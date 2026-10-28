@@ -78,7 +78,7 @@ func inner(i: int, j: int) -> bool:
 
 func to_world(u: float, v: float, hh := 0.0) -> Vector3:
 	var p := center + dir * u + right * v
-	return Vector3(p.x, Y_ROAD + hh, p.y)
+	return Vector3(p.x, Terrain.at(p) + Y_ROAD + hh, p.y)
 
 
 func local_of(p: Vector3) -> Vector2:
@@ -413,6 +413,8 @@ func _rebuild() -> void:
 			var gu := (hx1 - hx0) / (du * 2.0)
 			var gv := (hz1 - hz0) / (dv * 2.0)
 			var n2 := -dir * gu - right * gv
+			if Terrain.cur != null:
+				n2 -= Terrain.cur.gradient(wp.x, wp.z)   # the road under the pit slopes too (#8)
 			norms[k] = inv.basis * Vector3(n2.x, 1.0, n2.y).normalized()
 			cols[k] = Color(float(refill[k]), float(compacted[k]), float(fresh[k]), 1.0)
 	var idxs := PackedInt32Array()

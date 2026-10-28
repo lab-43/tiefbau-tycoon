@@ -142,8 +142,10 @@ func add_agent(kind: String, pieces: Array, start_s: float, player: Object = nul
 			ag.vmax = 15.5 + rng.randf_range(-1.5, 2.0)
 			ag.accel = 2.1
 	var pose := Router.piece_pose(pieces[0], start_s)
-	ag.p_cur = Geo.v3(pose[0], 0.05)
+	ag.p_cur = Geo.v3(pose[0], 0.05 + Terrain.piece_y(pieces[0], pose[0]))
 	ag.p_prev = ag.p_cur
+	ag.pitch_cur = pitch_on(pieces[0], pose[0], pose[1], ag.length)
+	ag.pitch_prev = ag.pitch_cur
 	ag.yaw_cur = atan2(-pose[1].x, -pose[1].y)
 	ag.yaw_prev = ag.yaw_cur
 	agents.append(ag)
@@ -206,6 +208,7 @@ func _place_visual(ag: Agent, alpha: float) -> void:
 	var p: Vector3 = ag.p_prev.lerp(ag.p_cur, alpha)
 	ag.visual.position = p
 	ag.visual.rotation.y = lerp_angle(ag.yaw_prev, ag.yaw_cur, alpha)
+	ag.visual.rotation.x = lerpf(ag.pitch_prev, ag.pitch_cur, alpha)
 	if ag.visual.has_meta("lights"):
 		TrafficModels.set_lights(ag.visual, ag.braking, ag.turn_signal, sim_time)
 
@@ -437,8 +440,10 @@ func _drive(ag: Agent, dt: float) -> void:
 	ag.yaw_prev = ag.yaw_cur
 	var pose := Router.piece_pose(ag.route[ag.pi], ag.s)
 	var dvec: Vector2 = _smooth_dir(ag, pose[0], pose[1])
-	ag.p_cur = Geo.v3(pose[0], 0.05)
+	ag.p_cur = Geo.v3(pose[0], 0.05 + Terrain.piece_y(ag.route[ag.pi], pose[0]))
 	ag.yaw_cur = atan2(-dvec.x, -dvec.y)
+	ag.pitch_prev = ag.pitch_cur
+	ag.pitch_cur = pitch_on(ag.route[ag.pi], pose[0], dvec, ag.length)
 
 
 ## Heading for the body: the chord between the route points yaw_chord behind and ahead of the agent.
@@ -1057,3 +1062,11 @@ func _choose_conn(ag: Agent, outs: Array) -> int:
 		if r <= 0.0:
 			return outs[i]
 	return outs[outs.size() - 1]
+
+
+## Nose-up angle of a vehicle of length l at p heading d on route piece pc (0 on flat maps, #8).
+static func pitch_on(pc: Dictionary, p: Vector2, d: Vector2, l: float) -> float:
+	if Terrain.cur == null:
+		return 0.0
+	var half := maxf(1.0, l * 0.4)
+	return atan2(Terrain.piece_y(pc, p + d * half) - Terrain.piece_y(pc, p - d * half), half * 2.0)

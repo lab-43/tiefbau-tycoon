@@ -21,6 +21,7 @@ var bounds := Rect2()
 var hq_info := {}
 var tool: Object = null          # active placement tool (receives input first)
 var marker_command: Callable     # screen markers (#7): right click on a marker -> true if handled
+var _terrain: Terrain = null     # ground heights of this map (#8)
 
 
 func setup(ms: MapService) -> void:
@@ -31,6 +32,8 @@ func setup(ms: MapService) -> void:
 	bounds = ms.bake_result.bounds
 	hq_info = ms.bake_result.hq
 	Geo.setup(Game.map_meta.center_lat, Game.map_meta.center_lon)
+	_terrain = ms.bake_result.get("terrain")
+	Terrain.activate(_terrain)
 	# environment
 	env_node = WorldEnvironment.new()
 	env_node.environment = DayNight.make_environment()
@@ -96,7 +99,7 @@ func setup(ms: MapService) -> void:
 	var start := Vector3.ZERO
 	if not hq_info.is_empty():
 		var lc: Vector2 = hq_info.lot_center
-		start = Vector3(lc.x, 0, lc.y)
+		start = Vector3(lc.x, Terrain.at(lc), lc.y)
 	camera_rig.set_view(start, 150.0, -35.0, 50.0)
 
 
@@ -174,6 +177,9 @@ func _exit_tree() -> void:
 	# road cut-outs are global shader state: clear them for the next game
 	for i in 4:
 		RenderingServer.global_shader_parameter_set("pit_b%d" % i, Vector4.ZERO)
+	# ground heights belong to this map (#8); a newer map may already have its own
+	if _terrain != null and Terrain.cur == _terrain:
+		Terrain.activate(null)
 
 
 func save_state() -> Dictionary:

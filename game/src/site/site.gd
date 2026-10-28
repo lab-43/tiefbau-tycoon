@@ -107,7 +107,7 @@ func setup(w: World, manager: Node, j: Job, layout: SiteLayout, id: int) -> void
 	work_light.light_energy = 0.0
 	work_light.shadow_enabled = false
 	var tc := lay.trench_center()
-	work_light.position = Vector3(tc.x, 6.0, tc.y)
+	work_light.position = gw(tc, 6.0)
 	add_child(work_light)
 	_set_status("Ein Fahrzeug zur Baustelle schicken, um sie zu erkunden.")
 
@@ -116,14 +116,14 @@ func _build_pipe_old() -> void:
 	pipe_old = SiteProps.pipe("old", job.length + 0.8, job.pipe_d)
 	add_child(pipe_old)
 	var c := lay.trench_center()
-	pipe_old.global_transform = Transform3D(Basis(Vector3.UP, SiteLayout.yaw_of(lay.trench_dir())), Vector3(c.x, SiteTerrain.Y_ROAD - job.depth + 0.05, c.y))
+	pipe_old.global_transform = Transform3D(Basis(Vector3.UP, SiteLayout.yaw_of(lay.trench_dir())), gw(c, SiteTerrain.Y_ROAD - job.depth + 0.05))
 
 
 func _build_marker() -> void:
 	marker = Node3D.new()
 	add_child(marker)
 	var c := lay.trench_center()
-	marker.position = Vector3(c.x, 0, c.y)
+	marker.position = gw(c, 0.0)
 	var lbl := Label3D.new()
 	lbl.text = "Auftrag %d" % job.id
 	lbl.font = UI.font(700)
@@ -163,11 +163,13 @@ func _build_hit() -> void:
 	var cs := CollisionShape3D.new()
 	var bs := BoxShape3D.new()
 	var length := lay.s_taper1 - lay.s0 + 6.0
-	bs.size = Vector3(lay.lw + 2.0, 0.6, length)
-	cs.shape = bs
 	var mid := (lay.s0 + lay.s_taper1) * 0.5
 	var p := lay.lane_pt(mid, 0.3)
-	hit.position = Vector3(p.x, 0.3, p.y)
+	# tall enough for the slope along the site (#8)
+	var rise := absf(Terrain.at(lay.lane_pt(lay.s0, 0.3)) - Terrain.at(lay.lane_pt(lay.s_taper1, 0.3)))
+	bs.size = Vector3(lay.lw + 2.0, 0.6 + rise, length)
+	cs.shape = bs
+	hit.position = gw(p, 0.3)
 	hit.rotation.y = SiteLayout.yaw_of(lay.lane_dir(mid))
 	hit.add_child(cs)
 	add_child(hit)
@@ -181,7 +183,7 @@ func _build_hit() -> void:
 	pin_body.collision_layer = 0b10
 	pin_body.collision_mask = 0
 	pin_body.set_meta("owner_obj", self)
-	pin_body.position = Vector3(tc.x, 5.0, tc.y)
+	pin_body.position = gw(tc, 5.0)
 	pin_body.add_child(cs2)
 	add_child(pin_body)
 
@@ -194,9 +196,14 @@ func contains(p: Vector2) -> bool:
 	return Geometry2D.is_point_in_polygon(p, _polygon)
 
 
+## World point at map position p, y metres above the ground (#8: ground heights; 0 = road base level).
+static func gw(p: Vector2, y: float) -> Vector3:
+	return Vector3(p.x, Terrain.at(p) + y, p.y)
+
+
 func center3() -> Vector3:
 	var c := lay.trench_center()
-	return Vector3(c.x, 0.0, c.y)
+	return gw(c, 0.0)
 
 
 func step_id() -> String:
@@ -507,7 +514,7 @@ func _go_van_spot(v: Vehicle) -> void:
 	var vp := lay.van_pose()
 	crew_van = v
 	v.drive_plan({"key": lay.key, "s": lay.s_van - 12.0}, job.short_title(), [v.pull_over_piece(lay.key, lay.s_van - 12.0, SiteLayout.CURB, 12.0)], func(veh):
-		veh.place(Vector3(vp.pos.x, 0, vp.pos.y), vp.yaw)
+		veh.place(gw(vp.pos, 0.0), vp.yaw)
 		_arrived(veh, "van"))
 	_reserve(v, "van")
 
@@ -572,7 +579,7 @@ func _behind_site(v: Vehicle) -> bool:
 
 func _slot_arrived(v: Vehicle, spot: String, slot_s: float) -> void:
 	var p := lay.pose(slot_s, 0.0)
-	v.place(Vector3(p.pos.x, 0, p.pos.y), p.yaw)
+	v.place(gw(p.pos, 0.0), p.yaw)
 	_arrived(v, spot)
 
 
@@ -693,7 +700,7 @@ func _ensure_workers() -> void:
 	for i in n:
 		var w := Worker.new()
 		add_child(w)
-		w.position = Vector3(cp.x + i * 0.7 - 0.7, 0.05, cp.y)
+		w.position = gw(Vector2(cp.x + i * 0.7 - 0.7, cp.y), 0.05)
 		w.rotation.y = SiteLayout.yaw_of(lay.lane_dir(lay.s_van))
 		workers.append(w)
 	crew_van.light_mode.hazard = true
@@ -725,7 +732,7 @@ func _worker_home(w: Worker, i: int) -> void:
 	var cp := lay.crew_point()
 	var d := lay.lane_dir(lay.s_van)
 	var p := cp + d * (i * 0.8 - 0.8)
-	w.walk_to(Vector3(p.x, 0.05, p.y))
+	w.walk_to(gw(p, 0.05))
 
 
 # ------------------------------------------------------------------------------------------
@@ -1039,7 +1046,7 @@ func _tick_crew_tasks() -> void:
 func _run_task(w: Worker, t: Dictionary) -> void:
 	w.busy = true
 	var cp := lay.crew_point()
-	var cp3 := Vector3(cp.x, 0.05, cp.y)
+	var cp3 := gw(cp, 0.05)
 	match t.type:
 		"place":
 			var i: int = t.i
@@ -1047,7 +1054,7 @@ func _run_task(w: Worker, t: Dictionary) -> void:
 			var node := SiteProps.item(d.kind, d.phase)
 			w.walk_to(cp3, func(_w):
 				w.hold(node)
-				var target := Vector3(d.pos.x, 0.05, d.pos.y)
+				var target := gw(d.pos, 0.05)
 				var approach := target + Vector3(sin(d.yaw), 0, cos(d.yaw)) * 0.9
 				w.walk_to(approach, func(_w2):
 					w.face(target)
@@ -1056,7 +1063,7 @@ func _run_task(w: Worker, t: Dictionary) -> void:
 						if n2.get_parent():
 							n2.get_parent().remove_child(n2)
 						add_child(n2)
-						n2.global_transform = Transform3D(Basis(Vector3.UP, d.yaw), Vector3(d.pos.x, 0.05, d.pos.y))
+						n2.global_transform = Transform3D(Basis(Vector3.UP, d.yaw), gw(d.pos, 0.05))
 						item_nodes[i] = n2
 						if d.get("in_lane", false) and not traffic_on:
 							_traffic_activate()
@@ -1064,7 +1071,7 @@ func _run_task(w: Worker, t: Dictionary) -> void:
 		"remove":
 			var i2: int = t.i
 			var d2: Dictionary = item_defs[i2]
-			var target2 := Vector3(d2.pos.x, 0.05, d2.pos.y)
+			var target2 := gw(d2.pos, 0.05)
 			var approach2 := target2 + Vector3(sin(d2.yaw), 0, cos(d2.yaw)) * 0.9
 			w.walk_to(approach2, func(_w):
 				w.face(target2)
@@ -1085,7 +1092,7 @@ func _run_task(w: Worker, t: Dictionary) -> void:
 			var pts: PackedVector2Array = yellow_lines[li]
 			var path: Array = []
 			for k in pts.size():
-				path.append(Vector3(pts[k].x, 0.05, pts[k].y))
+				path.append(gw(pts[k], 0.05))
 			w.walk_to(path[0], func(_w):
 				w.act("place", 1.0, func(_w2):
 					w.set_meta("tape", li)
@@ -1099,7 +1106,7 @@ func _run_task(w: Worker, t: Dictionary) -> void:
 			var pts2: PackedVector2Array = yellow_lines[li2]
 			var path2: Array = []
 			for k in range(pts2.size() - 1, -1, -1):
-				path2.append(Vector3(pts2[k].x, 0.05, pts2[k].y))
+				path2.append(gw(pts2[k], 0.05))
 			w.walk_to(path2[0], func(_w):
 				w.set_meta("untape", li2)
 				w.walk_path(path2, func(_w3):
@@ -1387,7 +1394,7 @@ func _on_rig_event(kind: String, data: Dictionary) -> void:
 				"released":
 					_excav.rig.hook_item = null
 					var c := lay.trench_center()
-					pipe_new.global_transform = Transform3D(Basis(Vector3.UP, SiteLayout.yaw_of(lay.trench_dir())), Vector3(c.x, SiteTerrain.Y_ROAD - job.depth + 0.05, c.y))
+					pipe_new.global_transform = Transform3D(Basis(Vector3.UP, SiteLayout.yaw_of(lay.trench_dir())), gw(c, SiteTerrain.Y_ROAD - job.depth + 0.05))
 	if kind == "done":
 		_excav.rig.set_meta("cycle", {})
 
@@ -1459,8 +1466,8 @@ func _start_pipe() -> void:
 		w.busy = true
 		var end := c + d * (job.length * 0.5 - 0.35) * (1.0 if k == 0 else -1.0)
 		var edge := c + d * (job.length * 0.5 + 0.5) * (1.0 if k == 0 else -1.0) + Geo.right_of(d) * (job.width * 0.5 + 0.6)
-		w.walk_path([Vector3(edge.x, 0.05, edge.y), Vector3(end.x, floor_y, end.y)], func(_w):
-			w.face(Vector3(c.x, floor_y, c.y))
+		w.walk_path([gw(edge, 0.05), gw(end, floor_y)], func(_w):
+			w.face(gw(c, floor_y))
 			w.act("cut", 8.0, func(_w2):
 				count[0] += 1
 				if count[0] >= n and sub == "workers_in":
@@ -1504,12 +1511,12 @@ func _tick_pipe(_delta: float) -> void:
 			var c := lay.trench_center()
 			if ex.rig:
 				ex.rig.set_meta("cycle", {"kind": "pipe_in", "target": fb})
-				ex.rig.lift_cycle(_bed_point(fb), Vector3(c.x, SiteTerrain.Y_ROAD - job.depth + 0.05 + job.pipe_d, c.y))
+				ex.rig.lift_cycle(_bed_point(fb), gw(c, SiteTerrain.Y_ROAD - job.depth + 0.05 + job.pipe_d))
 			else:
 				fb.cargo.pipes_new -= 1
 				pipe_new = SiteProps.pipe("new", job.length - 0.3, job.pipe_d)
 				add_child(pipe_new)
-				pipe_new.global_transform = Transform3D(Basis(Vector3.UP, SiteLayout.yaw_of(lay.trench_dir())), Vector3(c.x, SiteTerrain.Y_ROAD - job.depth + 0.05, c.y))
+				pipe_new.global_transform = Transform3D(Basis(Vector3.UP, SiteLayout.yaw_of(lay.trench_dir())), gw(c, SiteTerrain.Y_ROAD - job.depth + 0.05))
 		"lifting_new":
 			if ex.rig == null or not ex.rig.busy:
 				sub = "connect"
@@ -1536,7 +1543,7 @@ func _tick_pipe(_delta: float) -> void:
 			for i in ws2.size():
 				var w: Worker = ws2[i]
 				var edge := c2 + d2 * (job.length * 0.5 + 0.5) * (1.0 if i == 0 else -1.0) + Geo.right_of(d2) * (job.width * 0.5 + 0.6)
-				w.walk_to(Vector3(edge.x, 0.05, edge.y), func(_w):
+				w.walk_to(gw(edge, 0.05), func(_w):
 					w.busy = false
 					_worker_home(w, i)
 					cnt2[0] += 1
@@ -1648,7 +1655,7 @@ func _tick_refill(_delta: float) -> void:
 	var spot := terrain.lowest_spot(top)
 	var drop := terrain.surface_world(spot)
 	var pc := lay.pile_center()
-	var pile_top := Vector3(pc.x, 0.05 + _pile_height() * 0.7, pc.y)
+	var pile_top := gw(pc, 0.05 + _pile_height() * 0.7)
 	if ex.rig == null:
 		var amt := minf(0.6, pile_m3)
 		pile_m3 -= amt
@@ -1657,7 +1664,7 @@ func _tick_refill(_delta: float) -> void:
 		return
 	ex.rig.set_meta("cycle", {"kind": "fill", "spot": spot, "top": top, "fresh": false})
 	var dl := Geo.v3(lay.lane_dir(lay.s_exc))
-	ex.rig.material_cycle(pile_top + dl * 0.7, pile_top - Vector3(0, 0.35, 0) - dl * 0.7, drop, maxf(drop.y, 0.0) + 0.6, 1.0)
+	ex.rig.material_cycle(pile_top + dl * 0.7, pile_top - Vector3(0, 0.35, 0) - dl * 0.7, drop, maxf(drop.y, Terrain.at3(drop.x, drop.z)) + 0.6, 1.0)
 
 
 func _compaction_pass(after: Callable) -> void:
@@ -1684,10 +1691,10 @@ func _compaction_pass(after: Callable) -> void:
 			var tmp := a
 			a = b
 			b = tmp
-		path.append(Vector3(a.x, y, a.y))
-		path.append(Vector3(b.x, y, b.y))
+		path.append(gw(a, y))
+		path.append(gw(b, y))
 	_set_status("Verdichten mit der Rüttelplatte …")
-	w.walk_to(Vector3(edge.x, 0.05, edge.y), func(_w):
+	w.walk_to(gw(edge, 0.05), func(_w):
 		w.set_tool(plate)
 		w.action = "compact"
 		w.walk_path(path, func(_w2):
@@ -1695,7 +1702,7 @@ func _compaction_pass(after: Callable) -> void:
 				w.set_tool(null)
 				terrain.compact(1.0)
 				placed_since_compact = 0.0
-				w.walk_to(Vector3(edge.x, 0.05, edge.y), func(_w4):
+				w.walk_to(gw(edge, 0.05), func(_w4):
 					w.busy = false
 					_worker_home(w, workers.find(w))
 					compacting = false
@@ -1756,9 +1763,9 @@ func _tick_asphalt(_delta: float) -> void:
 				var spot := terrain.lowest_spot(0.0)
 				var drop := terrain.surface_world(spot)
 				var pc := lay.pile_center()
-				var pile_top := Vector3(pc.x, 0.05 + _pile_height() * 0.7, pc.y)
+				var pile_top := gw(pc, 0.05 + _pile_height() * 0.7)
 				ex.rig.set_meta("cycle", {"kind": "fill", "spot": spot, "top": 0.0, "fresh": true})
-				ex.rig.material_cycle(pile_top, pile_top - Vector3(0, 0.3, 0) - Geo.v3(lay.lane_dir(lay.s_exc)) * 0.8, drop, maxf(drop.y, 0.0) + 0.6, 1.0)
+				ex.rig.material_cycle(pile_top, pile_top - Vector3(0, 0.3, 0) - Geo.v3(lay.lane_dir(lay.s_exc)) * 0.8, drop, maxf(drop.y, Terrain.at3(drop.x, drop.z)) + 0.6, 1.0)
 			else:
 				# crew shovels it in
 				var amt := minf(0.15, pile_m3)
@@ -1782,9 +1789,9 @@ func _tick_asphalt(_delta: float) -> void:
 				var side := Geo.right_of(d) * (job.width * 0.5 + 0.45) * (1.0 if k == 0 else -1.0)
 				var a := c + d * job.length * 0.5 + side
 				var b := c - d * job.length * 0.5 + side
-				w.walk_path([Vector3(a.x, 0.05, a.y)], func(_w):
+				w.walk_path([gw(a, 0.05)], func(_w):
 					w.action = "rake"
-					w.walk_path([Vector3(b.x, 0.05, b.y), Vector3(a.x, 0.05, a.y)], func(_w2):
+					w.walk_path([gw(b, 0.05), gw(a, 0.05)], func(_w2):
 						w.act("rake", 3.0, func(_w3):
 							w.busy = false
 							cnt[0] += 1
@@ -1832,7 +1839,7 @@ func _update_pile() -> void:
 	pile_node.visible = true
 	var dm := _pile_dims()
 	var pc := lay.pile_center()
-	pile_node.global_transform = Transform3D(Basis(Vector3.UP, SiteLayout.yaw_of(lay.lane_dir(lay.s_exc))).scaled(Vector3(dm.y, _pile_height(), dm.x)), Vector3(pc.x, 0.04, pc.y))
+	pile_node.global_transform = Transform3D(Basis(Vector3.UP, SiteLayout.yaw_of(lay.lane_dir(lay.s_exc))).scaled(Vector3(dm.y, _pile_height(), dm.x)), gw(pc, 0.04))
 	pile_node.material_override = RigUtil.bulk_material(pile_mat if pile_mat != "" else "soil")
 
 
@@ -2219,7 +2226,7 @@ func load_state(d: Dictionary) -> void:
 			var df: Dictionary = item_defs[i]
 			var node := SiteProps.item(df.kind, df.phase)
 			add_child(node)
-			node.global_transform = Transform3D(Basis(Vector3.UP, df.yaw), Vector3(df.pos.x, 0.05, df.pos.y))
+			node.global_transform = Transform3D(Basis(Vector3.UP, df.yaw), gw(df.pos, 0.05))
 			item_nodes[i] = node
 	var yf: Array = d.get("yellow_fracs", [])
 	for i in yellow_fracs.size():
@@ -2248,7 +2255,7 @@ func load_state(d: Dictionary) -> void:
 		pipe_new = SiteProps.pipe("new", job.length - 0.3, job.pipe_d)
 		add_child(pipe_new)
 		var c := lay.trench_center()
-		pipe_new.global_transform = Transform3D(Basis(Vector3.UP, SiteLayout.yaw_of(lay.trench_dir())), Vector3(c.x, SiteTerrain.Y_ROAD - job.depth + 0.05, c.y))
+		pipe_new.global_transform = Transform3D(Basis(Vector3.UP, SiteLayout.yaw_of(lay.trench_dir())), gw(c, SiteTerrain.Y_ROAD - job.depth + 0.05))
 
 
 ## Called by World after vehicles are re-attached to the loaded site.

@@ -43,6 +43,8 @@ var p_prev := Vector3.ZERO
 var p_cur := Vector3.ZERO
 var yaw_prev := 0.0
 var yaw_cur := 0.0
+var pitch_prev := 0.0        # nose up > 0, from the ground heights under the axles (#8)
+var pitch_cur := 0.0
 
 
 static func make_piece(type: int, key: int, pts: PackedVector2Array, cum: PackedFloat32Array, s0: float, s1: float, vmax: float, occ: String, conn := -1, node := -1) -> Dictionary:

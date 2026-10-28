@@ -52,7 +52,7 @@ func _ready() -> void:
 
 
 func set_view(t: Vector3, dist: float, yaw_deg: float = -30.0, pitch_deg: float = 52.0, instant := true) -> void:
-	_t_target = t
+	_t_target = Vector3(t.x, Terrain.at3(t.x, t.z), t.z)
 	_t_distance = clampf(dist, MIN_DIST, MAX_DIST)
 	_t_yaw = deg_to_rad(yaw_deg)
 	_t_pitch = deg_to_rad(pitch_deg)
@@ -66,7 +66,7 @@ func set_view(t: Vector3, dist: float, yaw_deg: float = -30.0, pitch_deg: float 
 
 func focus_on(pos: Vector3, dist: float) -> void:
 	follow = null
-	_t_target = Vector3(pos.x, 0.0, pos.z)
+	_t_target = Vector3(pos.x, Terrain.at3(pos.x, pos.z), pos.z)
 	if dist > 0.0:
 		_t_distance = clampf(dist, MIN_DIST, MAX_DIST)
 
@@ -76,16 +76,52 @@ func _min_pitch_for(dist: float) -> float:
 	return deg_to_rad(lerpf(18.0, 50.0, t))
 
 
-## Ground point (y = 0 plane) under a screen position.
+## Ground point under a screen position: where the view ray meets the ground (#8: the terrain, else y = 0).
 func ground_point(screen: Vector2, plane_y := 0.0) -> Variant:
 	var from := camera.project_ray_origin(screen)
 	var dir := camera.project_ray_normal(screen)
+	if Terrain.cur != null:
+		return terrain_hit(from, dir)
 	if absf(dir.y) < 0.0001:
 		return null
 	var t := (plane_y - from.y) / dir.y
 	if t < 0.0:
 		return null
 	return from + dir * t
+
+
+## First point where a ray meets the terrain (steps between the highest and lowest ground, then bisection).
+static func terrain_hit(from: Vector3, dir: Vector3) -> Variant:
+	var hi: float = float(Terrain.cur.info.get("max", 100.0)) + 2.0
+	var lo: float = float(Terrain.cur.info.get("min", -10.0)) - 3.0
+	if dir.y > -0.0001 and from.y > hi:
+		return null
+	var t0 := 0.0
+	if from.y > hi and dir.y < 0.0:
+		t0 = (hi - from.y) / dir.y
+	var t1 := 20000.0
+	if dir.y < 0.0:
+		t1 = minf(t1, (lo - from.y) / dir.y)
+	var t := t0
+	var prev := t0
+	while t <= t1:
+		var p := from + dir * t
+		if p.y <= Terrain.at3(p.x, p.z):
+			var a := prev
+			var b := t
+			for i in 24:
+				var m := (a + b) * 0.5
+				var q := from + dir * m
+				if q.y <= Terrain.at3(q.x, q.z):
+					b = m
+				else:
+					a = m
+			var hit := from + dir * b
+			hit.y = Terrain.at3(hit.x, hit.z)
+			return hit
+		prev = t
+		t += maxf(1.5, t * 0.006)
+	return null
 
 
 func _unhandled_input(ev: InputEvent) -> void:
@@ -193,11 +229,13 @@ func _process(delta: float) -> void:
 			_t_pitch = clampf(_t_pitch - 0.9 * dt, _min_pitch_for(_t_distance), deg_to_rad(88.0))
 	if follow and is_instance_valid(follow):
 		var fp: Vector3 = follow.center3() if follow.has_method("center3") else follow.global_position
-		_t_target = Vector3(fp.x, 0.0, fp.z)
+		_t_target = Vector3(fp.x, fp.y, fp.z)
 	elif follow:
 		follow = null
 	_t_target.x = clampf(_t_target.x, bounds.position.x, bounds.end.x)
 	_t_target.z = clampf(_t_target.z, bounds.position.y, bounds.end.y)
+	if follow == null:
+		_t_target.y = Terrain.at3(_t_target.x, _t_target.z)
 	var k := 1.0 - exp(-dt * 12.0)
 	var kz := 1.0 - exp(-dt * 9.0)
 	target = target.lerp(_t_target, k)
@@ -225,7 +263,10 @@ func _apply_values(t: Vector3, y: float, p: float, d: float) -> void:
 		camera.global_transform = Transform3D(Basis(Vector3.UP, y) * Basis(Vector3.RIGHT, -PI * 0.5), t + Vector3(0.0, TOPDOWN_HEIGHT, 0.0))
 		return
 	var offset := Vector3(sin(y) * cos(p), sin(p), cos(y) * cos(p)) * d
-	camera.global_position = t + offset
+	var cp := t + offset
+	# never inside a hill (#8)
+	cp.y = maxf(cp.y, Terrain.at3(cp.x, cp.z) + 2.0)
+	camera.global_position = cp
 	camera.look_at(t, Vector3.UP)
 
 

@@ -235,6 +235,10 @@ static func plate_compactor() -> Node3D:
 ## Ribbon mesh along a polyline (temporary yellow marking 0.12 m), y slightly above white markings.
 static func ribbon(pts: PackedVector2Array, width: float, y: float, mat: Material) -> MeshInstance3D:
 	var l := MeshLayer.new()
+	if Terrain.cur != null:
+		# on slopes (#8): short pieces lifted onto the ground
+		l.terrain = Terrain.cur
+		pts = Geo.densify(pts, 3.0)
 	for i in pts.size() - 1:
 		var a := pts[i]
 		var b := pts[i + 1]

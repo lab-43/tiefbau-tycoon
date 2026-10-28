@@ -27,7 +27,8 @@ func setup(w: World) -> void:
 			var d: Vector2 = inf.d
 			var J: Vector2 = inf.get("p", nd.pos)   # merged junction groups: each road ends at its own point
 			var p: Vector2 = J + d * (inf.s + 0.8) - Geo.right_of(d) * (inf.hw + 0.7)
-			heads.append({"pos": Vector3(p.x, 0.0, p.y), "yaw": atan2(d.x, d.y), "node": ni, "phase": nd.phases.get(inf.ref, 0)})
+			var gy := Terrain.cur.road_height(p, -1, ni) if Terrain.cur else 0.0
+			heads.append({"pos": Vector3(p.x, gy, p.y), "yaw": atan2(d.x, d.y), "node": ni, "phase": nd.phases.get(inf.ref, 0)})
 	_build()
 
 

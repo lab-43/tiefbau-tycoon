@@ -582,14 +582,24 @@ func update_load_visual() -> void:
 # ------------------------------------------------------------------------------------------
 
 func place(pos: Vector3, yaw: float) -> void:
-	position = Vector3(pos.x, 0.0, pos.z)
-	rotation = Vector3(0.0, yaw, 0.0)
+	var p2 := Vector2(pos.x, pos.z)
+	var gy := Terrain.near(p2, pos.y)
+	position = Vector3(pos.x, gy, pos.z)
+	rotation = Vector3(_ground_pitch(p2, Vector2(-sin(yaw), -cos(yaw)), gy), yaw, 0.0)
 	_yaw = yaw
 	_last_pos = position
 	if trailer:
 		var fw := Vector2(-sin(yaw), -cos(yaw))
 		_trailer_axle = _hitch_point() - fw * _trailer_len
 		_update_trailer()
+
+
+## Nose-up angle for a vehicle standing at p facing d on the ground at height gy (#8; 0 on flat maps).
+func _ground_pitch(p: Vector2, d: Vector2, gy: float) -> float:
+	if Terrain.cur == null:
+		return 0.0
+	var half := maxf(1.0, (front_ext + rear_ext) * 0.4)
+	return atan2(Terrain.near(p + d * half, gy) - Terrain.near(p - d * half, gy), half * 2.0)
 
 
 func forward2() -> Vector2:
@@ -625,16 +635,20 @@ func _update_trailer() -> void:
 	var yaw := atan2(-dir.x, -dir.y)
 	var kp := RigUtil.find(trailer, "kingpin")
 	var kp_local := kp.position if kp else Vector3(0, 1.25, -11.5)
-	var basis := Basis(Vector3.UP, yaw)
-	var origin := Vector3(hitch.x, 0.0, hitch.y) - basis * Vector3(kp_local.x, 0.0, kp_local.z)
+	# on slopes (#8): ground under the kingpin and under the rear axle give the trailer's pitch
+	var g_front := Terrain.near(hitch, position.y)
+	var g_back := Terrain.near(_trailer_axle, g_front)
+	var basis := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, atan2(g_front - g_back, maxf(1.0, _trailer_len)))
+	var origin := Vector3(hitch.x, g_front, hitch.y) - basis * Vector3(kp_local.x, 0.0, kp_local.z)
 	trailer.global_transform = Transform3D(basis, origin)
 
 
 func apply_agent_pose(ag: Agent, alpha: float) -> void:
 	var p: Vector3 = ag.p_prev.lerp(ag.p_cur, alpha)
-	p.y = 0.0
+	p.y -= 0.05    # agents ride on the road surface, company vehicles stand on the ground level below it
 	position = p
 	rotation.y = lerp_angle(ag.yaw_prev, ag.yaw_cur, alpha)
+	rotation.x = lerpf(ag.pitch_prev, ag.pitch_cur, alpha)
 	speed = ag.v
 
 
@@ -1024,8 +1038,10 @@ func _start_agent(pieces: Array, s0: float) -> void:
 	agent.vmax = float(def.get("max_kmh", 50.0)) / 3.6
 	agent.accel = def.get("accel", 1.5)
 	agent.decel = 2.5
-	agent.p_cur = Vector3(position.x, 0.05, position.z)
+	agent.p_cur = Vector3(position.x, position.y + 0.05, position.z)
 	agent.p_prev = agent.p_cur
+	agent.pitch_cur = rotation.x
+	agent.pitch_prev = rotation.x
 	var pose := Router.piece_pose(pieces[0], s0)
 	agent.yaw_cur = atan2(-pose[1].x, -pose[1].y)
 	agent.yaw_prev = rotation.y

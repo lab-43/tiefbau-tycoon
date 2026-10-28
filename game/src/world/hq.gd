@@ -11,6 +11,7 @@ var bays: Dictionary = {}       # material -> Vector3 position of the bay mouth 
 var bay_u: Dictionary = {}      # material -> u coordinate of the bay centre
 var bay_piles: Dictionary = {}  # material -> MeshInstance3D
 var company_name := ""
+var level := 0.0                # height of the levelled yard (#8: the ground is flattened under the lot)
 
 
 func setup(hq: Dictionary, cname: String) -> void:
@@ -19,13 +20,14 @@ func setup(hq: Dictionary, cname: String) -> void:
 	gate = hq.gate
 	normal = hq.normal
 	along = Geo.left_of(normal)
+	level = Terrain.at(Geo.polygon_centroid(lot))
 	_build()
 
 
 func local_to_world(u: float, v: float) -> Vector3:
 	# u along the road (from gate), v depth into the lot
 	var p := gate + along * u + normal * v
-	return Vector3(p.x, 0.0, p.y)
+	return Vector3(p.x, level, p.y)
 
 
 func yaw_facing(dir2: Vector2) -> float:
@@ -36,7 +38,7 @@ func yaw_facing(dir2: Vector2) -> float:
 func _build() -> void:
 	# yard pavement
 	var yard := MeshLayer.new()
-	yard.polygon_up(lot, 0.045, 1.0)
+	yard.polygon_up(lot, level + 0.045, 1.0)
 	var ym := yard.commit()
 	var ymi := MeshInstance3D.new()
 	ymi.mesh = ym
@@ -180,8 +182,10 @@ func _fence() -> void:
 			if d.length() < 0.5:
 				continue
 			var nn := Geo.right_of(d.normalized())
-			l.quad(Geo.v3(p0, 0.0), Geo.v3(p1, 0.0), Geo.v3(p1, 2.0), Geo.v3(p0, 2.0), Vector3(nn.x, 0, nn.y))
-			l.quad(Geo.v3(p0, 0.0), Geo.v3(p1, 0.0), Geo.v3(p1, 2.0), Geo.v3(p0, 2.0), -Vector3(nn.x, 0, nn.y))
+			var y0 := level - 0.5
+			var y1 := level + 2.0
+			l.quad(Geo.v3(p0, y0), Geo.v3(p1, y0), Geo.v3(p1, y1), Geo.v3(p0, y1), Vector3(nn.x, 0, nn.y))
+			l.quad(Geo.v3(p0, y0), Geo.v3(p1, y0), Geo.v3(p1, y1), Geo.v3(p0, y1), -Vector3(nn.x, 0, nn.y))
 	var mi := MeshInstance3D.new()
 	mi.mesh = l.commit()
 	var m := StandardMaterial3D.new()
@@ -278,9 +282,9 @@ func bay_maneuver(mat: String, rear_ext: float, from_p: Vector2, from_d: Vector2
 	var k := clampf(from_p.distance_to(turn_p) * 0.4, 3.0, 12.0)
 	var fwd := bezier(from_p, from_p + from_d * k, turn_p - side * k, turn_p)
 	var rev := bezier(turn_p, turn_p - side * R * 0.55, final_p + f * R * 0.55, final_p)
-	return {"fwd": fwd, "rev": rev, "pos": Vector3(final_p.x, 0, final_p.y), "yaw": yaw_facing(f)}
+	return {"fwd": fwd, "rev": rev, "pos": Vector3(final_p.x, level, final_p.y), "yaw": yaw_facing(f)}
 
 
 func gate_world() -> Vector3:
-	return Vector3(gate.x, 0.0, gate.y)
+	return Vector3(gate.x, level, gate.y)
 

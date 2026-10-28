@@ -263,7 +263,7 @@ static func _instant_pipe(s: Site) -> void:
 		s.add_child(s.pipe_new)
 		var c := s.lay.trench_center()
 		s.pipe_new.global_transform = Transform3D(Basis(Vector3.UP, SiteLayout.yaw_of(s.lay.trench_dir())),
-			Vector3(c.x, SiteTerrain.Y_ROAD - s.job.depth + 0.05, c.y))
+			Site.gw(c, SiteTerrain.Y_ROAD - s.job.depth + 0.05))
 
 
 static func _instant_teardown(s: Site) -> void:
