@@ -63,9 +63,10 @@ cd "$HOME/mnt/Tiefbau Tycoon"; I=tools/agent/issues.py; [ -f userdata/.agent/iss
    - Headless (ohne `run`, mit `godot --headless --path game -- …`) entstehen keine Bilder, nur `repro.log`.
    - Kein `--autostart` verwenden, denn der Spielstand bringt Firma und Karte mit (Lektion load-ohne-autostart).
    - **Echte Karten (Hamburg …):** Der Container erreicht weder Geofabrik noch Overpass. Deshalb die fertige Karte vom PC holen:
-     - `userdata/maps/<map-id>/baked_v3.bin` und `map.json` per `device_stage_files` holen (`<map-id>` steht in `issue.json` → `map.id`),
+     - `userdata/maps/<map-id>/baked_v<n>.bin` und `map.json` per `device_stage_files` holen (`<map-id>` steht in `issue.json` → `map.id`),
      - nach `~/.local/share/godot/app_userdata/Baustellen Manager/maps/<map-id>/` kopieren.
      - Ohne diese Dateien bricht das Laden ab.
+     - Ändert der Fix `MapBuilder.BAKE_VERSION`, passt die geholte Datei nicht mehr. Dann den Auszug `userdata/extracts/<region>.osm.pbf` holen und in `maps/<map-id>/osm2/complete.json` eintragen: `{"pbf": "<Pfad im Container>", "source": "geofabrik", "region": "<Region>"}`. Das Spiel baut die Karte dann offline neu (Hamburg ca. 1 min).
    - Ohne Spielstand: mit `--autostart --fixture=utrecht` an der Stelle nachstellen und, wenn sinnvoll, ein neues e2e-Szenario schreiben.
 5. **Unklar? Fragen statt raten:**
    - `issues.py ask <n> --session S --text "…"` setzt den Status `rueckfrage`. Jonathan sieht die Frage im Spiel unter „Meldungen“ und antwortet dort.
