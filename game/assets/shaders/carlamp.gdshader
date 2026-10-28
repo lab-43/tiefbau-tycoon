@@ -58,17 +58,19 @@ void fragment() {
 	if (f == 0) {
 		k = 0.35 + night * 1.85;                          // daytime running light -> low beam
 	} else if (f == 1) {
-		col = vec3(1.0, 0.04, 0.02);
-		k = 0.4 + night * 0.8 + (tail_brakes ? lamp.x * 2.6 : 0.0);
+		// coloured lamps stay at emission <= ~2: above that AgX tonemapping turns them white
+		// (lesson leuchten-nicht-ueberstrahlen)
+		col = vec3(1.0, 0.02, 0.01);
+		k = 0.3 + night * 0.6 + (tail_brakes ? lamp.x * 1.3 : 0.0);
 	} else if (f == 2) {
-		col = vec3(1.0, 0.04, 0.02);
-		k = lamp.x * 3.0;
+		col = vec3(1.0, 0.02, 0.01);
+		k = lamp.x * 2.0;
 	} else if (f == 3) {
-		col = vec3(1.0, 0.48, 0.0);
-		k = lamp.y * 3.0;
+		col = vec3(1.0, 0.3, 0.0);
+		k = lamp.y * 2.0;
 	} else if (f == 4) {
-		col = vec3(1.0, 0.48, 0.0);
-		k = lamp.z * 3.0;
+		col = vec3(1.0, 0.3, 0.0);
+		k = lamp.z * 2.0;
 	} else {
 		col = vec3(1.0);
 	}
