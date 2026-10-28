@@ -110,6 +110,8 @@ func _process(delta: float) -> void:
 			_save_test(delta)
 		"load":
 			_load_test(delta)
+		"leuchten":
+			_leuchten()
 
 
 func _smoke() -> void:
@@ -570,3 +572,68 @@ func _repro(_delta: float) -> void:
 				print("E2E OK repro – Ergebnisse in ", ProjectSettings.globalize_path(_out))
 				get_tree().quit(0)
 var _pin_i := 0
+
+
+## Beacons (#1): every start-fleet vehicle has beacons that sit on its body (not floating), the flash
+## patterns have 2 / 3 flashes per cycle, and with --shots close-ups of each vehicle with beacons on.
+var _li := 0
+var _lfail := 0
+func _leuchten() -> void:
+	var vs: Array = world.fleet.vehicles
+	match step:
+		0:
+			if t < 1.5:
+				return
+			for n in [2, 3]:
+				var edges := 0
+				var was := false
+				for ms in int(Vehicle.FLASH_CYCLE * 1000.0):
+					var on := Vehicle.flash_lit(ms * 0.001, n)
+					if on and not was:
+						edges += 1
+					was = on
+				print("FLASH n=%d flashes per cycle=%d" % [n, edges])
+				if edges != n:
+					_lfail += 1
+			for v in vs:
+				var veh: Vehicle = v
+				veh.light_mode.beacon = "on"
+				var nodes := veh.beacon_nodes()
+				var want := 2 if veh.def_id == "van_crew" else 1
+				if nodes.size() < want:
+					print("BEACON FAIL %s: %d beacons, expected >= %d" % [veh.def_id, nodes.size(), want])
+					_lfail += 1
+				var inv := veh.model.global_transform.affine_inverse()
+				for nd in nodes:
+					var p: Vector3 = inv * (nd as Node3D).global_position
+					var sy := VehicleModels.surface_y(veh.model, p.x, p.z, p.y + 0.02, [nd])
+					var gap := p.y - sy
+					var ok := sy > -INF and absf(gap) <= 0.06
+					print("BEACON %s %-4s %s at (%.2f, %.2f, %.2f) surface %.2f gap %.3f" % [veh.def_id, "ok" if ok else "FAIL", nd.name, p.x, p.y, p.z, sy, gap])
+					if not ok:
+						_lfail += 1
+			Clock.set_speed(1)
+			step = 1
+		1:
+			if not shot_queue.is_empty():
+				return
+			if _li < vs.size() * 2:
+				var veh: Vehicle = vs[_li / 2]
+				var yaw := rad_to_deg(veh.rotation.y + PI) + (40.0 if _li % 2 == 0 else -140.0)
+				shot("leuchten_%02d_%s" % [_li, veh.def_id], veh.global_position + Vector3(0, 1.6, 0), 9.0 if veh.def_id == "van_crew" else 13.0, yaw, 30.0)
+				_li += 1
+				return
+			for v in vs:
+				if v.def_id == "van_crew":
+					Game.select(v)
+					shot("leuchten_panel", v.global_position + Vector3(0, 1.6, 0), 12.0, rad_to_deg(v.rotation.y + PI) + 40.0, 30.0)
+			step = 2
+		2:
+			if not shot_queue.is_empty():
+				return
+			if _lfail > 0:
+				print("E2E FAIL leuchten: %d Fehler" % _lfail)
+				get_tree().quit(1)
+				return
+			print("E2E OK leuchten")
+			get_tree().quit(0)
