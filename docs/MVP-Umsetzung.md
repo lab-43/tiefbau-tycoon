@@ -203,3 +203,13 @@ Fahrzeuge (Kolonnenbus, Pritsche, Kipper, Sattelzug mit Tieflader, Mobilbagger):
   - Die Logik steckt in `src/debug/debug_tools.gd`, die Oberfläche in `debug_panel.gd`.
   - Getestet mit dem e2e-Szenario `debug` (`tools/test.sh debug`, 32 Prüfungen).
   - Neue Arbeitsschritte brauchen einen Eintrag in `DebugTools.finish_step`.
+
+## Markierungen und Gebäude ausblenden (Meldung #7)
+- **Markierungen über der Karte** (`src/ui/world_markers.gd`, liegt unter allen HUD-Fenstern):
+  - Zentrale (weiß), laufende Baustellen (orange), Ausschreibungen (dunkel mit Vergütung) und Fahrzeuge (Farbe des Symbols: fährt = weiß, arbeitet/lädt = orange, steht = grau).
+  - Im Bild erscheinen Zentrale, Baustellen und Fahrzeuge erst beim Rauszoomen (ab ca. 280 m Kameraabstand, voll ab 480 m). Ausschreibungen haben kein 3D-Objekt und sind immer markiert.
+  - Außerhalb des Bildes klebt die Markierung am Rand des freien Bereichs (neben den Fenstern) mit Pfeil und Entfernung.
+  - Fahrzeuge, die in der Zentrale oder an ihrem Platz auf der Baustelle stehen, zählt die Markierung dort mit (Zahl oben rechts), das gewählte Fahrzeug bleibt immer einzeln. Nahe beieinander liegende Fahrzeuge oder Ausschreibungen werden zu einer Markierung mit Zahl zusammengefasst; verdeckte Markierungen im Bild stapeln sich nach oben.
+  - Klick: hinfliegen und auswählen (Ausschreibung: Auftragsliste öffnen). Rechtsklick mit gewähltem Fahrzeug: dorthin schicken (Baustelle, Zentrale, Tieflader).
+- **Leiste unten rechts:** Markierungen an/aus (H), Fahrzeuge, Baustellen, Ausschreibungen, Zentrale, Gebäude an/aus (B). Gebäude aus blendet die Ebene `building` aller Kartenkacheln aus; die Halle der Zentrale bleibt. Die Einstellung steht in `<Daten>/ansicht.json`.
+- Test: `tools/test.sh markierungen` (Zentrale mit gezählten Fahrzeugen, Randmarkierung mit Pfeil und Entfernung, Klick fliegt hin, Rechtsklick schickt den Kolonnenbus, Gebäude und Markierungen an/aus).
