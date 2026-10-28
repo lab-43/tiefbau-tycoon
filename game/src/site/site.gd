@@ -1322,6 +1322,7 @@ func _on_rig_event(kind: String, data: Dictionary) -> void:
 					var want := BUCKET_BANK * t - _bite_done
 					if want > 0.0 and not _bite.is_empty():
 						_bite_done += terrain.dig_strip(_bite, want)
+					_excav.rig.set_load(_bite_done * BULKING, "soil")   # the bucket fills during the bite (#11)
 				"picked":
 					_excav.rig.set_load(_bite_done * BULKING, "soil")
 				"dropped":
@@ -1333,6 +1334,9 @@ func _on_rig_event(kind: String, data: Dictionary) -> void:
 					_excav.rig.set_load(0.0, "soil")
 		"fill":
 			match kind:
+				"progress":
+					var tf: float = data.t
+					_excav.rig.set_load(minf(0.6, pile_m3) * tf, pile_mat)   # the bucket fills in the pile (#11)
 				"picked":
 					var amt: float = minf(0.6, pile_m3)
 					pile_m3 -= amt

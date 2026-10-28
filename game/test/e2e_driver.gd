@@ -510,13 +510,16 @@ func _issue_test() -> void:
 				get_tree().quit(0)
 
 
-## Reproduce an issue: --e2e=repro --issue=<issue folder> [--watch=<s>] [--out=<dir>] [--shots=<dir>]
+## Reproduce an issue: --e2e=repro --issue=<issue folder> [--watch=<s>] [--out=<dir>] [--shots=<dir>] [--every=<s>]
 ## Loads the attached save, restores the reported camera, takes pictures of the camera view and of
 ## every pin, then lets the game run and dumps the state every 10 s into <out>/repro.log.
+## --every: while the game runs, a picture of the reported camera view every <s> seconds (animations, #11).
 var _iss := {}
 var _iss_dir := ""
 var _out := ""
 var _watch := 60.0
+var _every := 0.0
+var _every_t := 0.0
 var _rlog: FileAccess
 func _repro_start() -> void:
 	for a in OS.get_cmdline_user_args():
@@ -526,6 +529,8 @@ func _repro_start() -> void:
 			_watch = float(a.substr(8))
 		elif a.begins_with("--out="):
 			_out = a.substr(6)
+		elif a.begins_with("--every="):
+			_every = float(a.substr(8))
 	_iss = IssueStore.load_issue(_iss_dir)
 	if _iss.is_empty() or not FileAccess.file_exists(_iss_dir.path_join("spielstand.sav")):
 		print("E2E FAIL repro: issue or spielstand.sav missing in ", _iss_dir)
@@ -586,6 +591,10 @@ func _repro(_delta: float) -> void:
 			if log_t > 10.0:
 				log_t = 0.0
 				_rdump("nach %.0f s" % t)
+			_every_t += _delta
+			if _every > 0.0 and _every_t >= _every:
+				_every_t = 0.0
+				shot("repro_t%05.1f" % t)
 			if t > _watch + 4.0:
 				_rdump("Ende")
 				print("E2E OK repro – Ergebnisse in ", ProjectSettings.globalize_path(_out))

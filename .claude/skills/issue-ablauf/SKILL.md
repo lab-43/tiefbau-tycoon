@@ -60,6 +60,7 @@ cd "$HOME/mnt/Tiefbau Tycoon"; I=tools/agent/issues.py; [ -f userdata/.agent/iss
        --watch=60 --out=/tmp/repro-<n>
    ```
    - Das lädt `spielstand.sav`, stellt die Kamera wie in der Meldung, macht `repro_kamera.png` und je Pin `repro_stelle_N.png` und schreibt alle 10 s den Zustand nach `repro.log`.
+   - Bei Animationen `--every=<s>` dazu: Dann entsteht beim Laufen alle s Sekunden ein Bild der gemeldeten Ansicht (`repro_t<zeit>.png`).
    - Headless (ohne `run`, mit `godot --headless --path game -- …`) entstehen keine Bilder, nur `repro.log`.
    - Kein `--autostart` verwenden, denn der Spielstand bringt Firma und Karte mit (Lektion load-ohne-autostart).
    - **Echte Karten (Hamburg …):** Der Container erreicht weder Geofabrik noch Overpass. Deshalb die fertige Karte vom PC holen:

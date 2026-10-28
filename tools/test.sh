@@ -1,8 +1,9 @@
 #!/bin/bash
 # Runs end-to-end scenarios headless on the offline Utrecht map and reports pass/fail.
 # usage: tools/test.sh [scenario ...]            default: smoke issue
-#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren debug leuchten verkehrslichter rig markierungen absperrung  (save+load = save mid-dig,
+#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren debug leuchten verkehrslichter rig schaufel markierungen absperrung  (save+load = save mid-dig,
 #              then load and finish; rig = excavator linkage/cylinders, see game/test/rig_test.gd;
+#              schaufel = soil in the bucket (game/test/bucket_test.gd, stand-in model always, real model if present);
 #              ebenen = height order of flat map layers, see game/test/layer_test.gd – also part of pbf;
 #              sichtweite = city meshes sit at their chunk (visibility ranges), game/test/range_test.gd – also part of pbf;
 #              fahren = calm driving: no twitching cars, no racing through bends, game/test/drive_test.gd on testdata/kreuzungen)
@@ -69,6 +70,10 @@ for s in "${SCEN[@]}"; do
       log=/tmp/tt_e2e_rig.log
       if timeout 300 "$G" --headless --path "$ROOT/game" -s res://test/rig_test.gd > "$log" 2>&1 \
          && grep -qE "RIG (OK|SKIP)" "$log"; then echo "OK    rig $(grep -oE 'RIG (OK|SKIP).*' "$log")"; else FAIL=1; echo "FAIL  rig – $log"; grep -E "FEHLER|FAIL|SCRIPT ERROR" "$log" | tail -8 | sed 's/^/      /'; fi ;;
+    schaufel)  # soil in the excavator bucket sits in the cavity, faces up when carried, pours out (#11)
+      log=/tmp/tt_e2e_schaufel.log
+      if timeout 300 "$G" --headless --path "$ROOT/game" -s res://test/bucket_test.gd > "$log" 2>&1 \
+         && grep -q "SCHAUFEL OK" "$log"; then echo "OK    schaufel $(grep -o 'SCHAUFEL OK.*' "$log")"; else FAIL=1; echo "FAIL  schaufel – $log"; grep -E "FEHLER|NICHT ERKANNT|FAIL|SCRIPT ERROR" "$log" | tail -8 | sed 's/^/      /'; fi ;;
     markierungen)  # screen markers (#7); also fails on any script error, the checks would not notice one in _draw
       run markierungen "E2E OK markierungen" --e2e=markierungen
       if grep -q "SCRIPT ERROR" /tmp/tt_e2e_markierungen.log; then FAIL=1; echo "FAIL  markierungen: Skriptfehler im Log"; grep -A3 "SCRIPT ERROR" /tmp/tt_e2e_markierungen.log | head -8 | sed 's/^/      /'; fi ;;

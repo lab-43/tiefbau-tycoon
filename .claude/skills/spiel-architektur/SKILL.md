@@ -57,6 +57,7 @@ Autoloads (`project.godot`):
   - Tieflader-Logik: Bagger auf- und abladen.
 - **`VehicleModels`** lädt `assets/consim/<id>/<id>.glb` + `.json` (Räder, Gelenke, Lichtmarker). Ohne Assets gibt es ein prozedurales Ersatzmodell.
 - **`ExcavatorRig`:** IK über die echte Gelenkkette (turret, boom, boom2, stick, bucket) mit Viergelenk. `RigUtil` steuert die Hydraulikzylinder (look_at) und Teleskopstufen.
+- **`BucketLoad`** (Kind der Schaufel): Erde im Löffel. Findet Hohlraum und Öffnung aus dem Schaufelmodell (Schnitte quer zur Gelenkachse, keine festen Koordinaten), füllt den Hohlraum und häuft aus der Öffnung. `set_load()` am Rig; die Baustelle füllt beim Graben mit (`progress`), beim Auskippen (Keyframe `pour`) rutscht die Erde heraus. Test: `tools/test.sh schaufel`.
 
 ## Baustelle (`src/site/`)
 

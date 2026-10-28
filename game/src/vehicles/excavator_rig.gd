@@ -24,7 +24,7 @@ var yaw := 0.0
 var bucket_angle := 0.0
 var blade_angle := 0.0
 var ok := false
-var load_node: MeshInstance3D
+var load_node: BucketLoad
 var load_m3 := 0.0
 var load_mat := "soil"
 var hook_item: Node3D = null   # item hanging on the bucket (pipe), keeps a fixed world yaw
@@ -122,16 +122,11 @@ func setup(vehicle: Node3D, mdl: Node3D, meta: Dictionary) -> void:
 		rest[link_b] = link_b.basis
 		_has_fourbar = true
 	hyd = RigUtil.setup_hydraulics(model, meta)
-	# load mound inside the bucket
-	load_node = MeshInstance3D.new()
-	load_node.mesh = RigUtil.mound_mesh()
-	load_node.visible = false
-	load_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# load inside the bucket: cavity and opening come from the bucket mesh (issue #11)
+	load_node = BucketLoad.new()
+	load_node.capacity = float(meta.get("bucket_capacity_m3", 0.6))
+	load_node.setup(bucket)
 	bucket.add_child(load_node)
-	var ab := RigUtil.local_aabb(bucket)
-	var c := ab.get_center()
-	load_node.position = Vector3(c.x, c.y, c.z)
-	load_node.set_meta("size", ab.size)
 	ok = true
 	travel_pose(true)
 
@@ -304,12 +299,14 @@ func set_load(m3: float, mat: String) -> void:
 	load_mat = mat
 	if load_node == null:
 		return
-	load_node.visible = m3 > 0.01
-	if load_node.visible:
-		var sz: Vector3 = load_node.get_meta("size", Vector3(0.9, 0.7, 0.8))
-		var f := clampf(m3 / 0.6, 0.15, 1.2)
-		load_node.scale = Vector3(sz.x * 0.85, sz.y * 0.55 * f, sz.z * 0.75)
+	if m3 > 0.01:
 		load_node.material_override = RigUtil.bulk_material(mat)
+	load_node.set_volume(m3 if m3 > 0.01 else 0.0)
+
+
+## Share of the load still in the bucket while it tips: the material slides out once the opening turns downwards.
+func _pour_share() -> float:
+	return clampf((load_node.opening_up() + 0.45) / 0.75, 0.0, 1.0)
 
 
 # ------------------------------------------------------------------------------------------
@@ -348,6 +345,8 @@ func update(delta: float) -> void:
 	if kf.has("blade"):
 		blade_angle = lerpf(_from.blade, deg_to_rad(kf.blade), w)
 	reach_polar(y, r, h, bk)
+	if kf.get("pour", false) and load_node and load_m3 > 0.01:
+		load_node.set_volume(load_m3 * _pour_share())
 	if kf.has("progress"):
 		cycle_event.emit("progress", {"t": t, "kf": kf})
 	if t >= 1.0:
@@ -374,7 +373,7 @@ func material_cycle(pick: Vector3, pick_to: Vector3, drop: Vector3, drop_h: floa
 		{"dur": 2.4 * sp, "yaw": b.x, "r": b.y, "h": b.z, "bucket": -65.0, "ev": "bite", "progress": true},
 		{"dur": 1.3 * sp, "yaw": b.x, "r": b.y - 0.3, "h": maxf(b.z, 0.0) + 2.0, "bucket": -88.0, "ev": "picked"},
 		{"dur": 2.4 * sp, "yaw": d.x, "r": d.y, "h": drop_h + 0.9, "bucket": -88.0},
-		{"dur": 1.6 * sp, "yaw": d.x, "r": d.y, "h": drop_h + 0.8, "bucket": 55.0, "ev": "dropped"},
+		{"dur": 1.6 * sp, "yaw": d.x, "r": d.y, "h": drop_h + 0.8, "bucket": 55.0, "ev": "dropped", "pour": true},
 		{"dur": 0.6 * sp, "yaw": d.x, "r": d.y, "h": drop_h + 1.2, "bucket": 20.0},
 	])
 
