@@ -32,7 +32,8 @@ LAMPS = [
     ("Color_F19", lambda x, y, z: x < 0.6, "head"),                                    # headlight reflectors
     ("Color_B09", lambda x, y, z: x < 0.6, "ind"),                                     # front indicators
     ("Color_A06", lambda x, y, z: x > 11.9, "tail"),                                   # rear lamps + top markers
-    ("Color_A05", lambda x, y, z: x > 11.9, "brake"),                                  # brake lenses
+    ("Color_A05", lambda x, y, z: x > 11.9 and y > 1.2, "ind"),                        # top lens of the rear cluster
+    ("Color_A05", lambda x, y, z: x > 11.9, "brake"),                                  # lower lenses
     ("Color_B01", lambda x, y, z: x > 11.9 and y < 1.0, "ind"),                        # rear corner indicators
 ]
 SUFFIX = {"head": "__light_head", "tail": "__light_tail", "brake": "__light_brake",
