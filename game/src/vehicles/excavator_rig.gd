@@ -361,11 +361,13 @@ func update(delta: float) -> void:
 			cycle_event.emit("done", {})
 
 
-## Standard dig/move cycle: bite at pick (world), drop at drop (world). pick_depth is how deep the tip goes below pick.y.
+## Standard dig/move cycle: bite at pick (world), drop at drop (world). drop_h is the world height the bucket
+## empties at (#8: on a map with ground heights this is not the height above the machine).
 func material_cycle(pick: Vector3, pick_to: Vector3, drop: Vector3, drop_h: float, speed := 1.0) -> void:
 	var a := polar_of(pick)
 	var b := polar_of(pick_to)
 	var d := polar_of(drop)
+	drop_h -= veh.global_position.y
 	var sp := 1.0 / maxf(0.2, speed)
 	run([
 		{"dur": 2.2 * sp, "yaw": a.x, "r": a.y, "h": a.z + 1.3, "bucket": 25.0, "blade": -18.0},

@@ -193,7 +193,7 @@ func _get_tile(url: String, path: String, cb: Callable) -> void:
 					break
 				hop_url = loc
 				continue
-			if res[0] == HTTPRequest.RESULT_SUCCESS and res[1] == 200 and (res[3] as PackedByteArray).size() > 64:
+			if res[0] == HTTPRequest.RESULT_SUCCESS and res[1] == 200 and _is_image(res[3]):
 				var body: PackedByteArray = res[3]
 				var f := FileAccess.open(path + ".part", FileAccess.WRITE)
 				if f:
@@ -210,7 +210,18 @@ func _get_tile(url: String, path: String, cb: Callable) -> void:
 			break
 		if attempt < 2:
 			await get_tree().create_timer(1.5 * (attempt + 1)).timeout
+			if _cancel:
+				break
 	cb.call(false)
+
+
+## A PNG or WebP file (an error page from a proxy or captive portal is not saved as a tile).
+static func _is_image(b: PackedByteArray) -> bool:
+	if b.size() < 64:
+		return false
+	if b[0] == 0x89 and b[1] == 0x50 and b[2] == 0x4E and b[3] == 0x47:
+		return true
+	return b.slice(0, 4).get_string_from_ascii() == "RIFF" and b.slice(8, 12).get_string_from_ascii() == "WEBP"
 
 
 func _log(text: String, level := L_INFO) -> void:

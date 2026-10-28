@@ -52,11 +52,11 @@ func prepare(m: Dictionary) -> void:
 	_log("Karte „%s“: %.0f × %.0f km um %.5f, %.5f" % [meta.get("name", "?"), meta.size_m / 1000.0, meta.size_m / 1000.0,
 		meta.center_lat, meta.center_lon])
 	_log("Godot %s · %s · Daten: %s" % [Engine.get_version_info().string, OS.get_name(), ProjectSettings.globalize_path(dir)])
-	var suffix := "_syn" if _synthetic_terrain() else ("_test" if TerrainSource._url_override() != "" else "")
+	var suffix := _cache_suffix()
 	var cache := dir.path_join("baked_v%d%s.bin" % [MapBuilder.BAKE_VERSION, suffix])
 	# baked without ground heights because they could not be downloaded: try the heights once more first (#8)
-	var flat := dir.path_join("baked_v%d_flach.bin" % MapBuilder.BAKE_VERSION)
-	if not FileAccess.file_exists(cache) and FileAccess.file_exists(flat):
+	var flat := dir.path_join("baked_v%d%s_flach.bin" % [MapBuilder.BAKE_VERSION, suffix])
+	if _terrain_wanted() and not FileAccess.file_exists(cache) and FileAccess.file_exists(flat):
 		_set_stages([["terrain", "Geländehöhen herunterladen"], ["cache", "Gespeicherte Karte lesen"], ["scene", "3D-Szene aufbauen"]])
 		await _terrain(dir)
 		if cancelled:
@@ -122,7 +122,7 @@ func prepare(m: Dictionary) -> void:
 	_begin("bake", "Karte aufbereiten …")
 	if terrain_dir == "" and _terrain_wanted():
 		cache = flat   # retried on the next start
-	var ok_b: bool = await _bake(osm_dir, cache)
+	var ok_b: bool = await _bake(osm_dir, cache, flat)
 	if not ok_b:
 		_stop()
 		return
@@ -196,6 +196,18 @@ func _use_pbf_shares() -> void:
 
 static func _synthetic_terrain() -> bool:
 	return "--terrain=synthetic" in OS.get_cmdline_user_args()
+
+
+## Saved maps of the test and switch modes never replace the real one (#8): "" = real heights (or a flat
+## offline test map), _syn = test hills, _test = local tile server, _aus = --no-terrain.
+static func _cache_suffix() -> String:
+	if _synthetic_terrain():
+		return "_syn"
+	if TerrainSource._url_override() != "":
+		return "_test"
+	if TerrainSource.disabled():
+		return "_aus"
+	return ""
 
 
 ## Real heights: not switched off, and offline test maps only with a local tile server.
@@ -272,7 +284,7 @@ func _copy_fixture(osm_dir: String) -> void:
 # ------------------------------------------------------------------------------------------
 
 ## Returns false if the player cancelled meanwhile.
-func _bake(osm_dir: String, cache: String) -> bool:
+func _bake(osm_dir: String, cache: String, flat := "") -> bool:
 	_builder = MapBuilder.new()
 	_thread = Thread.new()
 	var m := meta.duplicate(true)
@@ -312,6 +324,10 @@ func _bake(osm_dir: String, cache: String) -> bool:
 	_end("scene")
 	if cancelled:
 		return false
+	if terrain_dir != "" and bake_result.get("terrain") == null and flat != "":
+		# tiles were there but unreadable: download them again on the next start, keep this map as the flat one
+		DirAccess.remove_absolute(terrain_dir.path_join("terrain.json"))
+		cache = flat
 	_begin("save", "Karte für den nächsten Start speichern …")
 	await _save_cache(cache, bake_result)
 	_end("save")

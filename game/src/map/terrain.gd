@@ -127,20 +127,23 @@ func deck_height(ei: int, p: Vector2) -> float:
 
 
 ## A deck [h_a, h_b, a, b, land_a, land_b, trim_a, trim_b, blend]: straight between a and b, blended into
-## the ground near land ends (so the bridge meets the junction or the path exactly).
+## the ground near land ends (so the bridge meets the junction or the path exactly). At a junction on the bridge
+## the deck stays at the junction's height up to the end of the junction area, so road and junction meet without a step.
 func deck_at(dk: Array, p: Vector2) -> float:
 	var a: Vector2 = dk[2]
 	var b: Vector2 = dk[3]
 	var ab := b - a
 	var len2 := maxf(ab.length_squared(), 0.01)
 	var t := clampf((p - a).dot(ab) / len2, 0.0, 1.0)
-	var deck := lerpf(float(dk[0]), float(dk[1]), t)
 	var w := 1.0
 	var s := t * sqrt(len2)
 	var total := sqrt(len2)
 	var bl: float = dk[8]
 	var ta: float = dk[6]
 	var tb: float = dk[7]
+	var s0 := 0.0 if dk[4] else minf(ta, total * 0.45)
+	var s1 := total if dk[5] else total - minf(tb, total * 0.45)
+	var deck := lerpf(float(dk[0]), float(dk[1]), clampf((s - s0) / maxf(s1 - s0, 0.01), 0.0, 1.0))
 	if dk[4]:
 		w = minf(w, smoothstep(ta, ta + bl, s))
 	if dk[5]:
@@ -254,6 +257,13 @@ static func near(p: Vector2, hint: float) -> float:
 	if cur == null:
 		return 0.0
 	return cur.surface_near(p, hint)
+
+
+## Highest surface at p: a bridge deck above the ground, otherwise the ground (mouse picking). 0 on flat maps.
+static func top(p: Vector2) -> float:
+	if cur == null:
+		return 0.0
+	return cur.surface_near(p, 1.0e6)
 
 
 ## Ground height at p (0 on flat maps).

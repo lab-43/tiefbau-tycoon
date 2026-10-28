@@ -33,6 +33,7 @@ func tick(_delta: float) -> void:
 			if TerrainSource._url_override() != "":
 				_check_download(tr)
 			_check_layers(w)
+			_check_bridges(w)
 			_check_hq(w)
 			_check_vehicles(w)
 			_check_camera(w)
@@ -113,6 +114,43 @@ func _check_layers(w: World) -> void:
 	for nm in expect:
 		ok(int(checked.get(nm, 0)) > 0, "Ebene %s geprüft (%d Punkte)" % [nm, int(checked.get(nm, 0))])
 		ok(int(bad.get(nm, 0)) == 0, "Ebene %s liegt auf dem Gelände (%d Abweichungen)" % [nm, int(bad.get(nm, 0))])
+
+
+## Junctions on a bridge: the road starts at the junction's height (no step where the junction area ends), and a
+## click on a bridge picks the deck, not the ground below.
+func _check_bridges(w: World) -> void:
+	var tr := Terrain.cur
+	var n := 0
+	var worst := 0.0
+	for ei in tr.decks:
+		var dk: Array = tr.decks[ei]
+		var e: Dictionary = w.net.edges[ei]
+		var a: Vector2 = dk[2]
+		var b: Vector2 = dk[3]
+		var total := a.distance_to(b)
+		for end in [[dk[4], e.a, a, b, float(dk[6])], [dk[5], e.b, b, a, float(dk[7])]]:
+			if end[0] or not tr.node_decks.has(end[1]) or total < 1.0:
+				continue
+			var at_trim: Vector2 = (end[2] as Vector2).move_toward(end[3], minf(end[4], total * 0.45))
+			worst = maxf(worst, absf(tr.deck_at(dk, at_trim) - float(tr.node_decks[end[1]])))
+			n += 1
+	print("GELAENDE Kreuzungen auf Brücken: %d Anschlüsse geprüft" % n)
+	ok(worst < 0.01, "Brückenfahrbahn trifft Kreuzung ohne Stufe (max. %.3f m)" % worst)
+	var picked := 0
+	var high := 0
+	for ei in tr.decks:
+		var dk: Array = tr.decks[ei]
+		var pts: PackedVector2Array = dk[10]
+		var mid: Vector2 = pts[pts.size() >> 1] if pts.size() > 2 else pts[0].lerp(pts[1], 0.5)
+		var deck := tr.deck_at(dk, mid)
+		if deck - tr.sample(mid.x, mid.y) < 2.0:
+			continue
+		high += 1
+		var from := Vector3(mid.x + 30.0, deck + 60.0, mid.y + 30.0)
+		var hit = CameraRig.terrain_hit(from, (Vector3(mid.x, deck, mid.y) - from).normalized())
+		if hit != null and absf((hit as Vector3).y - deck) < 0.5:
+			picked += 1
+	ok(picked == high, "Mausklick trifft die Brücke (%d von %d)" % [picked, high])
 
 
 ## Within a bridge footprint (decks and junctions on bridges, incl. the blend into the ground at the ends).

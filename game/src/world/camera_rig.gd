@@ -90,9 +90,9 @@ func ground_point(screen: Vector2, plane_y := 0.0) -> Variant:
 	return from + dir * t
 
 
-## First point where a ray meets the terrain (steps between the highest and lowest ground, then bisection).
+## First point where a ray meets the terrain or a bridge deck (steps between the highest and lowest ground, then bisection).
 static func terrain_hit(from: Vector3, dir: Vector3) -> Variant:
-	var hi: float = float(Terrain.cur.info.get("max", 100.0)) + 2.0
+	var hi: float = float(Terrain.cur.info.get("max", 100.0)) + 12.0
 	var lo: float = float(Terrain.cur.info.get("min", -10.0)) - 3.0
 	if dir.y > -0.0001 and from.y > hi:
 		return null
@@ -106,18 +106,18 @@ static func terrain_hit(from: Vector3, dir: Vector3) -> Variant:
 	var prev := t0
 	while t <= t1:
 		var p := from + dir * t
-		if p.y <= Terrain.at3(p.x, p.z):
+		if p.y <= Terrain.top(Vector2(p.x, p.z)):
 			var a := prev
 			var b := t
 			for i in 24:
 				var m := (a + b) * 0.5
 				var q := from + dir * m
-				if q.y <= Terrain.at3(q.x, q.z):
+				if q.y <= Terrain.top(Vector2(q.x, q.z)):
 					b = m
 				else:
 					a = m
 			var hit := from + dir * b
-			hit.y = Terrain.at3(hit.x, hit.z)
+			hit.y = Terrain.top(Vector2(hit.x, hit.z))
 			return hit
 		prev = t
 		t += maxf(1.5, t * 0.006)

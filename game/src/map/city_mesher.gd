@@ -240,8 +240,11 @@ func _rails() -> void:
 		if not is_tram:
 			_flat_strip(layer(ck, "ballast"), pts, 3.4, BALLAST_Y)
 		var rl := layer(ck, "rail")
+		# rails use a plain material without the per-pixel ground height: short pieces, so they do not dip
+		# into the ballast on crests (#8)
+		var rpts := Geo.densify(pts, 5.0) if terrain else pts
 		for off in [-0.72, 0.72]:
-			var line := Geo.offset_polyline(pts, off)
+			var line := Geo.offset_polyline(rpts, off)
 			_flat_strip(rl, line, 0.08, 0.075 if is_tram else 0.12)
 	if terrain:
 		terrain.mode_deck = []

@@ -413,7 +413,9 @@ static func add_decks(t: Terrain, net: RoadNet) -> void:
 			nb[e.a].append([e.b, w])
 		if nb.has(e.b):
 			nb[e.b].append([e.a, w])
-	for it in 300:
+	# long chains converge slowly (about n² sweeps): sweep until nothing moves by more than 0.1 mm
+	for it in 20000:
+		var moved := 0.0
 		for ni in inner:
 			var s := 0.0
 			var ws := 0.0
@@ -421,7 +423,10 @@ static func add_decks(t: Terrain, net: RoadNet) -> void:
 				s += float(hn[pair[0]]) * float(pair[1])
 				ws += float(pair[1])
 			if ws > 0.0:
+				moved = maxf(moved, absf(s / ws - float(hn[ni])))
 				hn[ni] = s / ws
+		if moved < 0.0001:
+			break
 	for ni in inner:
 		t.node_decks[ni] = hn[ni]
 		t.node_pos[ni] = net.nodes[ni].pos
@@ -478,14 +483,18 @@ static func line_decks(t: Terrain, lines: Array) -> Dictionary:
 				if not nb.has(k):
 					nb[k] = []
 				nb[k].append([pair[1], w])
-	for it in 200:
+	for it in 20000:
+		var moved := 0.0
 		for k in inner:
 			var s := 0.0
 			var ws := 0.0
 			for q in nb[k]:
 				s += float(hk[q[0]]) * float(q[1])
 				ws += float(q[1])
+			moved = maxf(moved, absf(s / ws - float(hk[k])))
 			hk[k] = s / ws
+		if moved < 0.0001:
+			break
 	var out := {}
 	for li in bridges:
 		var pts: PackedVector2Array = lines[li].pts

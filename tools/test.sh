@@ -85,9 +85,16 @@ for s in "${SCEN[@]}"; do
       python3 "$ROOT/game/test/mock_terrain.py" 8766 & MT=$!
       sleep 1
       DEVMAP="$HOME/.local/share/godot/app_userdata/Baustellen Manager/maps/dev_utrecht"
-      rm -rf "$DEVMAP/terrain_test" "$DEVMAP"/baked_v*_test.bin
+      rm -rf "$DEVMAP/terrain_test" "$DEVMAP"/baked_v*_test*.bin
+      # a server answering with web pages instead of tiles: the map stays flat and is kept as the flat one,
+      # the next start (png) downloads again and replaces it
+      run gelaende-html "E2E OK smoke" --e2e=smoke --terrain-url=http://127.0.0.1:8766/html/{z}/{x}/{y}.png
+      if grep -q "Keine Geländehöhen verfügbar" /tmp/tt_e2e_gelaende-html.log && ls "$DEVMAP"/baked_v*_test_flach.bin >/dev/null 2>&1 \
+         && ! ls "$DEVMAP"/terrain_test/*.png >/dev/null 2>&1; then echo "OK    gelaende-html: Webseiten nicht als Kacheln gespeichert, Karte flach zwischengespeichert"
+      else FAIL=1; echo "FAIL  gelaende-html: Webseite als Kachel gespeichert oder flache Karte fehlt"; fi
       run gelaende-png "E2E OK gelaende" --e2e=gelaende --terrain-url=http://127.0.0.1:8766/ok/{z}/{x}/{y}.png
-      rm -rf "$DEVMAP/terrain_test" "$DEVMAP"/baked_v*_test.bin
+      if ls "$DEVMAP"/baked_v*_test_flach.bin >/dev/null 2>&1; then FAIL=1; echo "FAIL  gelaende-png: flache Karte nicht ersetzt"; fi
+      rm -rf "$DEVMAP/terrain_test" "$DEVMAP"/baked_v*_test*.bin
       run gelaende-webp "E2E OK gelaende" --e2e=gelaende --terrain-url=http://127.0.0.1:8766/webp/{z}/{x}/{y}.webp
       kill $MT 2>/dev/null ;;
     *) echo "unbekanntes Szenario: $s"; FAIL=1 ;;

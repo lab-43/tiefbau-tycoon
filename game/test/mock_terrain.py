@@ -5,7 +5,8 @@ Height in metres at (lat, lon): 12 + 900 * (lon - LON0) - 700 * (lat - LAT0), a 
 test can compare Terrain.sample() with the exact value (e2e_gelaende.gd, mode "download").
 Paths: /ok/{z}/{x}/{y}.png answers normally (PNG, 256 px like the AWS tiles),
        /webp/{z}/{x}/{y}.webp answers lossless WebP (512 px like Mapterhorn),
-       /404/... always HTTP 404, /flaky/... every second request HTTP 503.
+       /404/... always HTTP 404, /flaky/... every second request HTTP 503,
+       /html/... HTTP 200 with an HTML page (like a proxy or captive portal).
 Usage: mock_terrain.py <port>
 """
 import io, math, re, sys, threading
@@ -60,9 +61,14 @@ class H(BaseHTTPRequestHandler):
         if mode == "404" or (mode == "flaky" and k % 2 == 0):
             self.send_error(404 if mode == "404" else 503)
             return
-        body = tile(z, x, y, 512 if ext == "webp" else 256, ext)
+        if mode == "html":
+            body = b"<html><body>" + b"Bitte anmelden. " * 20 + b"</body></html>"
+            ctype = "text/html"
+        else:
+            body = tile(z, x, y, 512 if ext == "webp" else 256, ext)
+            ctype = "image/" + ext
         self.send_response(200)
-        self.send_header("Content-Type", "image/" + ext)
+        self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
