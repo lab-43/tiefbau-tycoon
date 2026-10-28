@@ -13,3 +13,8 @@ pruefung: lint:gelaende-hoehen und e2e:gelaende
 - Neue flache Kartenebenen: Shader mit `t_off` im Vertex-Shader und `DEPTH = terrain_depth(...)` (Vorbild `ground.gdshader`). Die Tiefe kommt dann aus der exakten Geländehöhe pro Pixel, nicht aus den Dreiecken. Ebenen über 0,6 m (Brückendecks) behalten ihre eigene Tiefe.
 - CPU-Meshes auf der Karte: `MeshLayer.terrain = Terrain.cur` hebt jeden Punkt an und schneidet große Flächen in 20-m-Zellen.
 - Wasser liegt flach. Seine Böschung liegt innerhalb der Wasserfläche und wird im Wasser-Shader überdeckt (`water_depth`). Sonst folgt das Ufer dem 5-m-Raster und franst aus (mit echten Hamburg-Daten gesehen).
+
+**Nachtrag (unabhängige Prüfung):** Die Tests waren grün, trotzdem fand der Prüf-Agent einen echten Fehler: `ExcavatorRig.material_cycle(…, drop_h)` behandelte `drop_h` als Höhe über der Maschine, die Baustelle übergab aber `drop.y` bzw. `Terrain.at3(…) + 0,6`, also Welthöhen. Auf flachen Karten ist beides gleich, deshalb fiel es im Auftragstest (flach) nicht auf; am Hang hätte der Bagger Meter neben der Mulde ausgekippt. Ebenso übersehen: eine Kachel-„Antwort“, die in Wahrheit eine HTML-Seite ist, wurde gespeichert, und `--no-terrain` hätte die echte gespeicherte Karte durch eine flache ersetzt.
+- Jede Funktion, die eine Höhe annimmt, sagt im `##`-Kommentar, ob es eine Welthöhe oder eine Höhe relativ zu etwas ist. Beim Umstellen auf Gelände jeden Aufrufer prüfen, nicht nur die Stellen mit `y = 0`.
+- Heruntergeladene Binärdaten vor dem Speichern am Dateikopf prüfen (PNG/WebP), nicht nur an Status 200 und Größe.
+- Schalter, die das Ergebnis verändern (Testdaten, Abschalten), bekommen eigene Cache-Dateien.
