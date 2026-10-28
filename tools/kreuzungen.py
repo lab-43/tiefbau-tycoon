@@ -23,6 +23,10 @@ Measured inside the circle of radius_m around the junction centre:
   knicke        places where a lane or turn path changes heading by more than 15° within 1 m
   versatz       straight-through connectors whose lanes are offset sideways by more than 0.5 m (S-wobble)
   markierung_m  approximate length of road markings (area / 0.12 m)
+  markierung_neben_m2  marking area that does not lie on asphalt (markings on the sidewalk or the ground)
+A second table counts what the marking code painted in the whole extract (mark_stats of the export):
+Haltlinien, Wartelinien, Richtungspfeile, Furten, Zebrastreifen, metres of lines through transitions
+and merged junctions, Knotenpunkt-Leitlinien and Warnlinien, Sperrflächen (number and m²).
 Needs shapely and matplotlib (pip install --break-system-packages shapely matplotlib).
 """
 import argparse, json, math, sys
@@ -40,8 +44,13 @@ MARK_W = 0.12
 KINK_DEG = 15.0
 KINK_SPAN = 1.0
 OFFSET_TOL = 0.5
-METRICS = ["knoten", "kurz", "luecke_m", "ueber_gehweg_m", "gehweg_auf_fahrbahn_m2", "splitter", "stufen", "knicke", "versatz", "markierung_m"]
-LOWER_IS_BETTER = {"knoten", "kurz", "luecke_m", "ueber_gehweg_m", "gehweg_auf_fahrbahn_m2", "splitter", "stufen", "knicke", "versatz"}
+METRICS = ["knoten", "kurz", "luecke_m", "ueber_gehweg_m", "gehweg_auf_fahrbahn_m2", "splitter", "stufen", "knicke", "versatz", "markierung_m",
+           "markierung_neben_m2"]
+LOWER_IS_BETTER = {"knoten", "kurz", "luecke_m", "ueber_gehweg_m", "gehweg_auf_fahrbahn_m2", "splitter", "stufen", "knicke", "versatz",
+                   "markierung_neben_m2"}
+MARK_STATS = [("haltlinie", "Haltlin."), ("wartelinie", "Wartelin."), ("pfeil", "Pfeile"), ("furt", "Furten"), ("zebra", "Zebras"),
+              ("durchgang_m", "durch_m"), ("knoten_leitlinie_m", "knotenll_m"), ("warnlinie_m", "warnl_m"),
+              ("sperrflaechen", "Sperrfl."), ("sperrflaeche_m2", "sperrfl_m2")]
 
 
 def pts_of(flat):
@@ -220,6 +229,8 @@ def measure(d):
     m["knicke"] = len(cells)
     m["versatz"] = sum(1 for p, q in offsets if math.hypot(*p) <= R)
     m["markierung_m"] = round(mark.intersection(win).area / MARK_W, 0) if not mark.is_empty else 0
+    off = mark.intersection(win).difference(asphalt.buffer(0.05)) if not (mark.is_empty or asphalt.is_empty) else Polygon()
+    m["markierung_neben_m2"] = round(off.area, 1)
     if d.get("drive_paths", True) is False:
         # generator without lanes/turn paths (e.g. osm2streets): these measures do not apply
         for k in ("luecke_m", "ueber_gehweg_m", "knicke", "versatz"):
@@ -411,6 +422,19 @@ def main():
                 t[k] = None if (m[k] is None or t[k] is None) else t[k] + m[k]
     for lab, t in totals.items():
         print(f"{'SUMME':<{w}}  {lab:<12} " + " ".join(f"{'–' if t[k] is None else round(t[k], 1):>10}" for k in METRICS))
+    stats_rows = []
+    for fx in fixtures:
+        for inp in a.inputs:
+            p = Path(inp) / f"{fx}.json"
+            if p.exists():
+                st = json.loads(p.read_text()).get("mark_stats")
+                if st:
+                    stats_rows.append((fx, labels[a.inputs.index(inp)], st))
+    if stats_rows:
+        print("\nMarkierungen (ganzer Ausschnitt):")
+        print(f"{'Kreuzung':<{w}}  {'Variante':<12} " + " ".join(f"{h:>10}" for _, h in MARK_STATS))
+        for fx, lab, st in stats_rows:
+            print(f"{fx:<{w}}  {lab:<12} " + " ".join(f"{round(st.get(k, 0)):>10}" for k, _ in MARK_STATS))
     print(f"Bilder und metrics.json in {out}")
 
 

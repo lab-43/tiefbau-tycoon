@@ -105,7 +105,7 @@ func _bake_one(pbf: String, lat: float, lon: float, half: float) -> Dictionary:
 			continue
 		conns.append({"from": c.from, "to": c.to, "turn": c.turn, "node": c.node, "pts": _flat(c.pts)})
 	return {"half": half, "window": win, "layers": lay_out, "nodes": nodes, "edges": edges, "lanes": lanes,
-		"connectors": conns, "osm_roads": _osm_roads(data, win)}
+		"connectors": conns, "osm_roads": _osm_roads(data, win), "mark_stats": rm.marks.stats}
 
 
 ## Raw OSM centre lines (for the picture), only car roads.
