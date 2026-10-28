@@ -18,3 +18,8 @@ pruefung: lint:gelaende-hoehen und e2e:gelaende
 - Jede Funktion, die eine Höhe annimmt, sagt im `##`-Kommentar, ob es eine Welthöhe oder eine Höhe relativ zu etwas ist. Beim Umstellen auf Gelände jeden Aufrufer prüfen, nicht nur die Stellen mit `y = 0`.
 - Heruntergeladene Binärdaten vor dem Speichern am Dateikopf prüfen (PNG/WebP), nicht nur an Status 200 und Größe.
 - Schalter, die das Ergebnis verändern (Testdaten, Abschalten), bekommen eigene Cache-Dateien.
+
+**Nachtrag (Brücken an echten Ufern):** Das Testgelände (künstliche Hügel, Utrecht) hat keine steilen Ufer an Brückenenden. Erst Bilder der Lombardsbrücke zeigten: Die Brückenfahrbahn hing am Land-Ende bis zu 2 m durch (der Übergang mischte die Bodenhöhe der Böschung ein), und Wasser lag als Dreiecke auf der Fahrbahn. Gemessen mit einem Wegwerf-Skript über `baked_v7.bin` (Deckhöhe gegen Boden entlang jeder Brücke): 69 von 405 Decks lagen stellenweise unter dem Boden.
+- Bei Änderungen an Brücken oder Ufern echte Karten rendern, nicht nur das Testgelände (`--e2e=repro --views=…`, Prüfstelle Lombardsbrücke: `-405,-1722,45,-35,28|-357,-1700,45,-35,28|-426,-1584,220,-35,28` auf hamburg_1793191710).
+- Vorher/nachher am selben Bild vergleichen: alter Stand in einem `git worktree`, gespeicherte Karte vorher beiseitelegen (gleiche BAKE_VERSION, gleicher Dateiname).
+- Gespeicherte Testkarten (`baked_v7_syn.bin`) überleben Code-Änderungen mit gleicher BAKE_VERSION; `tools/test.sh gelaende` löscht sie jetzt vorher.

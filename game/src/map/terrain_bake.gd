@@ -446,7 +446,8 @@ static func add_decks(t: Terrain, net: RoadNet) -> void:
 
 
 ## Decks for bridge ways of paths or rails ({pts, tags}): ways are joined at shared end points, ends that meet
-## a normal way (or nothing) sit on the ground, the others are interpolated along the chain.
+## a normal way (or nothing) sit on the ground, ends on a road bridge on its deck (call after add_decks), the
+## others are interpolated along the chain.
 ## Returns {way index: deck array (see Terrain.deck_at)}.
 static func line_decks(t: Terrain, lines: Array) -> Dictionary:
 	var ends := {}       # rounded end point -> [bridge ways, other ways]
@@ -467,6 +468,7 @@ static func line_decks(t: Terrain, lines: Array) -> Dictionary:
 	var hk := {}
 	var inner := {}
 	var nb := {}
+	var on_road := {}    # ends that meet a road bridge sit on its deck (a footway down from a bridge)
 	for li in bridges:
 		var pts: PackedVector2Array = lines[li].pts
 		var ka := Vector2i(roundi(pts[0].x * 2.0), roundi(pts[0].y * 2.0))
@@ -477,8 +479,12 @@ static func line_decks(t: Terrain, lines: Array) -> Dictionary:
 			var p: Vector2 = pair[2]
 			if not hk.has(k):
 				hk[k] = t.sample(p.x, p.y)
+				var top := t.surface_near(p, 1.0e6)
+				if top > float(hk[k]) + 0.3:
+					hk[k] = top
+					on_road[k] = true
 			var c: Array = ends[k]
-			if c[1] == 0 and c[0] >= 2:
+			if c[1] == 0 and c[0] >= 2 and not on_road.has(k):
 				inner[k] = true
 				if not nb.has(k):
 					nb[k] = []
@@ -502,7 +508,7 @@ static func line_decks(t: Terrain, lines: Array) -> Dictionary:
 		var kb := Vector2i(roundi(pts[pts.size() - 1].x * 2.0), roundi(pts[pts.size() - 1].y * 2.0))
 		var a := pts[0]
 		var b := pts[pts.size() - 1]
-		out[li] = [float(hk[ka]), float(hk[kb]), a, b, not inner.has(ka), not inner.has(kb), 0.0, 0.0,
+		out[li] = [float(hk[ka]), float(hk[kb]), a, b, not inner.has(ka) and not on_road.has(ka), not inner.has(kb) and not on_road.has(kb), 0.0, 0.0,
 			clampf(a.distance_to(b) / 3.0, 1.0, 12.0)]
 	return out
 

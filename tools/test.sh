@@ -80,11 +80,12 @@ for s in "${SCEN[@]}"; do
     absperrung)  # closure designer (#9); like markierungen it also fails on a script error (in _draw)
       run absperrung "E2E OK absperrung" --e2e=absperrung
       if grep -q "SCRIPT ERROR" /tmp/tt_e2e_absperrung.log; then FAIL=1; echo "FAIL  absperrung: Skriptfehler im Log"; grep -A3 "SCRIPT ERROR" /tmp/tt_e2e_absperrung.log | head -8 | sed 's/^/      /'; fi ;;
-    gelaende) run gelaende "E2E OK gelaende" --e2e=gelaende --terrain=synthetic
+    gelaende) DEVMAP="$HOME/.local/share/godot/app_userdata/Baustellen Manager/maps/dev_utrecht"
+      rm -f "$DEVMAP"/baked_v*_syn.bin   # a map saved by older code of the same BAKE_VERSION would hide bake changes
+      run gelaende "E2E OK gelaende" --e2e=gelaende --terrain=synthetic
       # download path: tiles from a local Terrarium server (PNG and lossless WebP)
       python3 "$ROOT/game/test/mock_terrain.py" 8766 & MT=$!
       sleep 1
-      DEVMAP="$HOME/.local/share/godot/app_userdata/Baustellen Manager/maps/dev_utrecht"
       rm -rf "$DEVMAP/terrain_test" "$DEVMAP"/baked_v*_test*.bin
       # a server answering with web pages instead of tiles: the map stays flat and is kept as the flat one,
       # the next start (png) downloads again and replaces it

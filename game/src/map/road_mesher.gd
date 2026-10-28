@@ -76,7 +76,7 @@ func _edge(ei: int) -> void:
 	var center := Geo.sub_polyline(e.pts, e.cum, s0, s1)
 	if center.size() < 2:
 		return
-	center = Geo.densify(center, 12.0)
+	center = Geo.densify(center, 3.0 if _on_deck() else 12.0)   # decks curve into the ground at their ends (#8)
 	var mid: Vector2 = Geo.sample(e.pts, e.cum, (s0 + s1) * 0.5)[0]
 	var ck := chunk_of(mid)
 	var hw: float = e.width * 0.5
@@ -170,6 +170,10 @@ func _clip_away(q: PackedVector2Array, clips: Array) -> Array:
 	return pieces
 
 
+func _on_deck() -> bool:
+	return terrain != null and not terrain.mode_deck.is_empty()
+
+
 func _inside_any(p: Vector2, clips: Array) -> bool:
 	for cl in clips:
 		if (cl[1] as Rect2).has_point(p) and Geometry2D.is_point_in_polygon(p, cl[0]):
@@ -207,6 +211,8 @@ func _strip(l: MeshLayer, center: PackedVector2Array, cum: PackedFloat32Array, s
 	var sub := Geo.sub_polyline(center, cum, sa, sb)
 	if sub.size() < 2:
 		return
+	if _on_deck():
+		sub = Geo.densify(sub, 3.0)
 	var l0 := Geo.offset_polyline(sub, off - w * 0.5)
 	var l1 := Geo.offset_polyline(sub, off + w * 0.5)
 	for i in range(sub.size() - 1):

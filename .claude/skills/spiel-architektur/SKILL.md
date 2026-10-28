@@ -35,7 +35,7 @@ Autoloads (`project.godot`):
   - `CityMesher` (Gebäude, Flächen, Wasser, Bäume, Laternen),
   - je Chunk ein `MeshLayer` pro Material aus `Mats`.
 - **Koordinaten:** `Geo.to_local(lat, lon)` → `Vector2(x, z)`, x = Ost, z = Süd.
-- **Geländehöhen (#8):** `TerrainSource` lädt Höhenkacheln (Mapterhorn), `TerrainBake` macht daraus im Bake das 5-m-Raster `Terrain` (Wasser flach, Hof eben, Brückendecks). Höhe holen: `Terrain.at(p)` (Boden), `Terrain.near(p, y)` (Boden oder Brücke, je nachdem was näher an y liegt), `Terrain.piece_y(piece, p)` (Routenstück), in Baustellen `Site.gw(p, y)`. Kartenebenen-Shader rechnen die Höhe pro Pixel aus (`terrain_depth`). Ohne Höhen (offline, Testkarte) ist alles 0. Neue Weltpunkte nie mit fester Höhe bauen (Lint-Regel gelaende-hoehen).
+- **Geländehöhen (#8):** `TerrainSource` lädt Höhenkacheln (Mapterhorn), `TerrainBake` macht daraus im Bake das 5-m-Raster `Terrain` (Wasser flach, Hof eben, Brückendecks). Höhe holen: `Terrain.at(p)` (Boden), `Terrain.near(p, y)` (Boden oder Brücke, je nachdem was näher an y liegt), `Terrain.piece_y(piece, p)` (Routenstück), in Baustellen `Site.gw(p, y)`. Kartenebenen-Shader rechnen die Höhe pro Pixel aus (`terrain_depth`); Fahrbahn, Gehweg und Markierung auf Brücken liegen in eigenen Ebenen `*_deck`, die nur angehoben werden (`terrain_depth_deck`). Mausklicks treffen mit `Terrain.top(p)` auch Brücken. Ohne Höhen (offline, Testkarte) ist alles 0. Neue Weltpunkte nie mit fester Höhe bauen (Lint-Regel gelaende-hoehen).
 - **Spurschlüssel:** `edge*16 + dir*8 + lane`. Spur 0 ist die linke Spur in Fahrtrichtung. **Spurkoordinaten:** s = Meter entlang der Spur, seitlich + = rechts (Bordstein).
 
 ## Verkehr und Wege
