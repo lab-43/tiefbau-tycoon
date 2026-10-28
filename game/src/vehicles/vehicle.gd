@@ -73,6 +73,7 @@ var _ramp_rest := Basis()
 var _ramp_hinges: Array = []   # [node, rest basis, open angle rad] of folding ramps (trailer JSON "ramp_open_deg")
 var _ramp_hyd: Array = []
 var _deck := {}                # loading deck of the trailer in trailer space: y, spot_z, end_z, ramp_end_z
+var _trailer_pitch := 0.0      # rad, + = front up (kingpin lifted onto the fifth wheel)
 var _load_node: MeshInstance3D
 var _load_box := AABB()
 var _pipes_vis: Array = []
@@ -172,7 +173,7 @@ func _collect_parts() -> void:
 			continue
 		for n in root.find_children("wheel_*", "Node3D", true, false):
 			var nm := String(n.name)
-			var r := 0.5
+			var r := float(n.get_meta("radius", 0.5))
 			var steer := nm == "wheel_fl" or nm == "wheel_fr"
 			var md: Dictionary = meta if root == model else trailer_meta
 			for wd in md.get("wheels", []):
@@ -180,7 +181,7 @@ func _collect_parts() -> void:
 					r = float(wd.get("radius", 0.5))
 					steer = bool(wd.get("steer", steer))
 			if root == trailer:
-				if md.get("wheels", []).is_empty():
+				if md.get("wheels", []).is_empty() and not n.has_meta("radius"):
 					r = 0.41
 				steer = false
 			_wheels.append([n, r, steer and root == model, (n as Node3D).basis])
@@ -558,8 +559,14 @@ func set_ramp(slide_m: float, deg: float) -> void:
 	if not _ramp_hinges.is_empty():
 		# folding ramps: the lowbed's (slide, tilt) progress drives the hinges from folded (0) to open (1)
 		var f := maxf(ramp_slide / 4.68, ramp_deg / 20.0)
-		for h in _ramp_hinges:
-			(h[0] as Node3D).basis = (h[1] as Basis) * Basis(Vector3.RIGHT, float(h[2]) * f)
+		# the open angles are for a level trailer; a pitched one (rear down) needs less to reach the ground:
+		# hinge at end_z, horizontal ramp length L -> about pitch * (1 + end_z / L) less on the first hinge
+		var ramp_l: float = maxf(0.5, float(_deck.get("ramp_end_z", 8.7)) - float(_deck.get("end_z", 6.0)))
+		var corr := _trailer_pitch * (1.0 + float(_deck.get("end_z", 6.0)) / ramp_l)
+		for i in _ramp_hinges.size():
+			var h: Array = _ramp_hinges[i]
+			var a := float(h[2]) - (corr if i == 0 else 0.0) * signf(float(h[2]))
+			(h[0] as Node3D).basis = (h[1] as Basis) * Basis(Vector3.RIGHT, a * f)
 		RigUtil.update_hydraulics(_ramp_hyd)
 		return
 	if _ramp_slide_node:
@@ -649,10 +656,17 @@ func point_ahead(d: float) -> Vector2:
 	return pos2() + forward2() * d
 
 
-func _hitch_point() -> Vector2:
+## The tractor's coupling point. Godot's scene import turns a node named *_wheel into a VehicleWheel3D called
+## "fifth" (name suffix rule), procedural models keep "fifth_wheel".
+func fifth_wheel() -> Node3D:
 	var fw := part("fifth_wheel")
 	if fw == null:
 		fw = part("fifth")
+	return fw
+
+
+func _hitch_point() -> Vector2:
+	var fw := fifth_wheel()
 	var lp := fw.position if fw else Vector3(0, 1.2, 1.2)
 	var p := transform * lp
 	return Vector2(p.x, p.z)
@@ -672,14 +686,12 @@ func _update_trailer() -> void:
 	var kp_local := kp.position if kp else Vector3(0, 1.25, -11.5)
 	# pitch about the axle centre: the slope between kingpin and rear axle (#8) plus the angle that puts the
 	# kingpin onto the fifth wheel (#24: the Nooteboom's kingpin is 10 cm lower than the heavy tractor's fifth
-	# wheel, the lowbed's 7 cm higher than the TGX's)
+	# wheel, the lowbed's 7 cm higher than the TGX's). _trailer_pitch keeps the second part for the ramp.
 	var g_front := Terrain.near(hitch, position.y)
 	var g_back := Terrain.near(_trailer_axle, g_front)
-	var pitch := atan2(g_front - g_back, maxf(1.0, _trailer_len))
-	var fw := part("fifth_wheel")
-	if fw and kp_local.z < -1.0:
-		pitch += atan2(fw.position.y - kp_local.y, -kp_local.z)
-	var basis := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, pitch)
+	var fw := fifth_wheel()
+	_trailer_pitch = atan2(fw.position.y - kp_local.y, -kp_local.z) if fw and kp_local.z < -1.0 else 0.0
+	var basis := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, atan2(g_front - g_back, maxf(1.0, _trailer_len)) + _trailer_pitch)
 	var origin := Vector3(hitch.x, 0.0, hitch.y) - basis * Vector3(kp_local.x, 0.0, kp_local.z)   # lint-ok: local offset, y set below
 	origin.y = g_back   # rear axle on the ground
 	trailer.global_transform = Transform3D(basis, origin)
@@ -1206,7 +1218,7 @@ func _ramp_pose(dist: float) -> Transform3D:
 	var ramp_len: float = _deck.ramp_end_z - _deck.end_z
 	if z > _deck.end_z:
 		var t := clampf((z - _deck.end_z) / ramp_len, 0.0, 1.0)
-		y = lerpf(_deck.y, 0.0, t)
+		y = lerpf(_deck.y, z * tan(_trailer_pitch), t)   # ground line in the (pitched) trailer frame
 		if t < 1.0:
 			pitch = -atan2(_deck.y, ramp_len) * sin(t * PI) * 1.2
 	return trailer.global_transform * Transform3D(Basis(Vector3.RIGHT, pitch), Vector3(0, y, z))
@@ -1224,7 +1236,7 @@ func can_carry(m: Vehicle) -> bool:
 func lowbed_back() -> float:
 	if trailer == null:
 		return 21.5
-	var fw := part("fifth_wheel")
+	var fw := fifth_wheel()
 	var kp := RigUtil.find(trailer, "kingpin")
 	var fz := fw.position.z if fw else 1.4
 	var kz := kp.position.z if kp else -11.58

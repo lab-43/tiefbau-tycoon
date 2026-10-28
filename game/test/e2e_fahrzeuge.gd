@@ -53,6 +53,13 @@ func tick(delta: float) -> void:
 				v_new[id] = v
 				ok(v.slot >= 0 and w.hq.in_lot(v.pos2()), "%s steht an der Zentrale (Stellplatz %d)" % [id, v.slot])
 				print("FAHRZEUGE %s Modell=%s Anhänger=%s" % [id, v.model.get_meta("source", ""), v.trailer.get_meta("source", "") if v.trailer else "-"])
+				if v.trailer:
+					var kp := RigUtil.find(v.trailer, "kingpin")
+					var fw := v.fifth_wheel()
+					print("FAHRZEUGE %s Auflieger-Neigung %.2f°, Königszapfen %.3f m, Sattelkupplung %.3f m (Abstand %.3f m)" % [id,
+						rad_to_deg(-v.trailer.global_transform.basis.z.angle_to(Vector3(v.trailer.global_transform.basis.z.x, 0, v.trailer.global_transform.basis.z.z)) * signf(v.trailer.global_transform.basis.z.y)),
+						kp.global_position.y if kp else -1.0, fw.global_position.y if fw else -1.0,
+						kp.global_position.distance_to(fw.global_position) if kp and fw else -1.0])
 			for id in NEW:
 				_check_ground(v_new[id], "Zentrale")
 				_check_lights(v_new[id])
@@ -259,19 +266,28 @@ func _lowest(v: Vehicle) -> float:
 	return lo
 
 
-func _lowest_of(node: Node3D) -> float:
+func _lowest_of(node: Node3D, skip_prefix := "") -> float:
 	var lo := 10.0
 	var meshes: Array = node.find_children("*", "MeshInstance3D", true, false)
 	if node is MeshInstance3D:
 		meshes.append(node)
 	for mi in meshes:
 		var m := mi as MeshInstance3D
-		if m.mesh == null:
+		if m.mesh == null or (skip_prefix != "" and _under_prefix(m, node, skip_prefix)):
 			continue
 		var xf := m.global_transform
 		for v in m.mesh.get_faces():   # vertices, not the box: a rotated box reaches far below a tilted ramp
 			lo = minf(lo, (xf * v).y)
 	return lo
+
+
+func _under_prefix(n: Node, top: Node, prefix: String) -> bool:
+	var p := n
+	while p != null and p != top:
+		if String(p.name).begins_with(prefix):
+			return true
+		p = p.get_parent()
+	return false
 
 
 ## Lamp markers sit at the lamp glass (within LIGHT_TOL of a model triangle), beacons on the surface below them.
@@ -324,13 +340,13 @@ func _check_joints(v: Vehicle) -> void:
 			var hl: Array = tl.get(String((h[0] as Node3D).name), [-180.0, 180.0])
 			var a := rad_to_deg(float(h[2]))
 			ok(a >= float(hl[0]) - 0.01 and a <= float(hl[1]) + 0.01, "%s Rampe %s öffnet %.1f° in [%.0f, %.0f]" % [v.def_id, (h[0] as Node3D).name, a, float(hl[0]), float(hl[1])])
-		# opened ramp end on the ground
+		# opened ramp end on the ground (the ramp itself; its rotating beacons sit on the far end and point down)
 		if not v._ramp_hinges.is_empty():
 			v.set_ramp(4.68, 20.0)
 			var lo := 10.0
 			for h in v._ramp_hinges:
-				lo = minf(lo, _lowest_of(h[0]))
-			ok(absf(lo) <= 0.12, "%s Rampe offen: Ende am Boden (%.3f m)" % [v.def_id, lo])
+				lo = minf(lo, _lowest_of(h[0], "beacon_"))
+			ok(absf(lo) <= GROUND_TOL, "%s Rampe offen: Ende am Boden (%.3f m, Neigung %.2f°)" % [v.def_id, lo, rad_to_deg(v._trailer_pitch)])
 			v.set_ramp(0.0, 0.0)
 	var arm := v.part("loader_arm")
 	var tip := v.part("bucket_tip")

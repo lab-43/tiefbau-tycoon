@@ -85,6 +85,7 @@ static func pivot(parent: Node3D, name: String, pos: Vector3) -> Node3D:
 
 static func wheel(parent: Node3D, name: String, pos: Vector3, r: float, w: float) -> Node3D:
 	var pv := pivot(parent, name, pos)
+	pv.set_meta("radius", r)   # stand-ins have no JSON: Vehicle reads the radius from here
 	var mi := MeshInstance3D.new()
 	var c := CylinderMesh.new()
 	c.top_radius = r
@@ -144,7 +145,7 @@ static func _tipper(root: Node3D, def: Dictionary) -> void:
 	marker(tb, "load_anchor", Vector3(0, 0.2, -bed_len * 0.5))
 	for p in [["wheel_fl", -1.0, -L * 0.5 + 1.3], ["wheel_fr", 1.0, -L * 0.5 + 1.3], ["wheel_rl", -1.0, L * 0.5 - 2.4], ["wheel_rr", 1.0, L * 0.5 - 2.4], ["wheel_rl2", -1.0, L * 0.5 - 1.0], ["wheel_rr2", 1.0, L * 0.5 - 1.0]]:
 		wheel(root, p[0], Vector3(p[1] * 1.05, 0.52, p[2]), 0.52, 0.35)
-	_std_lights(root, L, 2.5, 1.0, 3.25)
+	_std_lights(root, L, 2.5, 1.0, 3.1)   # beacons on the cab roof (cab top = 3.1 m)
 
 
 static func _flatbed(root: Node3D, def: Dictionary) -> void:
@@ -169,9 +170,10 @@ static func _tractor(root: Node3D, def: Dictionary) -> void:
 	marker(root, "fifth_wheel", Vector3(0, 1.25, L * 0.5 - 1.6))
 	for p in [["wheel_fl", -1.0, -L * 0.5 + 1.3], ["wheel_fr", 1.0, -L * 0.5 + 1.3], ["wheel_rl", -1.0, L * 0.5 - 1.9], ["wheel_rr", 1.0, L * 0.5 - 1.9], ["wheel_rl2", -1.0, L * 0.5 - 0.6], ["wheel_rr2", 1.0, L * 0.5 - 0.6]]:
 		wheel(root, p[0], Vector3(p[1] * 1.05, 0.52, p[2]), 0.52, 0.35)
-	box(root, "beacon_bar", Vector3(1.2, 0.12, 0.25), Vector3(0, 3.66, -L * 0.5 + 0.6), mat(Color(0.2, 0.2, 0.2)))
-	marker(root, "beacon_1", Vector3(-0.45, 3.78, -L * 0.5 + 0.6))
-	marker(root, "beacon_2", Vector3(0.45, 3.78, -L * 0.5 + 0.6))
+	# not "beacon_…": Vehicle treats every beacon_* node as a lamp
+	box(root, "roof_bar", Vector3(1.2, 0.12, 0.25), Vector3(0, 3.66, -L * 0.5 + 0.6), mat(Color(0.2, 0.2, 0.2)))
+	marker(root, "beacon_1", Vector3(-0.45, 3.72, -L * 0.5 + 0.6))
+	marker(root, "beacon_2", Vector3(0.45, 3.72, -L * 0.5 + 0.6))
 	_std_lights(root, L, 2.5, 1.0, -1.0)
 
 
@@ -336,7 +338,7 @@ static func _skid_loader(root: Node3D, def: Dictionary) -> void:
 static func _semi_lowloader(root: Node3D) -> void:
 	box(root, "gooseneck", Vector3(2.5, 0.5, 3.4), Vector3(0, 1.3, -8.3), mat(Color(0.7, 0.05, 0.05), 0.6))
 	box(root, "deck", Vector3(2.55, 0.3, 13.0), Vector3(0, 0.77, -1.0), mat(Color(0.7, 0.05, 0.05), 0.7))
-	marker(root, "kingpin", Vector3(0, 1.08, -8.1))
+	marker(root, "kingpin", Vector3(0, 1.25, -8.1))   # = fifth_wheel height of the stand-in tractor
 	for i in 4:
 		var z := -2.04 + i * 1.36
 		wheel(root, "wheel_rl%s" % ("" if i == 0 else str(i + 1)), Vector3(-0.62, 0.4, z), 0.4, 0.5)
