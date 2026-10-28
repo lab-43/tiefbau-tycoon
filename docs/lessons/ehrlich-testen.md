@@ -13,3 +13,5 @@ pruefung: manuell
 - noch unter Windows zu prüfen.
 
 Lieber eine Einschränkung mehr nennen.
+
+**Nachtrag (#8):** In der Meldung stand „Karte etwa 50 % größer“ – die Zahl stammte aus einer Messung Stunden vorher, bevor Brückendecks feiner unterteilt wurden und #5 die Kreuzungen änderte. Frisch gemessen: 210 statt 117 MB (+80 %). Zahlen für den Bericht (Größe, Dauer, Anzahl) direkt vor dem Schreiben mit dem Stand messen, der ausgeliefert wird.
