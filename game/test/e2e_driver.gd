@@ -135,6 +135,8 @@ func _process(delta: float) -> void:
 			_gelaende_test(delta)
 		"vollsperrung":
 			_vollsperrung_test(delta)
+		"umbau":
+			_umbau_test(delta)
 
 
 func _smoke() -> void:
@@ -747,6 +749,15 @@ func _verkehrslichter_test(delta: float) -> void:
 		_vl = load("res://test/e2e_verkehrslichter.gd").new()
 		_vl.drv = self
 	_vl.tick(delta)
+
+
+## Closure changed during the works (test/e2e_umbau.gd, #21).
+var _umb: RefCounted
+func _umbau_test(delta: float) -> void:
+	if _umb == null:
+		_umb = load("res://test/e2e_umbau.gd").new()
+		_umb.drv = self
+	_umb.tick(delta)
 
 
 ## Full road closure (test/e2e_vollsperrung.gd, #20).

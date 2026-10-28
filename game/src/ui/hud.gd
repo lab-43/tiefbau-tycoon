@@ -725,7 +725,7 @@ func _right_site(s: Site) -> void:
 	_bind(pb, func(): return s.progress)
 	right_body.add_child(pb)
 	for a in s.actions():
-		var b := UI.button(a.label, "pencil" if a.id == "plan" else "hammer", a.enabled)
+		var b := UI.button(a.label, "pencil" if a.id == "plan" else "hammer", a.enabled and not (a.id == "plan" and s.step_id() in Site.WORK_STEPS))
 		b.disabled = not a.enabled
 		var id: String = a.id
 		b.pressed.connect(func():

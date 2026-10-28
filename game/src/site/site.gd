@@ -55,6 +55,11 @@ var yellow_frac: float:
 			yellow_fracs[i] = v
 var _orphans: Array = []         # placed items a changed plan no longer contains (the crew collects them)
 var kit_used := false            # the closure kit is out of the crew van (taken at the start, back after teardown)
+# changing the closure while the works go on (#21): the work pauses, the crew rebuilds, the work goes on
+var rebuild := false             # an accepted plan still has to be built during the works
+var _rebuilding := false         # the crew is rebuilding right now
+var _pending_plan: ClosurePlan = null   # accepted while a machine cycle ran; applied at the next safe point
+const WORK_STEPS := ["dig", "pipe", "refill", "asphalt", "demob"]
 var workers: Array = []
 var crew_van: Vehicle
 var terrain: SiteTerrain
@@ -288,15 +293,24 @@ func actions() -> Array:
 			out.append(_action("demob", "Maschinen zur Zentrale", "" if _machines_on_site().size() > 0 else "Keine Maschinen vor Ort"))
 		"teardown":
 			out.append(_action("teardown", "Absperrung abbauen", _can_teardown()))
+	if step_id() in WORK_STEPS:
+		# #21: the closure can be changed during the works (also while a step runs: it pauses)
+		var why := can_edit_plan()
+		out.append({"id": "plan", "label": "Absperrung ändern", "enabled": why == "", "reason": why})
 	return out
 
 
 func _action(id: String, label: String, block: String) -> Dictionary:
+	if block == "" and id in WORK_STEPS and work_paused():
+		block = "Die Absperrung wird umgebaut"
 	return {"id": id, "label": label, "enabled": block == "" and not running, "reason": block if not running else "läuft…"}
 
 
 func do_action(id: String) -> void:
 	if running:
+		return
+	if id in WORK_STEPS and work_paused():
+		Events.warn("Die Absperrung wird umgebaut")
 		return
 	var block := ""
 	match id:
@@ -866,11 +880,68 @@ func _can_teardown() -> String:
 
 ## Empty if the plan can be changed now, else the reason.
 func can_edit_plan() -> String:
-	if step_id() != "closure":
-		return "Nur im Schritt „Absperrung aufbauen“"
-	if running:
-		return "Die Kolonne baut gerade auf"
-	return ""
+	var st := step_id()
+	if st == "closure":
+		return "Die Kolonne baut gerade auf" if running else ""
+	if st in WORK_STEPS:
+		return "Die Absperrung wird gerade umgebaut" if _rebuilding or _pending_plan != null else ""
+	if st == "scout":
+		return "Erst die Baustelle erkunden"
+	return "Die Absperrung wird abgebaut"
+
+
+## The work is paused for a changed closure (#21): no new machine cycles or crew jobs of the step.
+func work_paused() -> bool:
+	return step_id() in WORK_STEPS and (rebuild or _pending_plan != null)
+
+
+## A changed plan can be applied: no excavator cycle, compaction pass or crew job of the step is
+## under way. The pipe swap (crew in the trench, pipe on the hook) is finished first.
+func _safe_for_rebuild() -> bool:
+	if not running:
+		return true
+	if step_id() == "pipe":
+		return false
+	if compacting:
+		return false
+	if _excav and is_instance_valid(_excav) and _excav.rig and _excav.rig.busy:
+		return false
+	for w in workers:
+		if w.busy:
+			return false
+	return true
+
+
+func _start_rebuild() -> void:
+	_rebuilding = true
+	_ensure_workers()
+	_wtasks.clear()
+	for o in _orphans:
+		if is_instance_valid(o):
+			_wtasks.append({"type": "collect", "node": o})
+	for t in _build_sequence():
+		if t.type == "place" and item_nodes[t.i] != null:
+			continue
+		if t.type == "yellow_on" and float(yellow_fracs[t.l]) >= 1.0:
+			continue
+		_wtasks.append(t)
+	_set_status("Arbeit pausiert – die Kolonne baut die Absperrung um …")
+	changed.emit(self)
+
+
+func _finish_rebuild() -> void:
+	_rebuilding = false
+	rebuild = false
+	for i in workers.size():
+		_worker_home(workers[i], i)
+	if not traffic_on:
+		_traffic_activate()
+	_set_status("Absperrung umgebaut – die Arbeit geht weiter." if running else "Absperrung umgebaut.")
+	if not running:
+		_after_phase_change()
+	Events.ok("%s: Absperrung umgebaut" % job.short_title())
+	changed.emit(self)
+	Events.site_changed.emit(self)
 
 
 func _apply_plan() -> void:
@@ -889,6 +960,14 @@ func _apply_plan() -> void:
 ## others before it builds. build: the crew starts as soon as it is on site.
 func set_plan(p: ClosurePlan, build := true) -> void:
 	if can_edit_plan() != "":
+		return
+	var works := step_id() in WORK_STEPS
+	if works and not _safe_for_rebuild():
+		# a machine cycle or the pipe swap is under way: the work pauses at its next safe point
+		_pending_plan = p
+		_set_status("Neuer Absperrplan – die Arbeit pausiert, sobald der laufende Arbeitsgang fertig ist.")
+		changed.emit(self)
+		Events.site_changed.emit(self)
 		return
 	var ext_new: Dictionary = p.extent(lay)
 	var van_moves: bool = crew_van != null and is_instance_valid(crew_van) and spot_of.get(crew_van, "") == "van" \
@@ -940,8 +1019,16 @@ func set_plan(p: ClosurePlan, build := true) -> void:
 		crew_van.place(gw(vp.pos, 0.0), vp.yaw)
 		_arrived(crew_van, "van")
 	plan_confirmed = true
-	build_when_ready = build
-	if crew_present() and not van_moves:
+	build_when_ready = build and not works
+	if works:
+		rebuild = true
+		if crew_present() and not van_moves:
+			_set_status("Plan übernommen – die Arbeit pausiert, die Kolonne baut um.")
+		elif van_moves:
+			_set_status("Plan übernommen – die Arbeit pausiert, der Kolonnenbus parkt um.")
+		else:
+			_set_status("Plan übernommen – die Arbeit pausiert. Kolonnenbus schicken, dann baut die Kolonne um.")
+	elif crew_present() and not van_moves:
 		_set_status("Plan übernommen – die Kolonne baut ihn auf.")
 	elif van_moves:
 		_set_status("Plan übernommen – der Kolonnenbus parkt vor der neuen Verschwenkung um.")
@@ -1018,6 +1105,10 @@ func _tick_crew_tasks() -> void:
 	for w in workers:
 		if w.busy:
 			any_busy = true
+	if _rebuilding:
+		if _wtasks.is_empty() and not any_busy:
+			_finish_rebuild()
+		return
 	if step_id() == "closure":
 		total = item_defs.size() + yellow_lines.size()
 		done = _placed_count() + _lines_count(1.0)
@@ -2168,7 +2259,7 @@ func _process(delta: float) -> void:
 	var night: float = world.day_night.night if world.day_night else 0.0
 	work_light.light_energy = (2.5 * night) if (running and night > 0.15) else 0.0
 	marker.visible = phase < 2
-	if running:
+	if running and not (work_paused() and step_id() in ["dig", "refill", "asphalt"]):
 		match step_id():
 			"closure", "teardown":
 				_tick_crew_tasks()
@@ -2180,6 +2271,10 @@ func _process(delta: float) -> void:
 				_tick_refill(delta)
 			"asphalt":
 				_tick_asphalt(delta)
+	if _rebuilding:
+		_tick_crew_tasks()
+	elif running and work_paused() and step_id() != "pipe":
+		_set_status("Arbeit pausiert – " + ("die Absperrung wird gleich umgebaut." if crew_present() else "Kolonnenbus schicken, die Kolonne baut die Absperrung um."))
 	_redispatch_t += delta
 	if _redispatch_t > 2.0:
 		_redispatch_t = 0.0
@@ -2188,6 +2283,12 @@ func _process(delta: float) -> void:
 		_redispatch_waiting()
 		if build_when_ready and not running and step_id() == "closure" and _can_closure() == "":
 			do_action("closure")
+		if _pending_plan != null and _safe_for_rebuild():
+			var pp := _pending_plan
+			_pending_plan = null
+			set_plan(pp, true)
+		if rebuild and not _rebuilding and crew_present():
+			_start_rebuild()
 		if auto_continue and not running:
 			_auto_step()
 
@@ -2232,7 +2333,8 @@ func save_state() -> Dictionary:
 		"plan": plan.to_dict() if plan.custom else {}, "plan_ok": plan_confirmed, "plan_build": build_when_ready,
 		"kit": kit_used, "orphans": _orphans_state(), "terrain": terrain.save_state(),
 		"pile_mat": pile_mat, "pile_m3": pile_m3, "needs": needs, "layer": layer, "auto": auto_continue,
-		"pipe_old": pipe_old != null, "pipe_new": pipe_new != null}
+		"pipe_old": pipe_old != null, "pipe_new": pipe_new != null,
+		"rebuild": rebuild or _rebuilding, "plan_pending": _pending_plan.to_dict() if _pending_plan else {}}
 
 
 func load_state(d: Dictionary) -> void:
@@ -2279,6 +2381,11 @@ func load_state(d: Dictionary) -> void:
 		n["ordered"] = 0.0
 	layer = d.get("layer", 0)
 	auto_continue = d.get("auto", false)
+	# a closure change during the works (#21): the crew picks it up again when it is on site
+	rebuild = bool(d.get("rebuild", false))
+	var ppd: Dictionary = d.get("plan_pending", {})
+	if not ppd.is_empty():
+		_pending_plan = ClosurePlan.from_dict(ppd)
 	if not d.get("pipe_old", true) and pipe_old:
 		pipe_old.queue_free()
 		pipe_old = null

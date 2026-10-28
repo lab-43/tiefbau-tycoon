@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs end-to-end scenarios headless on the offline Utrecht map and reports pass/fail.
 # usage: tools/test.sh [scenario ...]            default: smoke issue
-#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren debug leuchten verkehrslichter rig schaufel markierungen absperrung gelaende vollsperrung  (save+load = save mid-dig,
+#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren debug leuchten verkehrslichter rig schaufel markierungen absperrung gelaende vollsperrung umbau  (save+load = save mid-dig,
 #              then load and finish; rig = excavator linkage/cylinders, see game/test/rig_test.gd;
 #              schaufel = soil in the bucket (game/test/bucket_test.gd, stand-in model always, real model if present);
 #              ebenen = height order of flat map layers, see game/test/layer_test.gd – also part of pbf;
@@ -101,6 +101,9 @@ for s in "${SCEN[@]}"; do
     vollsperrung)  # full road closure (#20): designer, traffic stays off the road, site vehicles get in
       run vollsperrung "E2E OK vollsperrung" --e2e=vollsperrung
       if grep -q "SCRIPT ERROR" /tmp/tt_e2e_vollsperrung.log; then FAIL=1; echo "FAIL  vollsperrung: Skriptfehler im Log"; grep -A3 "SCRIPT ERROR" /tmp/tt_e2e_vollsperrung.log | head -8 | sed 's/^/      /'; fi ;;
+    umbau)  # closure changed while the excavator digs (#21): work pauses, crew rebuilds, work goes on
+      run umbau "E2E OK umbau" --e2e=umbau
+      if grep -q "SCRIPT ERROR" /tmp/tt_e2e_umbau.log; then FAIL=1; echo "FAIL  umbau: Skriptfehler im Log"; grep -A3 "SCRIPT ERROR" /tmp/tt_e2e_umbau.log | head -8 | sed 's/^/      /'; fi ;;
     *) echo "unbekanntes Szenario: $s"; FAIL=1 ;;
   esac
 done

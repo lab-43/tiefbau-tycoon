@@ -239,9 +239,13 @@ func _build_top() -> void:
 	cancel_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	cancel_btn.pressed.connect(_cancel)
 	h.add_child(cancel_btn)
-	accept_btn = UI.button("Übernehmen und aufbauen" if site.crew_present() else "Plan übernehmen", "check", true)
+	var works := site.step_id() in Site.WORK_STEPS
+	accept_btn = UI.button("Übernehmen und umbauen" if works else ("Übernehmen und aufbauen" if site.crew_present() else "Plan übernehmen"), "check", true)
 	accept_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	accept_btn.tooltip_text = "Die Kolonne baut die Absperrung genau so auf." if site.crew_present() else "Die Kolonne baut den Plan auf, sobald der Kolonnenbus vor Ort ist."
+	if works:
+		accept_btn.tooltip_text = "Die Arbeit pausiert nach dem laufenden Arbeitsgang, die Kolonne baut um, danach geht es von selbst weiter."
+	else:
+		accept_btn.tooltip_text = "Die Kolonne baut die Absperrung genau so auf." if site.crew_present() else "Die Kolonne baut den Plan auf, sobald der Kolonnenbus vor Ort ist."
 	accept_btn.pressed.connect(_accept)
 	h.add_child(accept_btn)
 
