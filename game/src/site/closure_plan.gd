@@ -357,8 +357,16 @@ func checks(lay: SiteLayout) -> Array:
 			if pp.size() >= 2 and _elem_dist(items[i], pp, cums[pk]) < TRAFFIC_CLEAR:
 				in_path.append(i)
 				break
+	var why := "Der Verkehr wird ab der ersten Bake im Fahrstreifen verschwenkt."
+	if not in_path.is_empty():
+		# the detour has limits (crew van, waiting spots, next junction): explain when the plan exceeds them
+		var bx := lay.lane_coords(item_center(items[in_path[0]])).x
+		if bx > float(ext.obst1) + 0.5:
+			why = "Weiter hinten geht es hier nicht (Kreuzung oder Warteplätze): Der Verkehr schwenkt dort schon zurück. Hinteres Ende kürzer machen."
+		elif bx < float(ext.obst0) - 0.5:
+			why = "Früher als %s m vor dem Graben kann die Verschwenkung hier nicht beginnen. Vorderes Ende kürzer machen." % _fmt(lay.s_t0 - float(ext.obst0))
 	out.append({"id": "fahrweg", "ok": in_path.is_empty(), "required": true, "text": "Fahrweg des Verkehrs frei", "bad": in_path,
-		"hint": _bad_text(in_path, "dort, wo Autos fahren (gestrichelte Linie)", lay) + "Der Verkehr wird ab der ersten Bake im Fahrstreifen verschwenkt."})
+		"hint": _bad_text(in_path, "dort, wo Autos fahren (gestrichelte Linie)", lay) + why})
 	# 5. machine slots free
 	var slot_block: Array = []
 	for i in items.size():

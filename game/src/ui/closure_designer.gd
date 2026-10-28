@@ -384,7 +384,8 @@ func _build_right() -> void:
 	v.add_child(UI.sep())
 	v.add_child(UI.caps("Legende"))
 	for spec in [[Color(UI.ACCENT, 0.35), "Arbeitsbereich (muss abgesperrt sein)"], [Color(0.35, 0.22, 0.12, 0.9), "Graben"],
-			[UI.ACCENT, "Platz für Bagger und Kipper"], [TRAFFIC, "Fahrweg des Verkehrs (nach deinem Plan)"], [WHITE, "Stellplatz Kolonnenbus"]]:
+			[UI.ACCENT, "Platz für Bagger und Kipper"], [TRAFFIC, "Fahrweg des Verkehrs (nach deinem Plan)"], [WHITE, "Stellplatz Kolonnenbus"],
+			[RED, "Grenzen der Sperrung auf dieser Straße"]]:
 		var row := UI.hbox(8)
 		var sw := ColorRect.new()
 		sw.color = spec[0]
@@ -1010,6 +1011,12 @@ func _draw_plan() -> void:
 	var k2b := minf(lay.len_k2, float(ext.s2_b) + 45.0)
 	_traffic_line(cv, Geo.sub_polyline(lay._g2[0], lay._g2[1], k2a, k2b))
 	_tag(cv, font, _scr(lay.lane_pt(float(ext.det0), -0.3)), "Verschwenkung", TRAFFIC)
+	# how far the closure may reach on this street (crew van, waiting spots, junctions)
+	var lim := lay.extent_limits()
+	for k in 2:
+		var ls: float = lim.x if k == 0 else lim.y
+		cv.draw_dashed_line(_scr(lay.lane_pt(ls, -lay.lw * 0.5)), _scr(lay.lane_pt(ls, lay.lw * 0.5)), Color(RED, 0.85), 2.0, 5.0)
+		_tag(cv, font, _scr(lay.lane_pt(ls, lay.lw * 0.5 + 0.6)), "Sperrung frühestens ab hier" if k == 0 else "Sperrung höchstens bis hier", Color(1.0, 0.55, 0.5))
 	# yellow markings
 	for l in plan.lines.size():
 		var pl: PackedVector2Array = plan.lines[l]

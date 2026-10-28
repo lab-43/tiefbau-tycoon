@@ -350,6 +350,12 @@ func extent_for(items: Array) -> Dictionary:
 		"van": minf(s0 - 20.0, d0 - 12.0), "s2_a": k2.s2_a, "s2_b": k2.s2_b, "shift": k2.shift}
 
 
+## How far a player plan may extend the closure on K: Vector2(earliest start, latest end).
+func extent_limits() -> Vector2:
+	var b_max := minf(s_taper1 + 15.0, maxf(s_taper1 + 5.0, len_k - 32.0) - 5.0)
+	return Vector2(maxf(s0 - 15.0, 35.0), b_max)
+
+
 func apply_extent(ext: Dictionary) -> void:
 	s_det0 = ext.det0
 	s_det1 = ext.det1
