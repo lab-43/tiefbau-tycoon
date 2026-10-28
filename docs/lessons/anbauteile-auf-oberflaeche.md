@@ -1,8 +1,8 @@
 ---
-titel: Anbauteile auf die Modelloberfläche setzen, nicht auf die Bounding-Box
+titel: Anbauteile und Ladungen an der echten Modellform ausrichten, nicht an Bounding-Box und angenommenen Achsen
 bereich: fahrzeuge
 datum: 2026-10-28
-pruefung: e2e:leuchten, e2e:verkehrslichter
+pruefung: e2e:leuchten, e2e:verkehrslichter, e2e:schaufel
 ---
 
 **Was passiert ist:** Meldung #1 – die beiden Rundumleuchten des Kolonnenbusses (Modell `van_crew`, ein Transporter ohne eigene Leuchten) schwebten in der Luft. `vehicle.gd` setzte sie fest auf `Vector3(±0.45, height + 0.02, -0.9)`. `height` ist `bbox_max.y` aus der Modell-JSON (2,02 m) – das ist aber die Antenne hinten auf dem Dach. Das Dach liegt bei 1,96 m, und bei z = −0,9 ist schon die schräge Windschutzscheibe (1,86 m). Die Leuchten hingen also knapp 20 cm über der Scheibe. Auf dem Screenshot vom PC fiel das auf, im Code nicht.
@@ -23,3 +23,9 @@ pruefung: e2e:leuchten, e2e:verkehrslichter
 - Farbige Lampen: Emission ≤ ~2 (Lektion leuchten-nicht-ueberstrahlen).
 - `e2e:verkehrslichter` prüft jedes Verkehrsmodell (Glas vorhanden oder Kasten ≤ 6 cm von der Karosserie) und schlägt mit dem alten Code an.
 
+**Noch einmal (Meldung #11, Erde im Baggerlöffel):** `ExcavatorRig` setzte den Erdhügel in die Mitte der Bounding-Box der Schaufel und ließ ihn entlang der lokalen +Y-Achse wachsen. Beim Ersatzmodell (Kastenlöffel aus `VehicleModels._excavator`) zeigt +Y tatsächlich in die Öffnung, beim echten Liebherr-Löffel aber zur Rückwand. Ergebnis im Spiel: In jeder Stellung ragte eine braune Schale hinten aus dem Blech, von vorne sah man in eine leere Schaufel. Kein Test schaute auf die Ladung, und die Bilder ohne private Assets zeigen nur das Ersatzmodell.
+
+**Regel (ergänzt):**
+- Nicht nur die Position, auch die **Richtung** aus der Modellform bestimmen. Keine lokale Achse als „oben“ oder „Öffnung“ annehmen. `BucketLoad` findet die Öffnung über Schnitte quer zur Gelenkachse und Strahlen aus dem Hohlraum.
+- Code, der am Ersatzmodell stimmt, ist für das echte Modell nicht geprüft: Die Ersatzmodelle haben andere Achsen und Formen. Sichtbares immer mit den privaten Assets ansehen (Bild).
+- Ein Test für „liegt im Modell“ braucht eine **Gegenprobe**: Er muss die alte, falsche Platzierung erkennen (`tools/test.sh schaufel`: 90 von 169 Punkten hinter dem Blech). Sonst weiß man nicht, ob er überhaupt etwas prüft. Die Toleranz (hier 6 cm) begründen: Zahnhalter an der Schneide ragen ein paar Zentimeter in die Erde, das ist richtig so.
