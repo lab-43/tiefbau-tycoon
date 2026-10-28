@@ -624,6 +624,9 @@ func _right_vehicle(v: Vehicle) -> void:
 	_segmented("Rundumleuchte", [["auto", "Auto"], ["on", "An"], ["off", "Aus"]], v.light_mode.beacon, func(val):
 		v.light_mode.beacon = val
 		right_sig = "")
+	_segmented("Blitzmuster", [["2", "Doppelblitz"], ["3", "Dreifachblitz"]], str(v.light_mode.get("flash", "2")), func(val):
+		v.light_mode.flash = val
+		right_sig = "")
 	_toggle_row("Warnblinker", v.light_mode.hazard, func(on): v.light_mode.hazard = on)
 	_toggle_row("Arbeitsscheinwerfer", v.light_mode.work, func(on): v.light_mode.work = on)
 	right_body.add_child(UI.sep())

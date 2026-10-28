@@ -282,3 +282,167 @@ static func _std_lights(root: Node3D, L: float, W: float, y: float, roof_y: floa
 	if roof_y > 0.0:
 		marker(root, "beacon_1", Vector3(-0.5, roof_y, -L * 0.5 + 0.9))
 		marker(root, "beacon_2", Vector3(0.5, roof_y, -L * 0.5 + 0.9))
+
+
+# ------------------------------------------------------------------------------------------
+# Beacons the game mounts itself (models without own beacons, e.g. the crew van)
+# ------------------------------------------------------------------------------------------
+
+const BEACON_DONORS := ["truck_tipper", "truck_flatbed", "excavator_a918"]
+static var _beacon_parts: Array = []   # [body Mesh, body Basis, rotator Mesh] of a game beacon, or [null]
+static var _roof_cache: Dictionary = {}
+
+
+## A beacon (base + orange dome) with its origin at the bottom centre. Uses the beacon mesh of another
+## game model when the private assets are there, else a procedural one. The dome material is named
+## RotLight_ReflectorGlass… so Vehicle._setup_lights() picks it up like a model beacon.
+static func beacon_body() -> Node3D:
+	if _beacon_parts.is_empty():
+		_beacon_parts = [null]
+		for id in BEACON_DONORS:
+			var p := "res://assets/consim/%s/%s.glb" % [id, id]
+			if not ResourceLoader.exists(p):
+				continue
+			var sc: PackedScene = load(p)
+			var inst: Node3D = sc.instantiate()
+			var body := RigUtil.find(inst, "beacon_1_body")
+			var rot := RigUtil.find(inst, "beacon_1_rotator") as MeshInstance3D
+			var bm: MeshInstance3D = null
+			if body:
+				for c in body.get_children():
+					if c is MeshInstance3D:
+						bm = c
+			if bm and bm.mesh:
+				_beacon_parts = [bm.mesh, bm.basis, rot.mesh if rot else null]
+			inst.free()
+			if _beacon_parts[0] != null:
+				break
+	var root := Node3D.new()
+	if _beacon_parts[0] != null:
+		var mi := MeshInstance3D.new()
+		mi.name = "RotatingLight"
+		mi.mesh = _beacon_parts[0]
+		mi.basis = _beacon_parts[1]
+		root.add_child(mi)
+		if _beacon_parts[2] != null:
+			var rm := MeshInstance3D.new()
+			rm.name = "reflector"
+			rm.mesh = _beacon_parts[2]
+			mi.add_child(rm)
+		return root
+	var base := MeshInstance3D.new()
+	var bc := CylinderMesh.new()
+	bc.top_radius = 0.08
+	bc.bottom_radius = 0.085
+	bc.height = 0.05
+	bc.radial_segments = 12
+	base.mesh = bc
+	base.position.y = 0.025
+	base.material_override = mat(Color(0.05, 0.05, 0.05), 0.6)
+	root.add_child(base)
+	var dome := MeshInstance3D.new()
+	var dc := CylinderMesh.new()
+	dc.top_radius = 0.06
+	dc.bottom_radius = 0.075
+	dc.height = 0.13
+	dc.radial_segments = 12
+	var gm := mat(Color(1.0, 0.45, 0.02), 0.2)
+	gm.resource_name = "RotLight_ReflectorGlass_proc"
+	dc.material = gm
+	dome.mesh = dc
+	dome.position.y = 0.05 + 0.065
+	dome.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.add_child(dome)
+	return root
+
+
+## Where roof beacons go on a model: per lateral offset x the front edge of the flat roof (first point
+## from the front that is within 3 cm of the roof top), 15 cm behind it, on the surface. Cached per model.
+static func roof_mounts(model_id: String, root: Node3D, xs: Array) -> Array:
+	if _roof_cache.has(model_id):
+		return _roof_cache[model_id]
+	var faces := model_faces(root)
+	var out: Array = []
+	if faces.is_empty():
+		return out
+	var box := AABB(faces[0], Vector3.ZERO)
+	for v in faces:
+		box = box.expand(v)
+	for xv in xs:
+		var x: float = xv
+		var strip := _strip(faces, x)
+		var prof: Array = []
+		var top := -INF
+		var z := box.position.z
+		while z <= box.end.z:
+			var y := _top_y(strip, x, z, box.end.y + 1.0)
+			prof.append(Vector2(z, y))
+			top = maxf(top, y)
+			z += 0.05
+		for pt in prof:
+			if pt.y >= top - 0.03:
+				var zm: float = pt.x + 0.15
+				var ym := maxf(_top_y(strip, x, zm, box.end.y + 1.0), maxf(_top_y(strip, x, zm - 0.08, box.end.y + 1.0), _top_y(strip, x, zm + 0.08, box.end.y + 1.0)))
+				out.append(Vector3(x, ym, zm))
+				break
+	_roof_cache[model_id] = out
+	return out
+
+
+## Height of the topmost model surface below (x, from_y, z) in the model's space, -INF if there is none.
+## Meshes under any node in `skip` are ignored.
+static func surface_y(root: Node3D, x: float, z: float, from_y: float, skip: Array = []) -> float:
+	return _top_y(_strip(model_faces(root, skip), x), x, z, from_y)
+
+
+## All triangles of the model's meshes in the model's own space (current pose of all parts).
+static func model_faces(root: Node3D, skip: Array = []) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	for n in root.find_children("*", "MeshInstance3D", true, false):
+		var mi := n as MeshInstance3D
+		if mi.mesh == null or not mi.visible:
+			continue
+		var skipped := false
+		for s in skip:
+			if s == mi or (s as Node).is_ancestor_of(mi):
+				skipped = true
+		if skipped:
+			continue
+		var xf := Transform3D.IDENTITY
+		var p: Node = mi
+		while p != null and p != root:
+			if p is Node3D:
+				xf = (p as Node3D).transform * xf
+			p = p.get_parent()
+		var f := mi.mesh.get_faces()
+		for i in f.size():
+			out.append(xf * f[i])
+	return out
+
+
+static func _strip(faces: PackedVector3Array, x: float) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	for i in range(0, faces.size() - 2, 3):
+		var a := faces[i]
+		var b := faces[i + 1]
+		var c := faces[i + 2]
+		if minf(a.x, minf(b.x, c.x)) <= x and maxf(a.x, maxf(b.x, c.x)) >= x:
+			out.append(a)
+			out.append(b)
+			out.append(c)
+	return out
+
+
+static func _top_y(faces: PackedVector3Array, x: float, z: float, from_y: float) -> float:
+	var best := -INF
+	var o := Vector3(x, from_y, z)
+	for i in range(0, faces.size() - 2, 3):
+		var a := faces[i]
+		var b := faces[i + 1]
+		var c := faces[i + 2]
+		if minf(a.z, minf(b.z, c.z)) > z or maxf(a.z, maxf(b.z, c.z)) < z:
+			continue
+		var h = Geometry3D.ray_intersects_triangle(o, Vector3.DOWN, a, b, c)
+		if h != null and (h as Vector3).y > best:
+			best = (h as Vector3).y
+	return best

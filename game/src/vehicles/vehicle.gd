@@ -11,6 +11,12 @@ const LIGHT_SUFFIX := {"__light_head": "head", "__light_tail": "tail", "__light_
 const LIGHT_COLOR := {"head": Color(1.0, 0.95, 0.85), "tail": Color(1.0, 0.04, 0.02), "brake": Color(1.0, 0.04, 0.02),
 	"ind_l": Color(1.0, 0.48, 0.0), "ind_r": Color(1.0, 0.48, 0.0), "reverse": Color(1.0, 1.0, 1.0),
 	"work": Color(1.0, 0.98, 0.92), "beacon": Color(1.0, 0.55, 0.0)}
+# LED beacons: bursts of 2 or 3 short flashes per cycle; the 2nd beacon of a pair runs half a cycle later
+const FLASH_ON := 0.06
+const FLASH_GAP := 0.07
+const FLASH_CYCLE := 0.8
+const BEACON_GLOW := 6.0
+const ROOF_BEACON_X := 0.45    # lateral offset of the roof beacons the game mounts itself (crew van)
 
 var def_id := ""
 var def: Dictionary = {}
@@ -36,7 +42,7 @@ var slot := -1
 var site = null                # Site this vehicle is assigned to
 var site_spot := ""            # spot id at the site ("van", "machine", "load", "stage", ...)
 var carried_by: Vehicle = null
-var light_mode := {"low": "auto", "beacon": "auto", "hazard": false, "work": false}
+var light_mode := {"low": "auto", "beacon": "auto", "hazard": false, "work": false, "flash": "2"}
 var auto_shuttle := true       # tipper: automatic haul trips for its site
 var working := false
 var reversing := false
@@ -70,8 +76,8 @@ var _lmats := {}               # type -> Array[BaseMaterial3D]
 var _lval := {}                # type -> last energy
 var _spots: Array = []
 var _work_spots: Array = []
-var _beacon_rot: Array = []
-var _beacon_spots: Array = []
+var _beacons: Array = []       # [{key, node, mats: Array[BaseMaterial3D], light: OmniLight3D, offset, lit}]
+var _flash_phase := randf() * FLASH_CYCLE
 var low_on := false
 var beacon_on := false
 var work_on := false
@@ -196,6 +202,9 @@ func _setup_lights() -> void:
 	for t in LIGHT_COLOR:
 		_lmats[t] = []
 		_lval[t] = -1.0
+	# the crew van model has no beacons: mount two on the front of its roof (before the material scan)
+	if def_id == "van_crew" and model.find_children("beacon_*", "Node3D", true, false).is_empty():
+		_mount_roof_beacons()
 	for root in [model, trailer]:
 		if root == null:
 			continue
@@ -221,7 +230,10 @@ func _setup_lights() -> void:
 				dm.emission = LIGHT_COLOR[t]
 				dm.emission_energy_multiplier = 0.0
 				m3.set_surface_override_material(si, dm)
-				_lmats[t].append(dm)
+				if t == "beacon":
+					_beacon_of(m3, root).mats.append(dm)
+				else:
+					_lmats[t].append(dm)
 	# headlight beams
 	for n in model.find_children("light_head_*", "Node3D", true, false):
 		var sp := SpotLight3D.new()
@@ -245,57 +257,6 @@ func _setup_lights() -> void:
 		wl.rotation.x = deg_to_rad(-30.0)
 		n.add_child(wl)
 		_work_spots.append(wl)
-	# beacons: rotators of the game model, or procedural roof beacons (crew van)
-	for root in [model, trailer]:
-		if root == null:
-			continue
-		for n in root.find_children("beacon_*_rotator", "Node3D", true, false):
-			_beacon_rot.append(n)
-			if _beacon_spots.size() < 2 and root == model:
-				var bs := SpotLight3D.new()
-				bs.spot_range = 14.0
-				bs.spot_angle = 22.0
-				bs.light_color = LIGHT_COLOR.beacon
-				bs.light_energy = 0.0
-				bs.shadow_enabled = false
-				bs.rotation.x = deg_to_rad(-12.0)
-				n.add_child(bs)
-				_beacon_spots.append(bs)
-	if _beacon_rot.is_empty() and def_id == "van_crew":
-		for x in [-0.45, 0.45]:
-			var holder := Node3D.new()
-			holder.position = Vector3(x, height + 0.02, -0.9)
-			model.add_child(holder)
-			var cyl := MeshInstance3D.new()
-			var cm := CylinderMesh.new()
-			cm.top_radius = 0.085
-			cm.bottom_radius = 0.1
-			cm.height = 0.16
-			cm.radial_segments = 10
-			cyl.mesh = cm
-			cyl.position.y = 0.08
-			var bm := StandardMaterial3D.new()
-			bm.albedo_color = Color(1.0, 0.5, 0.05, 0.85)
-			bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			bm.emission_enabled = true
-			bm.emission = LIGHT_COLOR.beacon
-			bm.emission_energy_multiplier = 0.0
-			cyl.material_override = bm
-			cyl.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-			holder.add_child(cyl)
-			_lmats.beacon.append(bm)
-			var rot := Node3D.new()
-			rot.position.y = 0.08
-			holder.add_child(rot)
-			_beacon_rot.append(rot)
-			var bs2 := SpotLight3D.new()
-			bs2.spot_range = 12.0
-			bs2.spot_angle = 22.0
-			bs2.light_color = LIGHT_COLOR.beacon
-			bs2.light_energy = 0.0
-			bs2.rotation.x = deg_to_rad(-12.0)
-			rot.add_child(bs2)
-			_beacon_spots.append(bs2)
 	# procedural models: emissive blobs at the markers
 	if model.get_meta("source", "") == "procedural":
 		var mk := {"light_head_": "head", "light_tail_": "tail", "indicator_fl": "ind_l", "indicator_rl": "ind_l",
@@ -315,7 +276,86 @@ func _setup_lights() -> void:
 					bm2.emission_energy_multiplier = 0.0
 					mi2.material_override = bm2
 					n.add_child(mi2)
-					_lmats[t2].append(bm2)
+					if t2 == "beacon":
+						_beacon_of(n, model).mats.append(bm2)
+					else:
+						_lmats[t2].append(bm2)
+	# LED flash beacons: one light per beacon of the vehicle itself (max 2), trailers only glow
+	var lights := 0
+	for i in _beacons.size():
+		var b: Dictionary = _beacons[i]
+		b.offset = 0.5 * FLASH_CYCLE if i % 2 == 1 else 0.0
+		if lights < 2 and model.is_ancestor_of(b.node):
+			var ol := OmniLight3D.new()
+			ol.omni_range = 9.0
+			ol.omni_attenuation = 1.4
+			ol.light_color = LIGHT_COLOR.beacon
+			ol.light_energy = 0.0
+			ol.shadow_enabled = false
+			ol.position.y = 0.12
+			(b.node as Node3D).add_child(ol)
+			b.light = ol
+			lights += 1
+
+
+## Groups beacon materials by the beacon they belong to: the ancestor named beacon_<n>[_…] below root.
+func _beacon_of(n: Node, root: Node3D) -> Dictionary:
+	var key := ""
+	var holder: Node3D = n as Node3D
+	var p: Node = n
+	while p != null and p != root:
+		var nm := String(p.name)
+		if nm.begins_with("beacon_"):
+			key = "%s/beacon_%s" % [root.name, nm.get_slice("_", 1)]
+			holder = p as Node3D
+		p = p.get_parent()
+	if key == "":
+		key = "%s/%s" % [root.name, n.name]
+	for b in _beacons:
+		if b.key == key:
+			return b
+	var nb := {"key": key, "node": holder, "mats": [], "light": null, "offset": 0.0, "lit": false}
+	_beacons.append(nb)
+	return nb
+
+
+func _mount_roof_beacons() -> void:
+	var mounts := VehicleModels.roof_mounts(String(def.get("model", def_id)), model, [-ROOF_BEACON_X, ROOF_BEACON_X])
+	for i in mounts.size():
+		var bb := VehicleModels.beacon_body()
+		bb.name = "beacon_%d_body" % (i + 1)
+		bb.position = mounts[i]
+		model.add_child(bb)
+
+
+## Beacon mount points in vehicle space (for tests: each must sit on the model's surface).
+func beacon_nodes() -> Array:
+	var out: Array = []
+	for b in _beacons:
+		if model.is_ancestor_of(b.node):
+			out.append(b.node)
+	return out
+
+
+## True while an LED beacon running the n-flash pattern is lit at time t (seconds).
+static func flash_lit(t: float, n: int) -> bool:
+	var ph := fposmod(t, FLASH_CYCLE)
+	var k := int(ph / (FLASH_ON + FLASH_GAP))
+	return k < n and ph - k * (FLASH_ON + FLASH_GAP) < FLASH_ON
+
+
+func _update_beacons(night: float) -> void:
+	var n := 3 if str(light_mode.get("flash", "2")) == "3" else 2
+	var now := Time.get_ticks_msec() * 0.001 + _flash_phase   # real time: same rhythm at every game speed
+	for b in _beacons:
+		var lit: bool = beacon_on and flash_lit(now + float(b.offset), n)
+		if lit == b.lit:
+			continue
+		b.lit = lit
+		for m in b.mats:
+			(m as BaseMaterial3D).emission_energy_multiplier = BEACON_GLOW if lit else 0.0
+		if b.light:
+			(b.light as OmniLight3D).light_energy = (1.6 + night * 4.0) if lit else 0.0
 
 
 func _set_light(t: String, v: float) -> void:
@@ -368,14 +408,7 @@ func _update_lights(delta: float) -> void:
 	_set_light("work", 3.0 if work_on else 0.0)
 	for wl in _work_spots:
 		wl.light_energy = 3.2 if work_on else 0.0
-	if beacon_on:
-		for r in _beacon_rot:
-			(r as Node3D).rotate_y(delta * 9.0)
-		_set_light("beacon", 2.0 + 2.0 * absf(sin(_blink_t * 9.0)))
-	else:
-		_set_light("beacon", 0.0)
-	for bs in _beacon_spots:
-		bs.light_energy = (1.2 + night * 3.0) if beacon_on else 0.0
+	_update_beacons(night)
 
 
 # ------------------------------------------------------------------------------------------
@@ -1272,7 +1305,7 @@ func load_state(d: Dictionary) -> void:
 	cargo.barriers = c.get("barriers", 0)
 	cargo.pipes_new = c.get("pipes_new", 0)
 	cargo.pipes_old = c.get("pipes_old", 0)
-	light_mode = d.get("lights", light_mode)
+	light_mode.merge(d.get("lights", {}), true)   # keeps defaults for keys older saves lack (flash)
 	crew_aboard = d.get("crew", 0)
 	auto_shuttle = d.get("auto", true)
 	place(d.pos, d.yaw)
