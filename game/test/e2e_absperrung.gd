@@ -315,6 +315,18 @@ func tick(_delta: float) -> void:
 					_end()
 				return
 			ok(not site3.traffic_on, "Umleitung nach dem Abbau aufgehoben")
+			# #15: a bought crew van comes with its crew and a closure kit; old saves get them on load
+			Game.add_money(100000.0, "Test")
+			var nv: Vehicle = w.fleet.buy("van_crew")
+			ok(nv != null and nv.crew_aboard == 3 and nv.cargo.barriers == 1, "gekaufter Kolonnenbus hat Kolonne und Absperrmaterial")
+			if nv:
+				var vd: Dictionary = nv.save_state()
+				vd["crew"] = 0
+				vd["cargo"]["barriers"] = 0
+				var n0 := w.fleet.vehicles.size()
+				w.fleet.load_state({"vehicles": [vd], "plate_no": 900})
+				var lv: Vehicle = w.fleet.vehicles[w.fleet.vehicles.size() - 1]
+				ok(w.fleet.vehicles.size() == n0 + 1 and lv.crew_aboard == 3 and lv.cargo.barriers == 1, "alter Spielstand: Kolonnenbus ohne Kolonne bekommt sie beim Laden")
 			_end()
 
 
@@ -367,14 +379,26 @@ func _design() -> void:
 	_click(lay.lane_pt(lay.s_c0 + 0.5, -lw * 0.5 + 0.3))
 	_click(lay.lane_pt(lay.s_c0 + 0.5, lw * 0.5 - 0.05))
 	_key(KEY_ESCAPE)
-	ok(int(des.plan.counts().get("schranke", 0)) == 2, "2 Absperrschranken quer (%d)" % int(des.plan.counts().get("schranke", 0)))
+	ok(int(des.plan.counts().get("schranke", 0)) >= 1, "Absperrschranke quer (%d)" % int(des.plan.counts().get("schranke", 0)))
 	# fall protection on both sides of the trench
 	_key(KEY_4)
 	for side in [-1.0, 1.0]:
 		_click(lay.lane_pt(lay.s_t0 - 0.3, hw * side))
 		_click(lay.lane_pt(lay.s_t1 + 0.3, hw * side))
 		_key(KEY_ESCAPE)
-	ok(int(des.plan.counts().get("fence", 0)) >= 6, "Absperrgitter am Graben (%d)" % int(des.plan.counts().get("fence", 0)))
+	ok(int(des.plan.counts().get("fence", 0)) >= 4, "Absperrgitter am Graben (%d)" % int(des.plan.counts().get("fence", 0)))
+	# #17: chained fences stand end to end, not inside each other
+	var fc: Array = []
+	for it in des.plan.items:
+		if it.kind == "fence":
+			fc.append(ClosurePlan.item_center(it))
+	var min_d := INF
+	for i in fc.size():
+		for j in range(i + 1, fc.size()):
+			# same side of the trench only (the two sides are about W + 0.7 m apart)
+			if signf(lay.lane_coords(fc[i]).y) == signf(lay.lane_coords(fc[j]).y):
+				min_d = minf(min_d, (fc[i] as Vector2).distance_to(fc[j]))
+	ok(min_d > 1.95, "Gitter einer Kette überlappen nicht (kleinster Abstand %.2f m)" % min_d)
 	# yellow marking: one polyline, three segments
 	_key(KEY_5)
 	ok(des.kind == "line" and des.mode == "line", "gelbe Markierung zeichnet als Linie")
@@ -451,7 +475,7 @@ func _design() -> void:
 	for i in des._sel:
 		if des.plan.items[i].kind == "fence":
 			fences += 1
-	ok(fences >= 6, "Rahmen wählt die Gitter (%d von %d)" % [fences, des._sel.size()])
+	ok(fences >= 4, "Rahmen wählt die Gitter (%d von %d)" % [fences, des._sel.size()])
 	_key(KEY_ESCAPE)
 	ok(des._sel.is_empty(), "Esc hebt die Auswahl auf")
 	# snapping: 0.3 m next to the traffic-side lane edge lands on it

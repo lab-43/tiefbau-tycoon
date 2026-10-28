@@ -20,7 +20,7 @@ const KINDS := {
 }
 const ORDER := ["bake", "cone", "schranke", "fence", "line", "z123", "z208", "z308", "z274"]
 const ELEM_LEN := 2.14      # Absperrschranke / Absperrgitter: length along +X from the origin
-const ELEM_STEP := 2.05     # spacing of chained elements (they overlap a little at the feet)
+const ELEM_STEP := 2.05     # spacing of chained elements (end to end, the feet overlap a little)
 const TRAFFIC_CLEAR := 1.3  # m: nothing closer than this to the path of a car's centre
 const MAX_ITEMS := 600
 
@@ -132,21 +132,23 @@ static func chain(kind: String, path: PackedVector2Array, spacing: float, lay: S
 	if total < 0.05:
 		return out
 	if is_linear(kind):
-		var n := maxi(1, int(ceil((total - 0.09) / ELEM_STEP)))
-		var step := (total - ELEM_LEN) / float(n - 1) if n > 1 else 0.0
-		if total < ELEM_LEN:
-			n = 1
-			step = 0.0
+		# end to end with the feet touching (#17: stretching them over the path made them overlap);
+		# the last one may stick out or stop short by up to half an element
+		var n := maxi(1, int(round((total - ELEM_LEN) / ELEM_STEP)) + 1)
 		var d0 := _traffic_dir(path[0], lay)
 		var pref := (-d0 + Geo.left_of(d0)).normalized()
+		var end_dir: Vector2 = Geo.sample(path, cum, total)[1]
 		for i in n:
-			var s0 := clampf(i * step, 0.0, maxf(0.0, total - 0.01))
-			var s1 := minf(s0 + ELEM_LEN, total)
-			var a: Vector2 = Geo.sample(path, cum, s0)[0]
-			var b: Vector2 = Geo.sample(path, cum, s1)[0]
-			if total < ELEM_LEN:
-				b = a + (b - a).normalized() * ELEM_LEN
-			var t := (b - a).normalized()
+			var s0 := i * ELEM_STEP
+			var a: Vector2
+			var t: Vector2
+			if s0 + 0.5 < total:
+				a = Geo.sample(path, cum, s0)[0]
+				var b: Vector2 = Geo.sample(path, cum, minf(s0 + ELEM_LEN, total))[0]
+				t = (b - a).normalized()
+			else:
+				t = end_dir
+				a = path[path.size() - 1] + end_dir * (s0 - total)
 			var yaw := yaw_along(t)
 			var origin := a
 			if axis_z(yaw).dot(pref) < 0.0:
