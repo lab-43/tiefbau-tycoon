@@ -1,4 +1,4 @@
-# Baustellen Manager – Umsetzungsstand MVP (v1.7)
+# Baustellen Manager – Umsetzungsstand MVP (v1.7.1)
 
 Stand: 28.10.2026 · Ergänzt die Spezifikation „Baustellen-Manager-Konzept-MVP“. Wo die Umsetzung von der Spezifikation abweicht, steht es hier mit Begründung.
 
@@ -51,6 +51,17 @@ Fahrzeuge (Kolonnenbus, Pritsche, Kipper, Sattelzug mit Tieflader, Mobilbagger):
 - Abgeschlossene Baustellen werden stillgelegt statt sofort gelöscht, damit späte Rückmeldungen von Fahrzeugen nicht ins Leere laufen.
 
 ## Weiterentwicklung mit mehreren Sessions (v1.7)
+- **v1.7.1, unabhängige Prüfung:** Ein frischer Prüf-Agent fand 20 Probleme, alle sind behoben. Die wichtigsten:
+  - Eine Datei fehlte im Git.
+  - Eine private Git-Adresse stand in der Repo-Konfiguration; sie war in keinem Commit gelandet.
+  - Doppelte Übernahmen waren möglich, wenn zwei Sessions gleichzeitig übernahmen.
+  - Gleiche Meldungsnummern waren möglich.
+  - Die CI-Datei war ungültig.
+
+  Übernahmen, Nummern und Sperren sind jetzt mit `tools/agent/test_issues.sh` getestet, auch direkt auf Jonathans PC mit acht gleichzeitigen Sessions.
+- **Hamburg unter Windows bestätigt (v1.6-Build, Log vom 28.10.):**
+  - Die 6-km-Karte war nach 62 s fertig, inklusive 51 MB Geofabrik-Download.
+  - Die 10-km-Karte war nach 27 s fertig, weil der Auszug schon da war: 23.615 Straßenzüge, 46.081 Gebäude, 2.120 Ampeln.
 - **Git-Repository:**
   - Das Projekt ist ein Git-Repo für Jonathans GitHub.
   - Private Modelle, Extraktionswerkzeuge und Builds sind ausgeschlossen (`.gitignore`, geprüft von `tools/lint.py`).
