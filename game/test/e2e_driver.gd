@@ -721,6 +721,7 @@ func _verkehrslichter() -> void:
 				if only == "" or String(e.get("name", e.kind)) in only.split(","):
 					_vl_shots.append(i)
 				TrafficModels.set_lights(car, i % 2 == 0, -1 if i % 2 == 0 else 1, 0.1)
+				_vl_check_state(i, car, Vector4(1.0 if i % 2 == 0 else 0.0, 1.0 if i % 2 == 0 else 0.0, 0.0 if i % 2 == 0 else 1.0, 0.0))
 			Clock.set_speed(1)
 			step = 1
 		1:
@@ -815,3 +816,33 @@ func _markierungen(delta: float) -> void:
 	if _mk == null:
 		_mk = load("res://test/e2e_markierungen.gd").new(self)
 	_mk.tick(delta)
+
+
+## Glass cars: the lamp state really reaches the meshes, and indicator glass is on its side (left = -x).
+func _vl_check_state(i: int, car: Node3D, want: Vector4) -> void:
+	var e: Dictionary = TrafficModels.entries[i]
+	var nm := "%s#%d" % [e.get("name", e.kind), i]
+	for mi in car.get_meta("lights", {}).get("glass", []):
+		var m3 := mi as MeshInstance3D
+		var got = m3.get_instance_shader_parameter("lamp")
+		if not (got is Vector4) or not (got as Vector4).is_equal_approx(want):
+			print("VLICHT FAIL %s: lamp %s statt %s" % [nm, got, want])
+			_vl_fail += 1
+		var xf := LampSplit.xform_in(m3, car)
+		for si in m3.mesh.get_surface_count():
+			var sm := m3.get_active_material(si) as ShaderMaterial
+			if sm == null:
+				continue
+			var fn := int(sm.get_shader_parameter("fn"))
+			if fn != 3 and fn != 4:
+				continue
+			var arr := m3.mesh.surface_get_arrays(si)
+			var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+			var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX]   # split meshes keep all vertices: count the used ones
+			var sx := 0.0
+			for k in idx:
+				sx += (xf * vs[k]).x
+			var left := sx < 0.0
+			if left != (fn == 3):
+				print("VLICHT FAIL %s: Blinkerglas %s liegt auf der falschen Seite (x %.2f)" % [nm, "links" if fn == 3 else "rechts", sx / maxf(1.0, idx.size())])
+				_vl_fail += 1
