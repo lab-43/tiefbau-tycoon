@@ -21,7 +21,7 @@ vec3 asphalt_old(vec2 p) {
 	return mix(col, col * 0.82, patchy * 0.6);
 }
 void fragment() {
-	float h = wpos.y - y_road;
+	float h = wpos.y - y_road - terrain_h(wpos.xz);   // depth below the road surface (#8: ground heights)
 	vec2 p = wpos.xz;
 	float g = hash12(floor(p * 30.0 + wpos.y * 13.0));
 	float n = vnoise(p * 3.0 + wpos.y * 2.0);

@@ -10,6 +10,10 @@ var uvs := PackedVector2Array()
 var indices := PackedInt32Array()
 var use_colors := false
 var use_uvs := true
+## Set by the meshers on maps with ground heights (#8): every vertex is lifted onto the ground (or the bridge
+## deck the mesher is building), flat polygons are cut into DRAPE cells so they follow the slopes.
+var terrain: Terrain = null
+const DRAPE := 15.0
 
 
 func is_empty() -> bool:
@@ -17,6 +21,10 @@ func is_empty() -> bool:
 
 
 func _v(p: Vector3, n: Vector3, uv: Vector2, c: Color) -> int:
+	if terrain != null:
+		p.y += terrain.surface(p.x, p.z)
+		if n.y > 0.99:
+			n = terrain.surface_normal(p.x, p.z)
 	var i := verts.size()
 	verts.append(p)
 	normals.append(n)
@@ -58,7 +66,14 @@ func quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: Vector3, ua := Vect
 
 
 ## Flat horizontal polygon at height y facing up (uses world xz as uv * uv_scale).
+## With ground heights: y above the ground, cut into DRAPE cells so the polygon follows the slopes.
 func polygon_up(poly: PackedVector2Array, y: float, uv_scale: float = 1.0, col := Color.WHITE, holes: Array = []) -> bool:
+	if terrain != null and terrain.mode_deck.is_empty() and terrain.mode_node < 0:
+		return _polygon_draped(poly, y, uv_scale, col, holes)
+	return _polygon_flat(poly, y, uv_scale, col, holes)
+
+
+func _polygon_flat(poly: PackedVector2Array, y: float, uv_scale: float, col: Color, holes: Array) -> bool:
 	var idx := triangulate(poly, holes)
 	var pts := poly
 	if not holes.is_empty() and idx.size() > 0 and idx[0] < 0:
@@ -83,6 +98,64 @@ func polygon_up(poly: PackedVector2Array, y: float, uv_scale: float = 1.0, col :
 
 
 var _last_points := PackedVector2Array()
+
+
+## Cuts the polygon (with holes) into DRAPE x DRAPE cells of a global grid (rows first, then cells), so every
+## piece is small enough to lie on the ground. Shared cell borders give identical vertices: no cracks.
+func _polygon_draped(poly: PackedVector2Array, y: float, uv_scale: float, col: Color, holes: Array) -> bool:
+	var r := Rect2(poly[0], Vector2.ZERO)
+	for p in poly:
+		r = r.expand(p)
+	if r.size.x <= DRAPE and r.size.y <= DRAPE and floor(r.position.x / DRAPE) == floor(r.end.x / DRAPE) \
+			and floor(r.position.y / DRAPE) == floor(r.end.y / DRAPE):
+		return _polygon_flat(poly, y, uv_scale, col, holes)
+	var hole_boxes: Array = []
+	for hl in holes:
+		var hr := Rect2((hl as PackedVector2Array)[0], Vector2.ZERO)
+		for p in hl:
+			hr = hr.expand(p)
+		hole_boxes.append(hr)
+	var any := false
+	var z := floorf(r.position.y / DRAPE) * DRAPE
+	while z < r.end.y:
+		var row := PackedVector2Array([Vector2(r.position.x - 1.0, z), Vector2(r.end.x + 1.0, z),
+			Vector2(r.end.x + 1.0, z + DRAPE), Vector2(r.position.x - 1.0, z + DRAPE)])
+		for strip in Geometry2D.intersect_polygons(poly, row):
+			var sr := Rect2(strip[0], Vector2.ZERO)
+			for p in strip:
+				sr = sr.expand(p)
+			var x := floorf(sr.position.x / DRAPE) * DRAPE
+			while x < sr.end.x:
+				var cell := PackedVector2Array([Vector2(x, z), Vector2(x + DRAPE, z), Vector2(x + DRAPE, z + DRAPE), Vector2(x, z + DRAPE)])
+				var cr := Rect2(x, z, DRAPE, DRAPE)
+				for piece in Geometry2D.intersect_polygons(strip, cell):
+					var parts: Array = [piece]
+					var piece_holes: Array = []
+					for hi in holes.size():
+						if not (hole_boxes[hi] as Rect2).intersects(cr):
+							continue
+						var next: Array = []
+						for part in parts:
+							for q in Geometry2D.clip_polygons(part, holes[hi]):
+								next.append(q)
+						parts = next
+					# a hole inside a piece comes back as a ring of opposite winding
+					var outers: Array = []
+					for q in parts:
+						if parts.size() > 1 and Geometry2D.is_polygon_clockwise(q) != Geometry2D.is_polygon_clockwise(piece):
+							piece_holes.append(q)
+						else:
+							outers.append(q)
+					for q in outers:
+						var hs: Array = []
+						for ph in piece_holes:
+							if Geometry2D.is_point_in_polygon((ph as PackedVector2Array)[0], q):
+								hs.append(ph)
+						if _polygon_flat(q, y, uv_scale, col, hs):
+							any = true
+				x += DRAPE
+		z += DRAPE
+	return any
 
 
 ## Triangulate a polygon with optional holes (holes are bridged into the outer ring).

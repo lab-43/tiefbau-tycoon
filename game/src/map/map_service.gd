@@ -25,8 +25,11 @@ var frac := 0.0
 var stage_frac := 0.0
 var downloader: MapDownloader
 var geofabrik: GeofabrikSource
+var terrain_src: TerrainSource
 var pbf_path := ""               # Geofabrik extract to read instead of Overpass pieces
-var _shares := {"download": 0.45, "bake": 0.35, "scene": 0.12, "save": 0.08, "cache": 0.6}
+var terrain_dir := ""            # downloaded height tiles for the bake ("" = flat map)
+var terrain_mode := ""           # "synthetic" for tests (--terrain=synthetic)
+var _shares := {"download": 0.45, "terrain": 0.05, "bake": 0.35, "scene": 0.12, "save": 0.08, "cache": 0.6}
 
 var _thread: Thread
 var _builder: MapBuilder
@@ -49,7 +52,21 @@ func prepare(m: Dictionary) -> void:
 	_log("Karte „%s“: %.0f × %.0f km um %.5f, %.5f" % [meta.get("name", "?"), meta.size_m / 1000.0, meta.size_m / 1000.0,
 		meta.center_lat, meta.center_lon])
 	_log("Godot %s · %s · Daten: %s" % [Engine.get_version_info().string, OS.get_name(), ProjectSettings.globalize_path(dir)])
-	var cache := dir.path_join("baked_v%d.bin" % MapBuilder.BAKE_VERSION)
+	var suffix := "_syn" if _synthetic_terrain() else ("_test" if TerrainSource._url_override() != "" else "")
+	var cache := dir.path_join("baked_v%d%s.bin" % [MapBuilder.BAKE_VERSION, suffix])
+	# baked without ground heights because they could not be downloaded: try the heights once more first (#8)
+	var flat := dir.path_join("baked_v%d_flach.bin" % MapBuilder.BAKE_VERSION)
+	if not FileAccess.file_exists(cache) and FileAccess.file_exists(flat):
+		_set_stages([["terrain", "Geländehöhen herunterladen"], ["cache", "Gespeicherte Karte lesen"], ["scene", "3D-Szene aufbauen"]])
+		await _terrain(dir)
+		if cancelled:
+			_stop()
+			return
+		if terrain_dir == "":
+			cache = flat
+		else:
+			_log("Geländehöhen sind jetzt da – die Karte wird mit Höhen neu aufbereitet.", L_OK)
+			DirAccess.remove_absolute(flat)
 	if FileAccess.file_exists(cache):
 		_set_stages([["cache", "Gespeicherte Karte lesen"], ["scene", "3D-Szene aufbauen"]])
 		_begin("cache", "Gespeicherte Karte lesen …")
@@ -68,8 +85,8 @@ func prepare(m: Dictionary) -> void:
 			return
 		_log("Gespeicherte Karte ist unlesbar – sie wird neu aufbereitet.", L_WARN)
 		DirAccess.remove_absolute(cache)
-	_set_stages([["download", "Kartendaten herunterladen (OpenStreetMap)"], ["bake", "Karte aufbereiten"],
-		["scene", "3D-Szene aufbauen"], ["save", "Karte speichern"]])
+	_set_stages([["download", "Kartendaten herunterladen (OpenStreetMap)"], ["terrain", "Geländehöhen herunterladen"],
+		["bake", "Karte aufbereiten"], ["scene", "3D-Szene aufbauen"], ["save", "Karte speichern"]])
 	if Game.dev_fixture != "":
 		_copy_fixture(osm_dir)
 	var mf := MapDownloader.read_manifest(osm_dir)
@@ -98,7 +115,13 @@ func prepare(m: Dictionary) -> void:
 			finished.emit(false, msg)
 			return
 		_end("download")
+	await _terrain(dir)
+	if cancelled:
+		_stop()
+		return
 	_begin("bake", "Karte aufbereiten …")
+	if terrain_dir == "" and _terrain_wanted():
+		cache = flat   # retried on the next start
 	var ok_b: bool = await _bake(osm_dir, cache)
 	if not ok_b:
 		_stop()
@@ -114,6 +137,8 @@ func cancel() -> void:
 		downloader.cancel()
 	if geofabrik:
 		geofabrik.cancel()
+	if terrain_src:
+		terrain_src.cancel()
 	_log("Abgebrochen.", L_WARN)
 
 
@@ -165,8 +190,52 @@ func _download_any(osm_dir: String) -> bool:
 
 func _use_pbf_shares() -> void:
 	# reading the extract happens during "Karte aufbereiten" and takes longer than the download
-	_shares = {"download": 0.2, "bake": 0.6, "scene": 0.12, "save": 0.08, "cache": 0.6}
+	_shares = {"download": 0.2, "terrain": 0.05, "bake": 0.6, "scene": 0.12, "save": 0.08, "cache": 0.6}
 	_update_frac()
+
+
+static func _synthetic_terrain() -> bool:
+	return "--terrain=synthetic" in OS.get_cmdline_user_args()
+
+
+## Real heights: not switched off, and offline test maps only with a local tile server.
+static func _terrain_wanted() -> bool:
+	return not _synthetic_terrain() and not TerrainSource.disabled() and (Game.dev_fixture == "" or TerrainSource._url_override() != "")
+
+
+## Ground heights (#8): height tiles once per map (TerrainSource). Without them the map stays flat.
+## Offline test maps (--fixture) stay flat unless --terrain-url or --terrain=synthetic is given.
+func _terrain(dir: String) -> void:
+	var tdir := dir.path_join("terrain_test" if TerrainSource._url_override() != "" else "terrain")
+	if _synthetic_terrain():
+		terrain_mode = "synthetic"
+		_log("Geländehöhen: Testgelände (künstliche Hügel).")
+		_skip("terrain")
+		return
+	if not _terrain_wanted():
+		_skip("terrain")
+		return
+	if not TerrainSource.read_manifest(tdir).is_empty():
+		terrain_dir = tdir
+		_log("Geländehöhen liegen schon vor – kein Download nötig.", L_OK)
+		_skip("terrain")
+		return
+	_begin("terrain", "Geländehöhen herunterladen …")
+	terrain_src = TerrainSource.new()
+	terrain_src.name = "TerrainSource"
+	add_child(terrain_src)
+	terrain_src.log_line.connect(_log)
+	terrain_src.run(meta, tdir)
+	while terrain_src.running and not cancelled:
+		stage_frac = float(terrain_src.done) / maxf(1.0, terrain_src.total)
+		step_text = "Geländehöhen herunterladen: %d von %d Kacheln" % [terrain_src.done, terrain_src.total]
+		_update_frac()
+		await get_tree().process_frame
+	if cancelled:
+		return
+	if terrain_src.result == "ok":
+		terrain_dir = tdir
+	_end("terrain")
 
 func _download(osm_dir: String) -> bool:
 	downloader = MapDownloader.new()
@@ -207,6 +276,10 @@ func _bake(osm_dir: String, cache: String) -> bool:
 	_builder = MapBuilder.new()
 	_thread = Thread.new()
 	var m := meta.duplicate(true)
+	if terrain_dir != "":
+		m["terrain_dir"] = terrain_dir
+	if terrain_mode != "":
+		m["terrain"] = terrain_mode
 	var pbf := pbf_path
 	if pbf != "":
 		_log("Lese den Auszug %s …" % ProjectSettings.globalize_path(pbf))
@@ -246,6 +319,10 @@ func _bake(osm_dir: String, cache: String) -> bool:
 
 
 func _build_scene(res: Dictionary) -> void:
+	Terrain.activate(res.get("terrain"))
+	if res.get("terrain") != null:
+		var ti: Dictionary = (res.terrain as Terrain).info
+		_log("Geländehöhen: %s, %.0f bis %.0f m. %s" % [ti.get("name", "?"), float(ti.get("min", 0.0)), float(ti.get("max", 0.0)), ti.get("attribution", "")])
 	city_root = MapBuilder.create_city_root(res)
 	var total: int = maxi(1, res.roads.size() + res.city.size())
 	var count := 0
@@ -299,6 +376,7 @@ func _save_cache(path: String, res: Dictionary) -> void:
 	var d := {
 		"roads": _layers_to_data(res.roads), "city": _layers_to_data(res.city), "trees": res.trees, "lamps": res.lamps,
 		"bounds": res.bounds, "hq": res.hq, "stats": res.stats, "bus_stops": res.bus_stops, "net": res.net.serialize(),
+		"terrain": res.terrain.serialize() if res.get("terrain") != null else {},
 	}
 	var th := Thread.new()
 	th.start(func():
@@ -337,7 +415,8 @@ func _load_cache(path: String) -> bool:
 		var rn := RoadNet.new()
 		rn.deserialize(d.net)
 		return {"net": rn, "roads": _data_to_layers(d.roads), "city": _data_to_layers(d.city), "trees": d.trees,
-			"lamps": d.lamps, "bounds": d.bounds, "hq": d.hq, "stats": d.stats, "bus_stops": d.get("bus_stops", [])})
+			"lamps": d.lamps, "bounds": d.bounds, "hq": d.hq, "stats": d.stats, "bus_stops": d.get("bus_stops", []),
+			"terrain": Terrain.deserialize(d.get("terrain", {}))})
 	var t0 := Time.get_ticks_msec()
 	while th.is_alive():
 		step_text = "Gespeicherte Karte lesen … %d s" % int((Time.get_ticks_msec() - t0) / 1000.0)

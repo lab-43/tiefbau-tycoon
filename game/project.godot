@@ -88,6 +88,21 @@ pit_b3={
 "value": Vector4(0, 0, 0, 0)
 }
 
+terrain_tex={
+"type": "sampler2D",
+"value": ""
+}
+
+terrain_rect={
+"type": "vec4",
+"value": Vector4(0, 0, 0.1, 0)
+}
+
+terrain_size={
+"type": "vec4",
+"value": Vector4(2, 2, 10, 0)
+}
+
 night={
 "type": "float",
 "value": 0.0

@@ -14,6 +14,7 @@ var net: RoadNet
 var chunk_size := 500.0
 var origin := Vector2.ZERO
 var chunks := {}   # Vector2i -> {"asphalt": MeshLayer, "sidewalk":..., "curb":..., "mark":...}
+var terrain: Terrain = null   # ground heights (#8): layers lift their vertices onto it, bridges onto their deck
 
 
 func _init(n: RoadNet, chunk: float, bounds_origin: Vector2) -> void:
@@ -32,6 +33,7 @@ func layer(ck: Vector2i, name: String) -> MeshLayer:
 	var c: Dictionary = chunks[ck]
 	if not c.has(name):
 		var l := MeshLayer.new()
+		l.terrain = terrain
 		c[name] = l
 	return c[name]
 
@@ -41,13 +43,21 @@ var progress_cb: Callable   # (fraction 0..1), called from the bake thread
 func build_all() -> void:
 	var total := maxi(1, net.edges.size() + net.nodes.size())
 	for ei in net.edges.size():
+		if terrain:
+			terrain.mode_deck = terrain.decks.get(ei, [])
 		_edge(ei)
 		if ei % 200 == 0 and progress_cb.is_valid():
 			progress_cb.call(float(ei) / total)
+	if terrain:
+		terrain.mode_deck = []
 	for ni in net.nodes.size():
+		if terrain:
+			terrain.mode_node = ni if terrain.node_decks.has(ni) else -1
 		_junction(ni)
 		if ni % 200 == 0 and progress_cb.is_valid():
 			progress_cb.call(float(net.edges.size() + ni) / total)
+	if terrain:
+		terrain.mode_node = -1
 
 
 # ------------------------------------------------------------------------------------------
@@ -125,11 +135,12 @@ func _sidewalk_strip(ck: Vector2i, inner: PackedVector2Array, outer: PackedVecto
 			continue
 		var road_dir := (center[i] - a).normalized()
 		var n := Vector3(road_dir.x, 0, road_dir.y)
-		cb.quad(Geo.v3(a, Y_ROAD - 0.02), Geo.v3(b, Y_ROAD - 0.02), Geo.v3(b, Y_SW), Geo.v3(a, Y_SW), n,
+		# reaches below the road surface: on slopes the exact road surface lies a few cm off the straight mesh
+		cb.quad(Geo.v3(a, Y_ROAD - 0.15), Geo.v3(b, Y_ROAD - 0.15), Geo.v3(b, Y_SW), Geo.v3(a, Y_SW), n,
 			Vector2(0, 0), Vector2(seg.length(), 0), Vector2(seg.length(), CURB), Vector2(0, CURB))
-		# outer face down to the ground
+		# outer face down into the ground (on slopes the ground between two vertices can be lower)
 		var n2 := -n
-		cb.quad(Geo.v3(d, 0.0), Geo.v3(c, 0.0), Geo.v3(c, Y_SW), Geo.v3(d, Y_SW), n2)
+		cb.quad(Geo.v3(d, -0.4), Geo.v3(c, -0.4), Geo.v3(c, Y_SW), Geo.v3(d, Y_SW), n2)
 
 
 ## Parts of polygon q outside all clip areas (q itself if it touches none).

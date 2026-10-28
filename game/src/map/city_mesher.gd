@@ -19,6 +19,7 @@ var trees := {}          # Vector2i -> Array[Transform3D]
 var lamps := {}          # Vector2i -> Array[Transform3D]
 var hq_rect := PackedVector2Array()
 var rng := RandomNumberGenerator.new()
+var terrain: Terrain = null   # ground heights (#8); null = flat map
 
 
 func _init(d: OsmData, n: RoadNet, chunk: float) -> void:
@@ -40,6 +41,9 @@ func layer(ck: Vector2i, name: String, colors := false) -> MeshLayer:
 	if not c.has(name):
 		var l := MeshLayer.new()
 		l.use_colors = colors
+		# buildings get their own base height, water lies flat at its level
+		if name != "building" and name != "water":
+			l.terrain = terrain
 		c[name] = l
 	return c[name]
 
@@ -124,11 +128,23 @@ func _buildings() -> void:
 		var wall_col := Color(0.90 + v * 0.07, 0.90 + v * 0.065, 0.895 + v * 0.06)
 		var roof_col := Color(0.80 + v * 0.06, 0.80 + v * 0.06, 0.80 + v * 0.055)
 		var is_roof_only: bool = b.tags.get("building", "") == "roof"
-		var base := h - 0.4 if is_roof_only else 0.0
-		_walls(l, outer, base, h, wall_col)
+		# on slopes: the roof is h above the mean ground of the outline, the walls reach below its lowest point
+		var g_lo := 0.0
+		var g_mean := 0.0
+		if terrain:
+			g_lo = INF
+			for p in outer:
+				var gh := terrain.sample(p.x, p.y)
+				g_lo = minf(g_lo, gh)
+				g_mean += gh
+			g_mean /= outer.size()
+			g_lo -= 0.6
+		var top := g_mean + h
+		var base := top - 0.4 if is_roof_only else g_lo
+		_walls(l, outer, base, top, wall_col)
 		for hole in b.holes:
-			_walls(l, hole, base, h, wall_col, true)
-		l.polygon_up(outer, h, 0.0, roof_col, b.holes)
+			_walls(l, hole, base, top, wall_col, true)
+		l.polygon_up(outer, top, 0.0, roof_col, b.holes)
 
 
 ## Extruded walls; normals point away from the polygon interior (or into it for holes).
@@ -154,7 +170,9 @@ func _walls(l: MeshLayer, ring: PackedVector2Array, y0: float, y1: float, col: C
 
 
 func _areas() -> void:
-	for a in data.areas:
+	var levels: Dictionary = terrain.info.get("water_levels", {}) if terrain else {}
+	for ai in data.areas.size():
+		var a: Dictionary = data.areas[ai]
 		var kind: String = a.kind
 		var outer: PackedVector2Array = a.outer
 		if outer.size() < 3:
@@ -162,7 +180,7 @@ func _areas() -> void:
 		var ck := chunk_of(Geo.polygon_centroid(outer))
 		if kind == "water":
 			var l := layer(ck, "water")
-			l.polygon_up(outer, WATER_Y, 0.05, Color.WHITE, a.holes)
+			l.polygon_up(outer, WATER_Y + float(levels.get(ai, 0.0)), 0.05, Color.WHITE, a.holes)
 		else:
 			var y: float = Y.get(kind, 0.015)
 			var l2 := layer(ck, "area_" + kind)
@@ -170,7 +188,9 @@ func _areas() -> void:
 
 
 func _paths() -> void:
-	for p in data.paths:
+	var decks := TerrainBake.line_decks(terrain, data.paths) if terrain else {}
+	for pi in data.paths.size():
+		var p: Dictionary = data.paths[pi]
 		var hw: String = p.tags.get("highway", "")
 		var w := 2.0
 		var layer_name := "path"
@@ -191,7 +211,11 @@ func _paths() -> void:
 		var pts := Geo.chaikin(p.pts, 1, 2.0)
 		var ck := chunk_of(pts[pts.size() >> 1])
 		var l := layer(ck, layer_name)
+		if terrain:
+			terrain.mode_deck = decks.get(pi, [])
 		_flat_strip(l, pts, w, PATH_Y)
+	if terrain:
+		terrain.mode_deck = []
 
 
 func _flat_strip(l: MeshLayer, pts: PackedVector2Array, w: float, y: float) -> void:
@@ -204,7 +228,11 @@ func _flat_strip(l: MeshLayer, pts: PackedVector2Array, w: float, y: float) -> v
 
 
 func _rails() -> void:
-	for r in data.rails:
+	var decks := TerrainBake.line_decks(terrain, data.rails) if terrain else {}
+	for ri in data.rails.size():
+		var r: Dictionary = data.rails[ri]
+		if terrain:
+			terrain.mode_deck = decks.get(ri, [])
 		var pts := Geo.chaikin(r.pts, 2, 3.0)
 		var ck := chunk_of(pts[pts.size() >> 1])
 		var is_tram: bool = r.tags.get("railway", "") == "tram"
@@ -214,6 +242,8 @@ func _rails() -> void:
 		for off in [-0.72, 0.72]:
 			var line := Geo.offset_polyline(pts, off)
 			_flat_strip(rl, line, 0.08, 0.075 if is_tram else 0.12)
+	if terrain:
+		terrain.mode_deck = []
 
 
 # ------------------------------------------------------------------------------------------
@@ -229,7 +259,7 @@ func _add_tree(p: Vector2, scale: float) -> void:
 	if not trees.has(ck):
 		trees[ck] = []
 	var b := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * scale)
-	trees[ck].append(Transform3D(b, Vector3(p.x, 0.0, p.y)))
+	trees[ck].append(Transform3D(b, Vector3(p.x, terrain.sample(p.x, p.y) if terrain else 0.0, p.y)))
 
 
 func _trees() -> void:
@@ -262,7 +292,7 @@ func _trees() -> void:
 				placed += 1
 	# street trees along residential streets with sidewalks
 	for e in net.edges:
-		if not (e.cls in ["residential", "living_street", "tertiary", "secondary"]):
+		if not (e.cls in ["residential", "living_street", "tertiary", "secondary"]) or e.bridge:
 			continue
 		if e.sw_r <= 0.0 and e.sw_l <= 0.0:
 			continue
@@ -280,7 +310,8 @@ func _trees() -> void:
 
 
 func _lamps() -> void:
-	for e in net.edges:
+	for ei in net.edges.size():
+		var e: Dictionary = net.edges[ei]
 		if e.cls in ["motorway", "service", "track"] or e.tunnel:
 			continue
 		var spacing := 32.0 if e.cls in ["primary", "secondary", "trunk"] else 38.0
@@ -301,6 +332,7 @@ func _lamps() -> void:
 				# lamp arm points toward the road (-r*sd)
 				var toward: Vector2 = -r * sd
 				var basis := Basis.looking_at(Vector3(toward.x, 0, toward.y), Vector3.UP)
-				lamps[ck].append(Transform3D(basis, Vector3(p.x, 0.0, p.y)))
+				var ly := terrain.deck_height(ei, p) if terrain else 0.0
+				lamps[ck].append(Transform3D(basis, Vector3(p.x, ly, p.y)))
 			s += spacing
 			side = -side

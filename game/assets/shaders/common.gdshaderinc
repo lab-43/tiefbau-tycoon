@@ -36,3 +36,42 @@ bool pit_test(vec2 p, vec4 a, vec4 b) {
 bool in_pit(vec2 p) {
 	return pit_test(p, pit_a0, pit_b0) || pit_test(p, pit_a1, pit_b1) || pit_test(p, pit_a2, pit_b2) || pit_test(p, pit_a3, pit_b3);
 }
+
+// --- ground heights (#8): Terrain.activate() hands the smoothed height grid to the GPU ---
+// Flat map layers (ground, areas, roads, paths, markings) compute the exact ground surface per pixel, so the
+// layers keep their order (a few cm apart) on any slope, independent of how coarse their meshes are.
+global uniform sampler2D terrain_tex;
+global uniform vec4 terrain_rect;   // grid origin x, origin z, 1 / cell size, enabled (0/1)
+global uniform vec4 terrain_size;   // nodes x, nodes z, cell size, 0
+// height, dh/dx, dh/dz of the bilinear surface (same formula as Terrain.sample on the CPU)
+vec3 terrain_hg(vec2 p) {
+	if (terrain_rect.w < 0.5) return vec3(0.0);
+	vec2 mx = terrain_size.xy - 1.0;
+	vec2 g = clamp((p - terrain_rect.xy) * terrain_rect.z, vec2(0.0), mx);
+	vec2 i0 = min(floor(g), mx - 1.0);
+	vec2 f = g - i0;
+	ivec2 i = ivec2(i0);
+	float a = texelFetch(terrain_tex, i, 0).r;
+	float b = texelFetch(terrain_tex, i + ivec2(1, 0), 0).r;
+	float c = texelFetch(terrain_tex, i + ivec2(0, 1), 0).r;
+	float d = texelFetch(terrain_tex, i + ivec2(1, 1), 0).r;
+	return vec3(mix(mix(a, b, f.x), mix(c, d, f.x), f.y), mix(b - a, d - c, f.y) * terrain_rect.z, mix(c - a, d - b, f.x) * terrain_rect.z);
+}
+float terrain_h(vec2 p) { return terrain_hg(p).x; }
+// Depth of the surface `off` metres above the ground where the view ray through this fragment meets it
+// (Newton steps from the rasterised point). Layers more than 0.6 m above the ground (bridge decks) and
+// orthographic passes keep their own depth.
+float terrain_depth(vec3 cam, vec3 wp, float off, mat4 view, mat4 proj, float fz) {
+	if (terrain_rect.w < 0.5 || abs(off) > 0.6 || proj[3][3] > 0.5) return fz;
+	vec3 d = wp - cam;
+	float t = 1.0;
+	for (int k = 0; k < 3; k++) {
+		vec3 p = cam + d * t;
+		vec3 hg = terrain_hg(p.xz);
+		float df = d.y - hg.y * d.x - hg.z * d.z;
+		if (abs(df) < 1e-6) break;
+		t = clamp(t - (p.y - hg.x - off) / df, 0.9, 1.1);
+	}
+	vec4 c = proj * view * vec4(cam + d * t, 1.0);
+	return c.z / c.w;
+}

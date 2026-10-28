@@ -4,7 +4,7 @@ extends RefCounted
 ## The scene-tree part (creating MeshInstances) happens on the main thread in build_scene().
 
 const CHUNK := 500.0
-const BAKE_VERSION := 7   # 4: water on top of the base ground, no bank walls (#4); 5: merged junctions (#5); 6: smooth transitions (#5); 7: arc turn paths, islands (#5)
+const BAKE_VERSION := 8   # 4: water on top of the base ground, no bank walls (#4); 5: merged junctions (#5); 6: smooth transitions (#5); 7: arc turn paths, islands (#5); 8: ground heights (#8)
 const GROUND_Y := 0.0     # opaque base ground plane; flat map layers below it are invisible (test/layer_test.gd)
 
 var progress := 0.0
@@ -76,6 +76,8 @@ func bake(meta: Dictionary, osm_dir: String, pbf := "") -> Dictionary:
 	var hq := {}
 	if meta.has("hq"):
 		hq = plan_hq(data, Vector2(meta.hq.x, meta.hq.z))
+	set_step("Geländehöhen aufbereiten", _p(0.27))
+	var terrain := TerrainBake.build(meta, data, hq, func(t: String): note(t))
 	set_step("Straßennetz berechnen (%d Straßenzüge)" % data.roads.size(), _p(0.30))
 	var net := RoadNet.new()
 	net.build(data, hq)
@@ -84,21 +86,28 @@ func bake(meta: Dictionary, osm_dir: String, pbf := "") -> Dictionary:
 			if net.nodes[ni].osm_id == -900000002:
 				net.hq_node = ni
 	note("Straßennetz: %d Kreuzungen (%d aus mehreren OSM-Knoten zusammengefasst), %d Abschnitte, %d Fahrstreifen" % [net.nodes.size(), net.group_count, net.edges.size(), net.lane_geo.size()])
+	if terrain:
+		TerrainBake.add_decks(terrain, net)
 	set_step("Straßen modellieren", _p(0.55))
 	var rm := RoadMesher.new(net, CHUNK, data.bounds.position)
+	rm.terrain = terrain
 	rm.progress_cb = func(f: float): set_step("Straßen modellieren (%d %%)" % int(f * 100.0), _p(0.55 + 0.15 * f))
 	rm.build_all()
 	note("Straßen modelliert: %d Kacheln" % rm.chunks.size())
 	set_step("Gebäude und Flächen modellieren", _p(0.70))
 	var cm := CityMesher.new(data, net, CHUNK)
+	cm.terrain = terrain
 	if not hq.is_empty():
 		cm.hq_rect = hq.lot
 	cm.progress_cb = func(f: float, part: String): set_step("Stadt modellieren: %s" % part, _p(0.70 + 0.2 * f))
 	cm.build_all()
 	note("Stadt modelliert: %d Kacheln" % cm.chunks.size())
+	if terrain:
+		set_step("Boden modellieren", _p(0.88))
+		TerrainBake.ground_layers(terrain, cm.chunks, CHUNK, data.bounds.position, float(meta.size_m))
 	set_step("Fertigstellen", _p(0.90))
 	result = {"net": net, "roads": rm.chunks, "city": cm.chunks, "trees": cm.trees, "lamps": cm.lamps,
-		"bounds": data.bounds, "hq": hq, "stats": data.stats, "bus_stops": data.bus_stops}
+		"bounds": data.bounds, "hq": hq, "stats": data.stats, "bus_stops": data.bus_stops, "terrain": terrain}
 	set_step("Fertig", 1.0)
 	return result
 
@@ -153,7 +162,7 @@ static func plan_hq(data: OsmData, click: Vector2) -> Dictionary:
 
 const RANGE := {"mark": 900.0, "curb": 1300.0, "sidewalk": 2200.0, "rail": 1200.0, "path": 2200.0, "cycleway": 2200.0,
 	"bridge": 2500.0}
-const NO_SHADOW := {"asphalt": 1, "mark": 1, "sidewalk": 1, "path": 1, "cycleway": 1, "water": 1, "ballast": 1, "rail": 1,
+const NO_SHADOW := {"ground": 1, "asphalt": 1, "mark": 1, "sidewalk": 1, "path": 1, "cycleway": 1, "water": 1, "ballast": 1, "rail": 1,
 	"area_grass": 1, "area_park": 1, "area_forest": 1, "area_pitch": 1, "area_cemetery": 1, "area_farmland": 1,
 	"area_industrial": 1, "area_commercial": 1, "area_residential": 1, "area_paved": 1, "area_sand": 1, "track": 1}
 
@@ -162,6 +171,8 @@ const NO_SHADOW := {"asphalt": 1, "mark": 1, "sidewalk": 1, "path": 1, "cycleway
 static func create_city_root(res: Dictionary) -> Node3D:
 	var root := Node3D.new()
 	root.name = "City"
+	if res.get("terrain") != null:
+		return root   # the ground comes as chunk layers "ground" (TerrainBake.ground_layers)
 	var b: Rect2 = res.bounds
 	# base ground
 	var gm := PlaneMesh.new()

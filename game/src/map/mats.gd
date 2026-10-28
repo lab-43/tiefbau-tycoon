@@ -45,7 +45,7 @@ static func get_mat(name: String) -> Material:
 		"mark":
 			m = _shader("res://assets/shaders/mark.gdshader")
 		"mark_yellow":
-			m = _std(Color(0.96, 0.74, 0.05), 0.5)
+			m = _shader("res://assets/shaders/mark.gdshader", {"color": Color(0.96, 0.74, 0.05), "roughness": 0.5})
 		"building":
 			m = _shader("res://assets/shaders/building.gdshader")
 		"ground":
