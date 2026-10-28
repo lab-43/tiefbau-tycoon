@@ -20,6 +20,7 @@ var signals_view: SignalHeads
 var bounds := Rect2()
 var hq_info := {}
 var tool: Object = null          # active placement tool (receives input first)
+var marker_command: Callable     # screen markers (#7): right click on a marker -> true if handled
 
 
 func setup(ms: MapService) -> void:
@@ -131,6 +132,8 @@ func _unhandled_input(ev: InputEvent) -> void:
 func _on_right_click(screen: Vector2) -> void:
 	if tool and tool.has_method("on_right_click"):
 		tool.on_right_click(screen)
+		return
+	if marker_command.is_valid() and marker_command.call(screen):
 		return
 	var gp = camera_rig.ground_point(screen)
 	if gp == null:

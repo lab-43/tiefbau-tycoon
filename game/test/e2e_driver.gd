@@ -68,7 +68,11 @@ func shot(name: String, focus: Vector3 = Vector3.INF, dist := 0.0, yaw := -35.0,
 
 ## Camera goal + selection when a shot is queued; the picture is taken 8 frames later (e2e-shot-verzoegert).
 func _shot_state() -> Array:
-	return [world.camera_rig._t_target, world.camera_rig._t_distance, Game.selected] if world and world.camera_rig else []
+	if world == null or world.camera_rig == null:
+		return []
+	var rig := world.camera_rig
+	# while following a vehicle the goal moves every frame: compare the followed node instead
+	return [rig.follow if rig.follow else rig._t_target, rig._t_distance, Game.selected]
 
 
 func _process(delta: float) -> void:

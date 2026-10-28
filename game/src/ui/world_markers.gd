@@ -3,14 +3,16 @@ extends Control
 ## Screen markers ("HUD markers", #7) for the HQ, running sites, job offers and company vehicles.
 ## On screen a marker sits above its object once the camera is zoomed out; off screen it sticks to the
 ## edge of the free screen area with an arrow and the distance. Click = select + fly there, right
-## click = send the selected vehicle there. Vehicles parked at the HQ or at their site are counted on
-## that marker instead of stacking up. Also owns the view bar (marker groups, city buildings on/off,
-## keys H and B). Created by the HUD as its first child so all HUD panels stay on top.
-## The view settings are stored in <data>/ansicht.json.
+## click = send the selected vehicle there (via World.marker_command, so a right-drag that starts on a
+## marker still pans the map). Vehicles parked at the HQ or at their site are counted on that marker
+## instead of stacking up. Also owns the view bar (marker groups, city buildings on/off, keys H and B).
+## Created by the HUD as its first child so all HUD panels stay on top.
+## The view settings are stored in <data>/ansicht.json (not read or written in e2e runs).
 
 const ON_SCREEN_FROM := 280.0     # camera distance (m) where on-screen markers start to fade in
 const ON_SCREEN_FADE := 200.0     # ... and are fully visible this much further out
 const MERGE_PX := 30.0            # markers of the same group closer than this become one
+const GROUP_W := 80.0             # badge width used for the grouping point of edge markers
 const EDGE_PAD := 10.0            # gap between edge markers and the border of the free area
 const TOP_H := 54.0               # HUD top bar
 const RAIL_W := 56.0              # HUD left rail
@@ -45,6 +47,8 @@ func _ready() -> void:
 	add_child(_layer)
 	_build_bar()
 	apply_buildings()
+	if Game.world:
+		(Game.world as World).marker_command = command_at
 
 
 # ------------------------------------------------------------------------------------------
@@ -53,6 +57,10 @@ func _ready() -> void:
 
 static func load_view() -> void:
 	_view_loaded = true
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--e2e="):
+			persist = false       # tests and repros start with the defaults and leave no file behind
+			return
 	var path := Game.data_path(SETTINGS_FILE)
 	if not FileAccess.file_exists(path):
 		return
@@ -154,9 +162,10 @@ func _sync_bar() -> void:
 
 
 func _unhandled_key_input(ev: InputEvent) -> void:
-	if not (ev is InputEventKey) or not ev.pressed or ev.echo:
+	var k := ev as InputEventKey
+	if k == null or not k.pressed or k.echo or k.ctrl_pressed or k.alt_pressed or k.meta_pressed:
 		return
-	match (ev as InputEventKey).keycode:
+	match k.keycode:
 		KEY_B:
 			set_view("buildings", not view.buildings)
 			Events.info("Gebäude " + ("eingeblendet" if view.buildings else "ausgeblendet"))
@@ -177,10 +186,14 @@ func _process(_delta: float) -> void:
 	if w == null or w.camera_rig == null or hud == null:
 		_hide_unused()
 		return
-	bar.offset_right = -12.0 - (float(HUD.RIGHT_W) if hud.right.visible else 0.0)
-	bar.offset_left = bar.offset_right
 	var l := RAIL_W + (float(HUD.LEFT_W) if hud.left.visible else 0.0)
 	var r := size.x - (float(HUD.RIGHT_W) if hud.right.visible else 0.0)
+	# the debug menu (F3) stands right of / beside the context panel and above the HUD
+	for c in hud.get_parent().get_children():
+		if c is DebugPanel and (c as DebugPanel).panel and (c as DebugPanel).panel.visible:
+			r = minf(r, (c as DebugPanel).panel.get_global_rect().position.x - get_global_rect().position.x)
+	bar.offset_right = -12.0 - (size.x - r)
+	bar.offset_left = bar.offset_right
 	free_rect = Rect2(l, TOP_H, maxf(40.0, r - l), maxf(40.0, size.y - TOP_H - BOTTOM_H))
 	if view.markers:
 		_place(_collect(w), w)
@@ -190,7 +203,7 @@ func _process(_delta: float) -> void:
 ## Everything that gets a marker this frame, most important first.
 func _collect(w: World) -> Array:
 	var out: Array = []
-	var sel: Object = Game.selected
+	var sel: Object = Game.selected if is_instance_valid(Game.selected) else null
 	var hq_e := {}
 	var site_e := {}
 	if view.hq and not w.hq_info.is_empty():
@@ -216,8 +229,10 @@ func _collect(w: World) -> Array:
 			out.append(e2)
 	if view.vehicles:
 		for veh in w.fleet.vehicles:
+			if not is_instance_valid(veh):
+				continue
 			var v: Vehicle = veh
-			if not is_instance_valid(v) or v.carried_by != null:
+			if v.carried_by != null:
 				continue
 			if v != sel:
 				# parked at the HQ or at its spot on the site: counted there
@@ -232,12 +247,20 @@ func _collect(w: World) -> Array:
 			e3.selected = v == sel
 			e3.members.append(v)
 			out.append(e3)
-	out.sort_custom(func(a, b): return a.selected and not b.selected or (a.selected == b.selected and a.prio < b.prio))
+	for i in out.size():
+		out[i].idx = i
+	# selected first, then by group; stable within a group so group heads do not jump
+	out.sort_custom(func(a, b):
+		if a.selected != b.selected:
+			return a.selected
+		if a.prio != b.prio:
+			return a.prio < b.prio
+		return a.idx < b.idx)
 	return out
 
 
 func _entry(kind: String, obj: Object, p3: Vector3, icon_name: String, prio: int) -> Dictionary:
-	return {"kind": kind, "obj": obj, "p3": p3, "icon": icon_name, "prio": prio, "title": "", "selected": false, "members": []}
+	return {"kind": kind, "obj": obj, "p3": p3, "icon": icon_name, "prio": prio, "title": "", "selected": false, "members": [], "idx": 0}
 
 
 func _place(entries: Array, w: World) -> void:
@@ -251,7 +274,11 @@ func _place(entries: Array, w: World) -> void:
 		var p3: Vector3 = e.p3
 		var behind := cam.is_position_behind(p3)
 		var sp := Vector2.ZERO if behind else cam.unproject_position(p3)
-		var on_screen := not behind and free_rect.has_point(sp)
+		# on screen only if the whole badge (drawn above the point) fits into the free area
+		var on_text: String = e.title if (e.kind != "vehicle" or e.selected) else ""
+		var bw_on := badge_width(on_text)
+		var on_rect := free_rect.grow_individual(-bw_on * 0.5, -(BADGE_H + 10.0), -bw_on * 0.5, 0.0)
+		var on_screen := not behind and on_rect.has_point(sp)
 		var alpha := 1.0
 		if on_screen and e.kind != "offer":
 			alpha = fade
@@ -264,14 +291,15 @@ func _place(entries: Array, w: World) -> void:
 			d = Vector2(loc.x, -loc.y)
 		if d.length() < 0.001:
 			d = Vector2(0, 1)
-		# same group close together on screen: one marker with a count
-		var anchor := sp
+		var dir := d.normalized()
+		# same group close together: one marker with a count. Compared on the unshifted point, so
+		# markers pushed aside by others still collect their group.
+		var group_pt := sp if on_screen else _edge_point(dir, GROUP_W, BADGE_H)
 		var merged := false
 		if e.kind in ["vehicle", "offer"] and not e.selected:
-			var probe := sp if on_screen else _edge_point(d.normalized(), 40.0, BADGE_H)
 			for pm in placed:
 				var m: MapMarker = pm
-				if m.kind == e.kind and not m.selected and m.anchor.distance_to(probe) < MERGE_PX:
+				if m.kind == e.kind and not m.selected and m.edge == (not on_screen) and m.group_pt.distance_to(group_pt) < MERGE_PX:
 					m.members.append_array(e.members)
 					m.extra += 1
 					merged = true
@@ -287,29 +315,33 @@ func _place(entries: Array, w: World) -> void:
 		mk.members = e.members.duplicate()
 		mk.extra = 0
 		mk.edge = not on_screen
-		mk.dir = d.normalized()
+		mk.dir = dir
+		mk.group_pt = group_pt
 		mk.modulate.a = alpha
+		# barely visible markers must not catch clicks or the mouse wheel meant for the map
+		mk.mouse_filter = Control.MOUSE_FILTER_PASS if alpha >= 0.5 else Control.MOUSE_FILTER_IGNORE
 		var meters := Vector2(p3.x - tgt.x, p3.z - tgt.z).length()
 		mk.dist_text = _dist_text(meters)
 		mk.title = e.title
 		_style(mk, e)
-		if on_screen:
-			mk.text = mk.title if (e.kind != "vehicle" or e.selected) else ""
-		else:
-			mk.text = mk.dist_text
-		var bw := mk.badge_width()
+		mk.text = on_text if on_screen else mk.dist_text
+		var bw := badge_width(mk.text)
+		var anchor := sp
 		if not on_screen:
-			anchor = _edge_point(mk.dir, bw, BADGE_H)
-			anchor = _avoid_edge_overlap(anchor, bw, placed)
+			anchor = _avoid_edge_overlap(_edge_point(dir, bw, BADGE_H), bw, placed)
 		else:
-			anchor = _avoid_stack_overlap(anchor, bw, placed)
+			anchor = _avoid_stack_overlap(sp, bw, placed)
 		mk.anchor = anchor
 		mk.layout(bw)
 		placed.append(mk)
 	for pm in placed:
-		var m2: MapMarker = pm
-		m2.update_tip()
-		m2.queue_redraw()
+		(pm as MapMarker).queue_redraw()
+
+
+static func badge_width(t: String) -> float:
+	if t == "":
+		return BADGE_H
+	return BADGE_H + UI.font(600).get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 9.0
 
 
 ## Point on the border of the free area (inset by half a badge) in direction dir from its centre.
@@ -427,47 +459,70 @@ func _vehicle_icon(v: Vehicle) -> String:
 	return "truck"
 
 
-## Marker input: left = select / fly there, right = send the selected vehicle there.
-func on_marker_input(m: MapMarker, ev: InputEventMouseButton) -> void:
+## The clickable marker under a screen point (topmost first), or null.
+func marker_at(screen: Vector2) -> MapMarker:
+	for i in range(used - 1, -1, -1):
+		var m: MapMarker = markers[i]
+		if m.visible and m.mouse_filter != Control.MOUSE_FILTER_IGNORE and m.get_global_rect().has_point(screen):
+			return m
+	return null
+
+
+## Left click on a marker: select it and fly there.
+func on_marker_click(m: MapMarker) -> void:
 	var w := Game.world as World
 	if w == null:
 		return
 	var rig := w.camera_rig
-	if ev.button_index == MOUSE_BUTTON_LEFT:
-		var far := clampf(rig.distance * 0.5, 70.0, 320.0)
-		match m.kind:
-			"hq":
-				Events.request_focus.emit(m.focus, minf(rig.distance, 220.0))
-			"site":
+	match m.kind:
+		"hq":
+			Events.request_focus.emit(m.focus, minf(rig.distance, 220.0))
+		"site":
+			if is_instance_valid(m.obj):
 				Game.select(m.obj)
 				Events.request_focus.emit((m.obj as Site).center3(), minf(rig.distance, 160.0))
-			"offer":
-				if hud and hud.left_mode != "jobs":
-					hud.open_left("jobs")
-				Events.request_focus.emit(m.focus, minf(rig.distance, 260.0))
-			"vehicle":
-				if m.members.size() > 1:
-					# a group: fly there and zoom in so the group splits up
-					var sum := Vector3.ZERO
-					for mv in m.members:
-						sum += (mv as Vehicle).global_position
-					Events.request_focus.emit(sum / m.members.size(), maxf(60.0, rig.distance * 0.35))
-				elif is_instance_valid(m.obj):
-					Game.select(m.obj)
-					Events.request_focus.emit((m.obj as Vehicle).global_position, far)
-	elif ev.button_index == MOUSE_BUTTON_RIGHT:
-		if not (Game.selected is Vehicle) or not is_instance_valid(Game.selected):
-			Events.info("Erst ein Fahrzeug wählen, dann mit Rechtsklick auf die Markierung hinschicken")
-			return
-		var sel := Game.selected as Vehicle
-		match m.kind:
-			"hq":
-				sel.command_at(m.focus, null)
-			"site":
+		"offer":
+			if hud and hud.left_mode != "jobs":
+				hud.open_left("jobs")
+			Events.request_focus.emit(m.focus, minf(rig.distance, 260.0))
+		"vehicle":
+			if m.members.size() > 1:
+				# a group: fly there and zoom in so the group splits up
+				var sum := Vector3.ZERO
+				for mv in m.members:
+					sum += (mv as Vehicle).global_position
+				Events.request_focus.emit(sum / m.members.size(), maxf(60.0, rig.distance * 0.35))
+			elif is_instance_valid(m.obj):
+				Game.select(m.obj)
+				Events.request_focus.emit((m.obj as Vehicle).global_position, clampf(rig.distance * 0.5, 70.0, 320.0))
+
+
+## World.marker_command: a right click (short, not a drag) on a marker sends the selected vehicle
+## there. Returns false when there is no marker under the point, then the normal command runs.
+func command_at(screen: Vector2) -> bool:
+	if not view.markers:
+		return false
+	var m := marker_at(screen)
+	if m == null:
+		return false
+	if not is_instance_valid(Game.selected) or not (Game.selected is Vehicle):
+		Events.info("Erst ein Fahrzeug wählen, dann mit Rechtsklick auf die Markierung hinschicken")
+		return true
+	var sel := Game.selected as Vehicle
+	match m.kind:
+		"hq":
+			sel.command_at(m.focus, null)
+		"site":
+			if is_instance_valid(m.obj):
 				sel.command_at((m.obj as Site).center3(), m.obj)
-			"vehicle":
-				if m.members.size() == 1 and m.obj != sel and is_instance_valid(m.obj):
-					sel.command_at((m.obj as Vehicle).global_position, m.obj)
+		"offer":
+			Events.info("Ausschreibung erst annehmen, dann Fahrzeuge zur Baustelle schicken")
+		"vehicle":
+			if m.members.size() > 1:
+				Events.info("Mehrere Fahrzeuge an dieser Stelle – erst hineinzoomen")
+			elif m.obj != sel and is_instance_valid(m.obj):
+				sel.command_at((m.obj as Vehicle).global_position, m.obj)
+	return true
 
 
 ## One marker on screen. Draws itself; the parent WorldMarkers fills it every frame.
@@ -485,14 +540,16 @@ class MapMarker extends Control:
 	var selected := false
 	var edge := false
 	var dir := Vector2.DOWN
-	var anchor := Vector2.ZERO
+	var anchor := Vector2.ZERO    # where the marker sits (after pushing it aside)
+	var group_pt := Vector2.ZERO  # unshifted point used for grouping
 	var bg := UI.BG_SOLID
 	var fg := UI.TEXT
 	var _hover := false
 	var _sb := StyleBoxFlat.new()
 
 	func _ready() -> void:
-		mouse_filter = Control.MOUSE_FILTER_STOP
+		# PASS: only the left click is taken; wheel, right and middle button reach the camera
+		mouse_filter = Control.MOUSE_FILTER_PASS
 		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		_sb.set_corner_radius_all(4)
 		_sb.anti_aliasing = true
@@ -510,14 +567,6 @@ class MapMarker extends Control:
 		if kind == "offer":
 			return extra + 1 if extra > 0 else 0
 		return members.size() if members.size() > 1 else 0
-
-	func badge_width() -> float:
-		var t := text
-		if kind == "vehicle" and _hover and not edge and t == "" and members.size() == 1:
-			t = (members[0] as Vehicle).vname
-		if t == "":
-			return WorldMarkers.BADGE_H
-		return WorldMarkers.BADGE_H + UI.font(600).get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x + 9.0
 
 	func layout(bw: float) -> void:
 		size = Vector2(bw, WorldMarkers.BADGE_H)
@@ -547,13 +596,10 @@ class MapMarker extends Control:
 		_sb.draw(get_canvas_item(), r)
 		if icon_tex:
 			draw_texture_rect(icon_tex, Rect2(6, 6, 18, 18), false, fg)
-		var t2 := text
-		if kind == "vehicle" and _hover and not edge and t2 == "" and members.size() == 1:
-			t2 = (members[0] as Vehicle).vname
-		if t2 != "":
+		if text != "":
 			var f := UI.font(600)
 			var y := (size.y + f.get_ascent(12) - f.get_descent(12)) * 0.5
-			draw_string(f, Vector2(WorldMarkers.BADGE_H - 1.0, y), t2, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, fg)
+			draw_string(f, Vector2(WorldMarkers.BADGE_H - 1.0, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, fg)
 		var n := count()
 		if n > 0:
 			var bc := Vector2(size.x - 2.0, 1.0)
@@ -564,49 +610,57 @@ class MapMarker extends Control:
 			draw_circle(bc, rad, UI.BG_SOLID if kind == "site" else UI.ACCENT)
 			draw_string(f2, Vector2(bc.x - nw * 0.5, bc.y + 3.5), ns, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, UI.TEXT if kind == "site" else Color(0.04, 0.04, 0.04))
 
-	func update_tip() -> void:
+	## Tooltip text, built only when it is shown.
+	func _get_tooltip(_at: Vector2) -> String:
 		var lines: Array = []
+		var far := ("  ·  " + dist_text) if edge else ""
 		match kind:
 			"hq":
-				lines.append("Zentrale" + ("  ·  " + dist_text if edge else ""))
+				lines.append("Zentrale" + far)
 				if not members.is_empty():
 					lines.append("%d Fahrzeug%s hier: %s" % [members.size(), "" if members.size() == 1 else "e", _names()])
 				lines.append("Klick: hinfliegen · Rechtsklick: gewähltes Fahrzeug heimschicken")
 			"site":
-				var s: Site = obj
-				if is_instance_valid(s):
-					lines.append("Baustelle %s · %s" % [s.job.short_title(), s.job.location()] + ("  ·  " + dist_text if edge else ""))
+				if is_instance_valid(obj):
+					var s: Site = obj
+					lines.append("Baustelle %s · %s%s" % [s.job.short_title(), s.job.location(), far])
 					lines.append("%d/%d %s: %s" % [s.phase + 1, Site.STEPS.size(), Site.STEPS[mini(s.phase, Site.STEPS.size() - 1)].title, s.status])
 				if not members.is_empty():
 					lines.append("Vor Ort: " + _names())
 				lines.append("Klick: öffnen · Rechtsklick: gewähltes Fahrzeug hinschicken")
 			"offer":
-				var j: Job = obj
-				lines.append("Ausschreibung: %s · %s" % [j.title(), j.location()] + ("  ·  " + dist_text if edge else ""))
+				if obj:
+					var j: Job = obj
+					lines.append("Ausschreibung: %s · %s%s" % [j.title(), j.location(), far])
 				lines.append(title + (" (+%d weitere in der Nähe)" % extra if extra > 0 else ""))
 				lines.append("Klick: zeigen")
 			_:
 				if members.size() > 1:
-					lines.append("%d Fahrzeuge%s" % [members.size(), "  ·  " + dist_text if edge else ""])
+					lines.append("%d Fahrzeuge%s" % [members.size(), far])
 					for mv in members:
-						lines.append("%s · %s" % [(mv as Vehicle).vname, (mv as Vehicle).status_text])
-					lines.append("Klick: hinfliegen")
-				elif members.size() == 1:
+						if is_instance_valid(mv):
+							lines.append("%s · %s" % [(mv as Vehicle).vname, (mv as Vehicle).status_text])
+					lines.append("Klick: hinfliegen und hineinzoomen")
+				elif members.size() == 1 and is_instance_valid(members[0]):
 					var v: Vehicle = members[0]
-					lines.append(v.vname + ("  ·  " + dist_text if edge else ""))
+					lines.append(v.vname + far)
 					lines.append(v.status_text)
 					lines.append("Klick: auswählen · Rechtsklick: gewähltes Fahrzeug hinschicken (z. B. auf Tieflader)")
-		var tip := "\n".join(lines)
-		if tip != tooltip_text:
-			tooltip_text = tip
+		return "\n".join(lines)
 
 	func _names() -> String:
 		var parts: Array = []
 		for mv in members:
-			parts.append((mv as Vehicle).vname)
+			if is_instance_valid(mv):
+				parts.append((mv as Vehicle).vname)
 		return ", ".join(parts)
 
 	func _gui_input(ev: InputEvent) -> void:
-		if ev is InputEventMouseButton and ev.pressed and ev.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT]:
-			accept_event()
-			wm.on_marker_input(self, ev as InputEventMouseButton)
+		var mb := ev as InputEventMouseButton
+		if mb == null or not mb.pressed or mb.button_index != MOUSE_BUTTON_LEFT:
+			return
+		# a world tool (e.g. "place contract" in the debug menu) gets the click on the map
+		if Game.world and (Game.world as World).tool != null:
+			return
+		accept_event()
+		wm.on_marker_click(self)

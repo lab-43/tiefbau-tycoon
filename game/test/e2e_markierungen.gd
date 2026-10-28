@@ -37,12 +37,31 @@ func find(wm: WorldMarkers, kind: String, obj: Object = null):
 	return null
 
 
-func click(m, button: MouseButton) -> void:
+## Real input through the viewport (GUI routing, camera, World), not a direct _gui_input call.
+func send_button(pos: Vector2, button: MouseButton, pressed: bool) -> void:
 	var ev := InputEventMouseButton.new()
 	ev.button_index = button
-	ev.pressed = true
-	ev.position = m.size * 0.5
-	m._gui_input(ev)
+	ev.pressed = pressed
+	ev.position = pos
+	ev.global_position = pos
+	if button in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
+		ev.factor = 1.0
+	d.get_viewport().push_input(ev, true)
+
+
+func send_motion(pos: Vector2, rel: Vector2, mask: int) -> void:
+	var ev := InputEventMouseMotion.new()
+	ev.position = pos
+	ev.global_position = pos
+	ev.relative = rel
+	ev.button_mask = mask
+	d.get_viewport().push_input(ev, true)
+
+
+func click(m, button: MouseButton) -> void:
+	var p: Vector2 = m.get_global_rect().get_center()
+	send_button(p, button, true)
+	send_button(p, button, false)
 
 
 func tick(_delta: float) -> void:
@@ -109,6 +128,10 @@ func tick(_delta: float) -> void:
 			var hq = find(wm, "hq")
 			check(hq != null, "Randmarkierung noch da")
 			if hq:
+				# wheel over a marker still zooms (markers only take the left click)
+				var dist0: float = w.camera_rig._t_distance
+				send_button(hq.get_global_rect().get_center(), MOUSE_BUTTON_WHEEL_UP, true)
+				check(w.camera_rig._t_distance < dist0 - 1.0, "Mausrad über einer Markierung zoomt (%.0f -> %.0f m)" % [dist0, w.camera_rig._t_distance])
 				click(hq, MOUSE_BUTTON_LEFT)
 				check(Vector2(w.camera_rig._t_target.x, w.camera_rig._t_target.z).distance_to(Vector2(lc.x, lc.z)) < 1.0, "Klick fliegt zur Zentrale")
 			# a site and a selected vehicle get their own markers
@@ -131,9 +154,38 @@ func tick(_delta: float) -> void:
 			step = 6
 		6:
 			var sm2 = find(wm, "site", site)
+			check(sm2 != null, "Baustelle noch markiert")
 			if sm2:
-				click(sm2, MOUSE_BUTTON_RIGHT)
-				check(van.site == site, "Rechtsklick schickt %s zur Baustelle" % van.vname)
+				var p: Vector2 = sm2.get_global_rect().get_center()
+				# right drag that starts on a marker pans the map and sends nobody
+				var t0: Vector3 = w.camera_rig._t_target
+				send_button(p, MOUSE_BUTTON_RIGHT, true)
+				for k in 5:
+					send_motion(p + Vector2(30.0 * (k + 1), 0), Vector2(30, 0), MOUSE_BUTTON_MASK_RIGHT)
+				send_button(p + Vector2(150, 0), MOUSE_BUTTON_RIGHT, false)
+				check(w.camera_rig._t_target.distance_to(t0) > 5.0, "Rechts ziehen auf einer Markierung verschiebt die Karte")
+				check(van.site == null, "… und schickt kein Fahrzeug los")
+				# a short right click on the site marker sends the selected van
+				w.camera_rig.set_view(t0, w.camera_rig._t_distance, rad_to_deg(w.camera_rig._t_yaw), rad_to_deg(w.camera_rig._t_pitch))
+				step = 61
+				return
+			step = 62
+		61:
+			var sm3 = find(wm, "site", site)
+			if sm3:
+				click(sm3, MOUSE_BUTTON_RIGHT)
+				check(van.site == site, "Rechtsklick auf die Markierung schickt %s zur Baustelle" % van.vname)
+			# a world tool (debug: place contract) gets the left click, the marker does not
+			var sm4 = find(wm, "site", site)
+			if sm4:
+				Game.select(null)
+				w.tool = RefCounted.new()
+				var tgt0: Vector3 = w.camera_rig._t_target
+				click(sm4, MOUSE_BUTTON_LEFT)
+				check(Game.selected != site and w.camera_rig._t_target.distance_to(tgt0) < 0.01, "Mit aktivem Werkzeug nimmt die Markierung keinen Klick")
+				w.tool = null
+			step = 62
+		62:
 			Game.select(null)
 			_wait(0.3)
 			step = 7
