@@ -22,7 +22,8 @@ Der PC-Ordner ist ein Git-Klon (Branch main). Dort wird **nicht** entwickelt und
 2. Bis 10 MB direkt: `device_commit_files` mit `stagedPath` und `devicePath`. Bis 50 Dateien und 100 MB pro Aufruf.
 3. Größer: `split -b 10M -d -a 2 datei datei.part` und die Teile nach `build/_transfer/` übertragen, dann auf dem PC `cat datei.part?? > ziel`. Eine einzelne Datei über ~25 MB mit `stagedPath` scheiterte mit HTTP 400 (Lektion pc-grosse-dateien).
 4. Prüfen: `sha256sum` im Container (mit relativen Namen, Lektion pruefsummen-relativ) und auf dem PC vergleichen. Danach `build/_transfer/` löschen.
-   - PNG-Bilder kommen auf dem PC mit einem zusätzlichen `caBX`-Block (Herkunftsnachweis, ~6 KB) an. Ihre Prüfsummen weichen deshalb ab, die Bilder sind trotzdem in Ordnung. pck- und andere Dateien kommen unverändert an (beobachtet bei #7).
+   - PNG-Bilder kommen auf dem PC mit einem zusätzlichen `caBX`-Block (Herkunftsnachweis, ~6 KB) an, JPEG-Bilder mit einem APP11-Segment (C2PA, ~6 KB). Ihre Prüfsummen weichen deshalb ab, die Bilder sind trotzdem in Ordnung. Bilddaten ohne diesen Block vergleichen (Lektion pc-bilder-herkunft). pck- und andere Dateien kommen unverändert an (beobachtet bei #7 und #24).
+   - Hilfsdateien der Geräte-Shell nach `/tmp/…` schreiben, nie in den verbundenen Ordner, dort lassen sie sich nicht löschen (Lektion pc-tempdateien).
 5. Vorhandene Dateien ersetzen: Schreiben geht, Löschen nicht ohne `device_request_delete_permission`. Den Ordner `Tiefbau Tycoon` einmal pro Session anfragen, wenn aufgeräumt werden muss.
 6. Läuft das Spiel gerade, sperrt Windows `BaustellenManager.pck`. In diesem Fall Jonathan bitten, es zu schließen, oder die Testversion in einen neuen Ordner legen.
 
