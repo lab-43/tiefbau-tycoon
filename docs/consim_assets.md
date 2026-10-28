@@ -23,7 +23,7 @@ Files: `game/assets/consim/<id>/<id>.glb` + `<id>.json` (metadata: dimensions, t
 | `excavator_a918` | Liebherr A 918 Compact litronic wheeled excavator | 33,603 | 3.9 MB | 6.9 x 3.1 x 4.2 m; limits: boom [-105.0, 0.0], boom2 [-10.0, 75.0], stick [-30.0, 50.0], bucket [-90.0, 75.0], blade [-36.5, 0.0]; 4 wheels r=0.55 | Rest pose = lower boom fully raised (game prefab pose). Hydraulic hoses are runtime splines in the game -> not included. Cylinders must be aimed at runtime (look_at data in JSON). Bucket linkage (bucket_link_a/b) is static unless the 4-bar is solved. |
 | `truck_tipper` | MAN TGS 6x4 with Meiller P330 rear tipper body | 45,645 | 7.6 MB | 8.4 x 2.9 x 3.3 m; limits: tipper_body [0.0, 47.0], tailgate [-60, 10]; 6 wheels r=0.55 | Telescopic tipping cylinder: aim hyd_tipper_a at hyd_tipper_b and slide the 3 stages yourself. Tailgate hangs freely in the game (limits are a suggestion). |
 | `tractor_tgx` | MAN TGX 4x2 semi-tractor | 28,515 | 4.7 MB | 6.3 x 3.0 x 3.9 m; 4 wheels r=0.54 | Beacons are the game's generic rotating-beacon prefab grafted onto the RotatingLight anchors. fifth_wheel is ~7 cm below trailer kingpin height (suspension). |
-| `tractor_tgx_heavy` | MAN TGX 8x4 heavy-haulage tractor | 37,753 | 4.7 MB | 7.8 x 3.0 x 3.9 m; 8 wheels r=0.54 | Same as tractor_tgx; 8x4 heavy-haulage version. |
+| `tractor_tgx_heavy` | MAN TGX 8x4 heavy-haulage tractor | 37,753 | 4.7 MB | 7.8 x 3.0 x 3.9 m; 8 wheels r=0.54 | Same as tractor_tgx; 8x4 heavy-haulage version. Rebuilt in #24 without the stray marker from the UI node IndicatorTarget (tractor_tgx still has it as `indicator_sr`). |
 | `trailer_lowbed` | Heavy-duty 8-axle lowbed semi-trailer with pendulum axles and rear loading ramp | 16,894 | 2.4 MB | 20.3 x 3.9 x 2.8 m; limits: ramp [0.0, 20.0]; 16 wheels r=0.41 | Ramp is one piece with two tracks (no separate ramp_left/right in the source). Pendulum-axle swing arms kept but not articulated. |
 | `cold_planer_bm2000` | Bomag BM 2000/75 cold milling machine | 34,343 | 3.4 MB | 15.4 x 2.8 x 5.0 m; limits: conveyor [-60.0, 60.0], track_fl [-35, 35], track_fr [-35, 35]; 8 wheels r=0.18 | Track chains are part of the static track-unit meshes (rollers can spin). Conveyor inclination is fixed (no pitch joint in the source). No head/tail lamps on the machine (work lights + beacon only). |
 | `roller_bw141` | Bomag BW 141 AD-5 articulated tandem asphalt roller | 30,036 | 4.0 MB | 4.4 x 2.1 x 3.2 m; limits: rear_body [-17.5, 17.5]; 2 wheels r=0.55 | Source has brake/reverse/indicator lamps but no separate tail lamps. |
@@ -44,7 +44,7 @@ Files: `game/assets/consim/<id>/<id>.glb` + `<id>.json` (metadata: dimensions, t
 | `car_police_eu` | Traffic car - EU police car | 17,808 | 1.6 MB | 4.9 x 2.1 x 1.7 m; 4 wheels r=0.35 | Prefab has no light anchors: light markers estimated from the bounding box. Blue roof lights = beacon_blue_l/r. Lamp glass not split in the asset; same body as car_hatchback, so the game takes the hatchback's glass split at load time (`LampSplit.donor`). Excluded from the Windows data pack (export_presets.cfg). |
 | `van_big` | Large van (Sprinter class) | 12,977 | 1.1 MB | 6.9 x 2.4 x 2.7 m; 4 wheels r=0.39 |  |
 | `truck_traffic_cabover` | Traffic rigid truck, European cab-over box truck | 17,839 | 1.6 MB | 7.7 x 2.8 x 3.1 m; 4 wheels r=0.44 |  |
-| `truck_traffic_scania` | Scania G500 6x2 semi-tractor, usable as traffic truck or tractor | 28,298 | 2.4 MB | 6.5 x 3.0 x 3.5 m; 6 wheels r=0.55 | Player tractor from the game, usable as traffic truck (has fifth_wheel). Lamp glass is one material (G500_Exterior_Lights_M); the game splits it at the light markers at load time (`LampSplit.markers`). |
+| `truck_traffic_scania` | Scania G500 6x2 semi-tractor, usable as traffic truck or tractor | 28,298 | 2.4 MB | 6.5 x 3.0 x 3.5 m; 6 wheels r=0.55 | Player tractor from the game, usable as traffic truck (has fifth_wheel). Lamp glass is one material (G500_Exterior_Lights_M); the game splits it at the light markers at load time (`LampSplit.markers`). Still has a stray marker `indicator_sr3` (UI node IndicatorTarget) from before #24; rebuild with the current tool to drop it. |
 | `bus_citaro` | Mercedes-Benz Citaro C2 city bus in HVV red. **Not from Construction Simulator:** Sketchfab "Mercedes+CITARO+II+RATP" by moussasy.sy715 (CC BY 4.0), converted by `tools/models/citaro_import.py` from `private/mercedescitaroiiratp.zip` | 74,336 | 6.5 MB | 12.2 x 3.1 x 2.9 m; axles at z = -3.0 / +3.0, wheels r=0.44 | One flattened mesh, no wheel nodes. Lamp glass split by the import script; destination display "6 U Hauptbahnhof", plate HH-HB 389. |
 
 ## P1 - props
@@ -61,6 +61,15 @@ Files: `game/assets/consim/<id>/<id>.glb` + `<id>.json` (metadata: dimensions, t
 | `trafficlight_eu_head_straight` | EU car signal head, 3 lamps, straight | 1,740 | 0.9 MB | 0.5 x 0.3 x 1.0 m |  |
 | `trafficlight_eu_head_left` | EU car signal head with left-arrow lenses | 1,740 | 0.9 MB | 0.5 x 0.3 x 1.0 m |  |
 | `street_lamp` | EU double-arm street lamp | 1,616 | 0.7 MB | 7.8 x 0.4 x 11.0 m | Taken from the game's "StreetLamp_Double" cargo prefab (stored lying down) and stood upright; lamp-head markers derived from geometry. |
+
+## P1 - machines added in #24
+
+| id | source | tris | size | joints / notes | known issues |
+|---|---|---:|---:|---|---|
+| `excavator_r938` | Liebherr R 938 crawler excavator, mono boom | 31,319 | 4.3 MB | 7.5 x 3.4 x 8.8 m; limits: boom [-110.0, 0.0], stick [0.0, 110.0], bucket [-50.0, 110.0]; crawler, 32 links per track | Crawler: the chains are generated from the game's runtime track system (link mesh "Track" placed along the CurvySpline through the tread control points) and are static, no track animation; idlers/sprockets (`track_*_idler/sprocket`) can spin. No wheel nodes. Bucket joint limits [-50, 110] (game prefab): the game drives this bucket by world attitude (`bucket_world_zero_deg`). Hydraulic hoses are runtime splines -> not included. |
+| `trailer_nooteboom` | Nooteboom MCOS-58-04 semi-low-loader, 4 axles, one-piece hydraulic rear ramp | 18,870 | 2.9 MB | 13.5 x 2.8 x 3.7 m; limits: ramp [0.0, 120.0]; 8 wheels r=0.40; deck y=0.92 m, ramp end z=6.5 m | MCOS-58-04 (4 axles, ~42 t payload) instead of the MCOS-48-03 (~36.5 t, too little for the R 938; the builder `_nooteboom()` handles both). Prefab settle pitch removed (axles level). One-piece ramp (two tracks) opens 107.5 deg to the ground. Kingpin 1.08 m, i.e. ~10 cm below tractor_tgx_heavy's fifth wheel: the game pitches the trailer (`Vehicle._update_trailer`). |
+| `truck_tipper_crane` | MAN TGS 6x4 with Meiller D316 three-way tipper body and Palfinger PK 27002 loading crane behind the cab | 59,126 | 9.3 MB | 8.3 x 2.9 x 3.7 m; limits: tipper_body [0.0, 50.0], tailgate [-60, 10], crane_boom [0.0, 130.0], crane_jib [0.0, 177.0]; 6 wheels r=0.54 | Only rear tipping is rigged (side boards side_l/side_r static). Crane cylinders and support legs static, crane folded in transport position. Payload is low with the crane (game: 6 m3). |
+| `loader_s550` | Bobcat S550 skid-steer loader | 23,457 | 2.9 MB | 3.4 x 1.7 x 2.2 m; limits: loader_arm [0.0, 72.0], loader_bucket [-150.0, 0.0]; 4 wheels r=0.39 | Rest pose: arm down, bucket fully rolled back (limit 0). No head-light anchors in the prefab; head lamps come from the light-mask glass split. bucket_tip = the game's CuttingBladeTransform. |
 
 ## P2
 
@@ -84,6 +93,6 @@ Files: `game/assets/consim/<id>/<id>.glb` + `<id>.json` (metadata: dimensions, t
 
 ## Coupling
 
-`tractor_tgx`, `tractor_tgx_heavy`, `truck_traffic_scania` have an empty `fifth_wheel`; `trailer_lowbed` has `kingpin`. Place the trailer so kingpin == fifth_wheel (kingpin is ~7 cm higher than the tractors' fifth wheel at rest; lower the trailer front or accept the gap).
+`tractor_tgx`, `tractor_tgx_heavy`, `truck_traffic_scania` have an empty `fifth_wheel`; `trailer_lowbed` has `kingpin`. Place the trailer so kingpin == fifth_wheel (kingpin is ~7 cm higher than the tractors' fifth wheel at rest; lower the trailer front or accept the gap). `trailer_nooteboom` (#24) has `kingpin` ~10 cm lower than `tractor_tgx_heavy`'s fifth wheel; it also has `deck_spot`, `deck_end` and `ramp_end` markers and the same positions in the JSON block `deck` (y, spot_z, end_z, ramp_end_z), plus `ramp_open_deg`. The game pitches every trailer about its axle centre so that the kingpin rests on the fifth wheel.
 
-Total assets: 41 (40 from Construction Simulator + bus_citaro).
+Total assets: 45 (44 from Construction Simulator + bus_citaro).
