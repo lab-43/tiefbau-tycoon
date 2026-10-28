@@ -27,6 +27,9 @@ Autoloads (`project.godot`):
 - **Lesen:** `PbfReader` (3 Durchläufe) oder `OsmParser.parse_dir` (Overpass-JSON) → `OsmData`, schon projiziert (`Geo`) und klassifiziert.
 - **Aufbereiten** (`MapBuilder`, Worker-Thread):
   - `RoadNet` (Graph, Querschnitte, Kreuzungsflächen, Spuren, Abbiegebeziehungen, Konflikte, Ampeln/Vorfahrt),
+    - `JunctionMerge` fasst die OSM-Knoten einer echten Kreuzung zu einem Knoten zusammen (`group`, `reach`), Fläche als Vereinigung (`_group_polygon`),
+    - Knoten mit nur zwei Straßen sind Übergänge (`cont`): abgerundet, Breite und Gehweg laufen aus (`_continuation_geometry`),
+    - Prüfstand für alles hier: `tools/kreuzungen.sh` (Skill tycoon-dev),
   - `RoadMesher` (Fahrbahn, Gehweg, Bordstein, Markierung),
   - `CityMesher` (Gebäude, Flächen, Wasser, Bäume, Laternen),
   - je Chunk ein `MeshLayer` pro Material aus `Mats`.

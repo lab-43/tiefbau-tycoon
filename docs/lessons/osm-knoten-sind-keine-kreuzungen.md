@@ -12,7 +12,9 @@ pruefung: manuell: tools/kreuzungen.sh vorher/nachher vergleichen (--compare), S
 **Regel:**
 - Knoten, zwischen denen nach dem Ausschneiden der Kreuzungsecken kein echtes Straßenstück übrig bleibt, gehören zu einer Kreuzung (`JunctionMerge`, Kreisverkehre ausgenommen, höchstens 70 m Ausdehnung).
 - Welche Ausfahrt von welcher Einfahrt erreichbar ist, folgt den entfernten inneren Stücken in Fahrtrichtung. Nicht alles mit allem verbinden.
-- Die Fläche einer zusammengefassten Kreuzung entsteht als Vereinigung (Sternpolygon, Eckkeile, innere Stücke, Straßenstummel, Abbiegewege mit 1,3 m Breite), dann 1 m schließen. Gehwege werden gegen diese Fläche geschnitten.
+- Die Fläche einer zusammengefassten Kreuzung entsteht als Vereinigung (Sternpolygon, Eckkeile, innere Stücke, Straßenstummel, Abbiegewege mit 1,3 m Breite), dann 2 m schließen (`CLOSE_R`). Gehwege werden gegen diese Fläche geschnitten.
 - Auf der Außenseite einer Biegung treffen sich die Bordsteine in einem Punkt hinter dem Rückschnitt (`_outer_corner`). Eine gerade Linie zwischen den Rückschnitten schneidet in die Fahrbahn, und der Eckgehweg liegt dann auf der Fahrspur.
+- Knoten mit nur zwei Straßen sind keine Kreuzung, sondern ein Übergang (Spurzahl, Gehweg, Name wechseln). Dort keine Kreuzungsfläche bauen, sondern abrunden und die Breite auslaufen lassen (`_continuation_geometry`). Sonst entstehen Stufen und Kerben (Etappe 2, 28.10.).
+- Teile, die aneinanderstoßen, aus derselben Geometrie berechnen. Die Ecken der Kreuzungsfläche kamen aus einer Geraden in Richtung der ersten 6 m, die Straßenfläche aus der echten Mittellinie. An gekrümmten Zufahrten ergab das Stufen und Risse. Jetzt nimmt die Fläche Punkt und Richtung der Mittellinie an der Schnittkante (`inf.q`, `inf.qd`).
 - Jede Änderung an `road_net.gd`, `road_mesher.gd` oder `junction_merge.gd` mit dem Prüfstand vergleichen.
 - Asphalt unter einem Gehweg sieht man nicht. Entscheidend ist `ueber_gehweg_m` (Fahrweg über erhöhtem Gehweg), dazu die Fehlerbilder.
