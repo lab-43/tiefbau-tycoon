@@ -144,8 +144,15 @@ func tick(_delta: float) -> void:
 			ok(not Game.save_data().is_empty(), "Spielstand speicherbar")
 			var c := site.center3()
 			drv.shot("absp_03_aufgebaut", c + Geo.v3(lay2.lane_dir(lay2.s_t0)) * -12.0, 48.0, -50.0, 42.0)
-			drv.shot("absp_04_von_oben", c + Geo.v3(lay2.lane_dir(lay2.s_t0)) * -10.0, 70.0, rad_to_deg(SiteLayout.yaw_of(lay2.lane_dir(lay2.s_t0))) + 90.0, 75.0)
 			t_mark = drv.t
+			step = 41
+		41:
+			# one picture per step: shot() takes the picture 8 frames later
+			if not drv.shot_queue.is_empty():
+				return
+			var lay4 := site.lay
+			drv.shot("absp_04_von_oben", site.center3() + Geo.v3(lay4.lane_dir(lay4.s_t0)) * -10.0, 70.0,
+				rad_to_deg(SiteLayout.yaw_of(lay4.lane_dir(lay4.s_t0))) + 90.0, 75.0)
 			step = 5
 		5:
 			if not drv.shot_queue.is_empty():

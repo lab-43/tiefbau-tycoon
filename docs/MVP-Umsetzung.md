@@ -213,3 +213,20 @@ Fahrzeuge (Kolonnenbus, Pritsche, Kipper, Sattelzug mit Tieflader, Mobilbagger):
   - Klick: hinfliegen und auswählen (Ausschreibung: Auftragsliste öffnen). Rechtsklick mit gewähltem Fahrzeug: dorthin schicken (Baustelle, Zentrale, Tieflader).
 - **Leiste unten rechts:** Markierungen an/aus (H), Fahrzeuge, Baustellen, Ausschreibungen, Zentrale, Gebäude an/aus (B). Gebäude aus blendet die Ebene `building` aller Kartenkacheln aus; die Halle der Zentrale bleibt. Die Einstellung steht in `<Daten>/ansicht.json`.
 - Test: `tools/test.sh markierungen` (Zentrale mit gezählten Fahrzeugen, Randmarkierung mit Pfeil und Entfernung, Klick fliegt hin, Rechtsklick schickt den Kolonnenbus, Gebäude und Markierungen an/aus).
+
+## Absperrung selbst planen (Meldung #9)
+- **Öffnen:** Im Schritt „Absperrung aufbauen“ zeigt das Baustellenfenster „Absperrung planen“ (danach „Plan ändern“). „Standard-Absperrung aufbauen“ baut wie bisher das feste Schema.
+- **Planungsmodus:** Kamera senkrecht von oben (orthografisch), Straße liegt waagerecht, Verkehr des gesperrten Streifens fährt von links nach rechts. Das Spiel ist pausiert, das Licht steht auf Mittag, Bäume sind ausgeblendet. Alles kommt beim Schließen zurück.
+- **Bauteile:** Leitbake, Leitkegel, Absperrschranke, Absperrgitter, gelbe Markierung, Z 123, Z 208, Z 308, Z 274 (Tasten 1–9).
+- **Werkzeuge:**
+  - Einzeln: ein Teil pro Klick, R/Umschalt+R dreht in 15°-Schritten. Baken und Schilder schauen automatisch zum Verkehr des nächsten Fahrstreifens, Schranken stehen quer.
+  - Gerade: Kette von Klick zu Klick, weiterklicken setzt den nächsten Abschnitt an. Liegen beide Enden am gesperrten Streifen, folgt die Kette dessen Krümmung. Abstand je Bauteil einstellbar, die Kette hält ihn höchstens ein (nie weiter auseinander).
+  - Kurve: Anfang, Ende, dann die Biegung klicken.
+  - Auswählen (Klick, Umschalt, Rahmen), verschieben, drehen, Entf löscht. Radierer. Strg+Z / Strg+Y. Einrasten an Fahrstreifenkanten und -mitten (Alt = frei).
+  - Standard-Vorlage laden, Leeren.
+- **Eingezeichnet:** Graben, Arbeitsbereich, Platz für Bagger und Kipper, Stellplatz Kolonnenbus, Fahrweg des Verkehrs nach dem aktuellen Plan.
+- **Prüfung** (warnt nur, Übernehmen geht immer): Pflicht sind Querabsperrung vor dem Graben, Längsabsicherung zum Verkehr ohne Lücke, Gitter an beiden Grabenseiten, nichts im Fahrweg, Maschinenplatz frei. Empfohlen: Verschwenkung mit mindestens 3 Baken, Z 123, bei Gegenverkehr Z 208 und Z 308. Die Standard-Vorlage erfüllt alles.
+- **Aufbau:** Die Kolonne baut den Plan genau so auf: Schilder zuerst, dann von vorne nach hinten, gelbe Markierungen zuletzt; der Abbau läuft rückwärts. Steht schon ein Teil der alten Absperrung, bleibt, was auch im neuen Plan steht; der Rest wird eingesammelt.
+- **Verkehr:** Die Verschwenkung beginnt 8 m vor dem ersten Teil im gesperrten Fahrstreifen und ist voll, wo der Plan den Streifen bis zur Verkehrsseite schließt. Grenzen: höchstens 15 m früher und 15 m später als beim Standard, damit Stellplätze und Wartepositionen passen. Beginnt sie früher, parkt der Kolonnenbus vorher um.
+- **Bewusst noch nicht:** Material ist unbegrenzt und kostet nichts, Verstöße haben keine Folgen, eigene Vorlagen lassen sich nicht speichern, geplant wird nur vor dem Aufbau (nicht während die Kolonne baut). Rückfragen dazu stehen in Meldung #9.
+- **Technik:** `src/site/closure_plan.gd` (Plan, Ketten, Prüfung, Speichern), `src/ui/closure_designer.gd` (Planungsmodus), `SiteLayout.extent_for` (Verkehr aus dem Plan), `CameraRig.enter_topdown`. Test: `tools/test.sh absperrung`.

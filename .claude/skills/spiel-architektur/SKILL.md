@@ -69,15 +69,20 @@ Autoloads (`project.godot`):
 - **Debug-Menü (F3):** `src/debug/`. Wer einen Arbeitsschritt ändert oder neu baut, passt `DebugTools.finish_step` an, damit er sich sofort erledigen lässt, und prüft das mit `tools/test.sh debug`.
 - **`SiteTerrain`:** Höhenraster (10 cm) mit Schichten Asphalt, Tragschicht und Boden. Die Grube wird gegraben und verfüllt.
 - **`SiteProps`:** Absperrteile (FS25-Set, privat) und Schilder. **`Worker`:** Kolonne mit einfachen Animationen.
+- **`ClosurePlan`** (#9): die Absperrung als Plan in Weltkoordinaten – Teile `{kind, pos, yaw, phase, group}` und gelbe Linien. Vorlage = `SiteLayout.items()` (Reihenfolge und Verkehr unverändert, `custom = false`), sonst vom Spieler. Ketten, Prüfliste, Speichern.
+  - `Site.item_defs` kommt aus `plan.defs(lay)`; `in_lane` = Teil sperrt Spur K. Das erste gesetzte `in_lane`-Teil schaltet den Verkehr um, das letzte entfernte zurück.
+  - Ein eigener Plan verschiebt die Verkehrsgeometrie (`SiteLayout.extent_for` / `apply_extent`: `s_det0/1`, `p_full0/1`, `obst0/1`, `s_van`, K2-Bereich). Wer in `site.gd` Positionen aus dem Layout liest, nimmt die Felder, nicht die Standardformeln.
+  - `Site.set_plan()` übernimmt einen Plan, auch wenn schon Teile stehen (passende bleiben, der Rest wird von der Kolonne eingesammelt).
 
 ## Welt und Oberfläche
 
-- **`World`** besitzt Karte, Umgebung, HQ, Verkehr, Fuhrpark, Aufträge, Lichter und die Kamera (`CameraRig`, Shapez-2-Stil).
+- **`World`** besitzt Karte, Umgebung, HQ, Verkehr, Fuhrpark, Aufträge, Lichter und die Kamera (`CameraRig`, Shapez-2-Stil). `CameraRig.enter_topdown()` / `exit_topdown()` schalten auf eine orthografische Draufsicht (Absperrung-Designer).
   - `DayNight`: Sonne nach Breitengrad und Datum.
   - `LightPool`: echte Lichter an den nächsten Laternen.
   - `SignalHeads`: Ampeln.
   - `HQ`: Hof, Halle, Lagerboxen, Parkplätze.
 - **`HUD`:** obere Leiste, linke Leiste (Aufträge, Fuhrpark, Finanzen, Hilfe, **Meldungen** mit Zähler) und Kontextfenster für Fahrzeug und Baustelle.
+  - `ClosureDesigner` (#9, „Absperrung planen“): eigenes Vollbild-Control im HUD, blendet die übrigen HUD-Teile (außer Meldungen/Toasts) aus, ist `World.tool` (Rechtsklick), pausiert das Spiel und zeichnet den Plan als Symbole über der Draufsicht. Übernehmen → `Site.set_plan()`.
   - Stil: schwarz/weiß mit orangem Akzent (`UI`-Kit).
   - **`WorldMarkers`** (erstes Kind des HUD, also unter allen Fenstern): Markierungen für Zentrale, Baustellen, Ausschreibungen und Fahrzeuge, am Bildrand mit Pfeil; Leiste unten rechts mit Ansicht-Schaltern (H Markierungen, B Gebäude = Ebene `building` der Kartenkacheln). Der freie Bildbereich hängt an `HUD.LEFT_W`/`RIGHT_W`; wer dort Fenster ändert, prüft die Markierungen mit `tools/test.sh markierungen`.
 
