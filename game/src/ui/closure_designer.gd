@@ -1020,8 +1020,14 @@ func _draw_plan() -> void:
 	var hover := -1
 	if mode in ["select", "erase"] and _over_map and _press.is_empty():
 		hover = _item_at(_mp_raw)
+	var bad := {}
+	for ch in _checks:
+		for bi in ch.get("bad", []):
+			bad[bi] = true
 	for i in plan.items.size():
 		var it: Dictionary = plan.items[i]
+		if bad.has(i):
+			_halo(cv, it, RED)
 		if _sel.has(i) or i == hover:
 			_halo(cv, it, UI.ACCENT if _sel.has(i) else (UI.ERROR if mode == "erase" else WHITE))
 		_draw_item(cv, it, 1.0)
@@ -1088,12 +1094,7 @@ func _hint_text() -> String:
 
 ## Position relative to the trench, e.g. "12 m vor dem Graben".
 func _where(p: Vector2) -> String:
-	var lc := lay.lane_coords(p)
-	if lc.x < lay.s_t0:
-		return "%s m vor dem Graben" % _fmt(lay.s_t0 - lc.x)
-	if lc.x > lay.s_t1:
-		return "%s m hinter dem Graben" % _fmt(lc.x - lay.s_t1)
-	return "neben dem Graben"
+	return ClosurePlan.where(lay, p)
 
 
 func _lane_rect(sa: float, sb: float, la: float, lb: float) -> PackedVector2Array:

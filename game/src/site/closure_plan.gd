@@ -344,7 +344,7 @@ func checks(lay: SiteLayout) -> Array:
 	out.append({"id": "grube", "ok": sides_ok, "required": true, "text": "Graben gegen Absturz gesichert",
 		"hint": "Absperrgitter an beiden Längsseiten des Grabens."})
 	# 4. nothing on the path of the traffic
-	var in_path := -1
+	var in_path: Array = []
 	var paths: Array = [lay.detour_pts_for(ext), lay.zone2_pts_for(ext),
 		lay.lane_poly(maxf(0.0, ext.det0 - 80.0), ext.det0, func(_s): return 0.0, 2.0),
 		lay.lane_poly(ext.det1, minf(lay.len_k, ext.det1 + 60.0), func(_s): return 0.0, 2.0)]
@@ -355,21 +355,18 @@ func checks(lay: SiteLayout) -> Array:
 		for pk in paths.size():
 			var pp: PackedVector2Array = paths[pk]
 			if pp.size() >= 2 and _elem_dist(items[i], pp, cums[pk]) < TRAFFIC_CLEAR:
-				in_path = i
+				in_path.append(i)
 				break
-		if in_path >= 0:
-			break
-	out.append({"id": "fahrweg", "ok": in_path < 0, "required": true, "text": "Fahrweg des Verkehrs frei",
-		"hint": ("%s steht dort, wo Autos fahren (gestrichelte Linie). " % label(items[in_path].kind) if in_path >= 0 else "") + "Der Verkehr wird ab der ersten Bake im Fahrstreifen verschwenkt."})
+	out.append({"id": "fahrweg", "ok": in_path.is_empty(), "required": true, "text": "Fahrweg des Verkehrs frei", "bad": in_path,
+		"hint": _bad_text(in_path, "dort, wo Autos fahren (gestrichelte Linie)", lay) + "Der Verkehr wird ab der ersten Bake im Fahrstreifen verschwenkt."})
 	# 5. machine slots free
-	var slot_block := -1
+	var slot_block: Array = []
 	for i in items.size():
 		var lc6: Vector2 = lc_of[i]
 		if lc6.x > lay.s_t1 + 2.3 and lc6.x < lay.s_c1 - 0.5 and absf(lc6.y) < 1.1:
-			slot_block = i
-			break
-	out.append({"id": "plaetze", "ok": slot_block < 0, "required": true, "text": "Platz für Bagger und Kipper frei",
-		"hint": ("%s steht im Maschinenplatz. " % label(items[slot_block].kind) if slot_block >= 0 else "") + "Im orange umrandeten Platz darf nichts stehen."})
+			slot_block.append(i)
+	out.append({"id": "plaetze", "ok": slot_block.is_empty(), "required": true, "text": "Platz für Bagger und Kipper frei", "bad": slot_block,
+		"hint": _bad_text(slot_block, "im Maschinenplatz", lay) + "Im orange umrandeten Platz darf nichts stehen."})
 	# 6. taper ahead of the cross barrier
 	var n_taper := 0
 	for i in items.size():
@@ -399,6 +396,31 @@ func checks(lay: SiteLayout) -> Array:
 		out.append({"id": "vorrang", "ok": has208 and has308, "required": false, "text": "Engstelle mit Z 208 und Z 308 geregelt",
 			"hint": "Z 208 vor der Engstelle auf deiner Seite, Z 308 für den Gegenverkehr auf dessen Seite."})
 	return out
+
+
+## "Leitbake (12 m vor dem Graben) und 2 weitere stehen <where>. " – the offending items are marked red.
+func _bad_text(bad: Array, where_txt: String, lay: SiteLayout) -> String:
+	if bad.is_empty():
+		return ""
+	var it: Dictionary = items[bad[0]]
+	var more := (" und %d weitere" % (bad.size() - 1)) if bad.size() > 1 else ""
+	return "%s (%s)%s %s %s (rot markiert). " % [label(it.kind), where(lay, item_center(it)), more, "stehen" if bad.size() > 1 else "steht", where_txt]
+
+
+## Position along the closed lane relative to the trench, e.g. "12 m vor dem Graben".
+static func where(lay: SiteLayout, p: Vector2) -> String:
+	var lc := lay.lane_coords(p)
+	if lc.x < lay.s_t0:
+		return "%s m vor dem Graben" % _fmt(lay.s_t0 - lc.x)
+	if lc.x > lay.s_t1:
+		return "%s m hinter dem Graben" % _fmt(lc.x - lay.s_t1)
+	return "neben dem Graben"
+
+
+static func _fmt(x: float) -> String:
+	if absf(x - round(x)) < 0.05:
+		return str(int(round(x)))
+	return ("%.1f" % x).replace(".", ",")
 
 
 ## Distance of an item's footprint (segment for linear elements) to a polyline.
