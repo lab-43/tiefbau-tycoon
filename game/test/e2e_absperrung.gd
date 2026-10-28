@@ -142,8 +142,11 @@ func tick(_delta: float) -> void:
 					same = false
 			ok(same, "Plan aus dem Spielstand gleich")
 			ok(not Game.save_data().is_empty(), "Spielstand speicherbar")
-			var c := site.center3()
-			drv.shot("absp_03_aufgebaut", c + Geo.v3(lay2.lane_dir(lay2.s_t0)) * -12.0, 48.0, -50.0, 42.0)
+			# pictures in daylight, looking from the curb side and from behind along the lane
+			DebugTools.light_override(12.0)
+			var d2 := lay2.lane_dir(lay2.s_t0)
+			var view := Geo.left_of(d2) - d2 * 0.8   # from the traffic side (buildings stand on the curb side)
+			drv.shot("absp_03_aufgebaut", site.center3() - Geo.v3(d2) * 8.0, 42.0, rad_to_deg(atan2(view.x, view.y)), 48.0)
 			t_mark = drv.t
 			step = 41
 		41:
@@ -151,12 +154,14 @@ func tick(_delta: float) -> void:
 			if not drv.shot_queue.is_empty():
 				return
 			var lay4 := site.lay
-			drv.shot("absp_04_von_oben", site.center3() + Geo.v3(lay4.lane_dir(lay4.s_t0)) * -10.0, 70.0,
-				rad_to_deg(SiteLayout.yaw_of(lay4.lane_dir(lay4.s_t0))) + 90.0, 75.0)
+			var d4 := lay4.lane_dir(lay4.s_t0)
+			var view4 := Geo.left_of(d4)
+			drv.shot("absp_04_von_oben", site.center3() - Geo.v3(d4) * 10.0, 70.0, rad_to_deg(atan2(view4.x, view4.y)), 80.0)
 			step = 5
 		5:
 			if not drv.shot_queue.is_empty():
 				return
+			DebugTools.light_override(-1.0)
 			# jump to the teardown and let the crew take the plan down again
 			for id in ["dig", "pipe", "refill", "asphalt", "demob"]:
 				if site.step_id() == id:
