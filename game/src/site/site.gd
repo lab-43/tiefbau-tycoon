@@ -1706,6 +1706,12 @@ func _finish_refill() -> void:
 	pile_mat = ""
 	_pile_base = 0.0
 	_update_pile()
+	# sand and gravel are no longer needed: a tipper still bringing some must not tip it onto the
+	# asphalt spot (its pile blocked the asphalt delivery for good)
+	for n in needs:
+		if n.mat != "asphalt":
+			n.m3 = n.delivered
+			n["ordered"] = 0.0
 	_complete("refill")
 	for v in vehicles:
 		if is_instance_valid(v) and role(v) == "bulk" and v.auto_shuttle:
@@ -1920,6 +1926,8 @@ func _tipper_arrived(v: Vehicle) -> void:
 		var need := _next_need()
 		if phase > 2 and not need.is_empty() and v.bulk_main() == need.mat and v.bulk_m3() > 0.05:
 			_tip_here(v)
+		elif phase > 2 and v.bulk_m3() > 0.05:
+			_tipper_next.call_deferred(v)   # the load is no longer needed here (the step ended on the way)
 
 
 func _tip_here(v: Vehicle) -> void:
