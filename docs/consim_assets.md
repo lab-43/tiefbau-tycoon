@@ -41,10 +41,11 @@ Files: `game/assets/consim/<id>/<id>.glb` + `<id>.json` (metadata: dimensions, t
 | `car_mpv` | Traffic car - compact MPV | 14,771 | 1.2 MB | 4.7 x 2.1 x 1.6 m; 4 wheels r=0.34 |  |
 | `car_premium` | Traffic car - premium compact saloon | 14,397 | 1.1 MB | 5.0 x 2.1 x 1.7 m; 4 wheels r=0.35 |  |
 | `car_minicompact` | Traffic car - mini compact | 13,872 | 1.1 MB | 3.7 x 1.9 x 1.5 m; 4 wheels r=0.31 |  |
-| `car_police_eu` | Traffic car - EU police car | 17,808 | 1.6 MB | 4.9 x 2.1 x 1.7 m; 4 wheels r=0.35 | Prefab has no light anchors: light markers estimated from the bounding box. Blue roof lights = beacon_blue_l/r. |
+| `car_police_eu` | Traffic car - EU police car | 17,808 | 1.6 MB | 4.9 x 2.1 x 1.7 m; 4 wheels r=0.35 | Prefab has no light anchors: light markers estimated from the bounding box. Blue roof lights = beacon_blue_l/r. Lamp glass not split in the asset; same body as car_hatchback, so the game takes the hatchback's glass split at load time (`LampSplit.donor`). Excluded from the Windows data pack (export_presets.cfg). |
 | `van_big` | Large van (Sprinter class) | 12,977 | 1.1 MB | 6.9 x 2.4 x 2.7 m; 4 wheels r=0.39 |  |
 | `truck_traffic_cabover` | Traffic rigid truck, European cab-over box truck | 17,839 | 1.6 MB | 7.7 x 2.8 x 3.1 m; 4 wheels r=0.44 |  |
-| `truck_traffic_scania` | Scania G500 6x2 semi-tractor, usable as traffic truck or tractor | 28,298 | 2.4 MB | 6.5 x 3.0 x 3.5 m; 6 wheels r=0.55 | Player tractor from the game, usable as traffic truck (has fifth_wheel). |
+| `truck_traffic_scania` | Scania G500 6x2 semi-tractor, usable as traffic truck or tractor | 28,298 | 2.4 MB | 6.5 x 3.0 x 3.5 m; 6 wheels r=0.55 | Player tractor from the game, usable as traffic truck (has fifth_wheel). Lamp glass is one material (G500_Exterior_Lights_M); the game splits it at the light markers at load time (`LampSplit.markers`). |
+| `bus_citaro` | Mercedes-Benz Citaro C2 city bus in HVV red. **Not from Construction Simulator:** Sketchfab "Mercedes+CITARO+II+RATP" by moussasy.sy715 (CC BY 4.0), converted by `tools/models/citaro_import.py` from `private/mercedescitaroiiratp.zip` | 74,336 | 6.5 MB | 12.2 x 3.1 x 2.9 m; axles at z = -3.0 / +3.0, wheels r=0.44 | One flattened mesh, no wheel nodes. Lamp glass split by the import script; destination display "6 U Hauptbahnhof", plate HH-HB 389. |
 
 ## P1 - props
 
@@ -85,4 +86,4 @@ Files: `game/assets/consim/<id>/<id>.glb` + `<id>.json` (metadata: dimensions, t
 
 `tractor_tgx`, `tractor_tgx_heavy`, `truck_traffic_scania` have an empty `fifth_wheel`; `trailer_lowbed` has `kingpin`. Place the trailer so kingpin == fifth_wheel (kingpin is ~7 cm higher than the tractors' fifth wheel at rest; lower the trailer front or accept the gap).
 
-Total assets: 40.
+Total assets: 41 (40 from Construction Simulator + bus_citaro).
