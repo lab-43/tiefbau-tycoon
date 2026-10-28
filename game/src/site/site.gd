@@ -874,7 +874,7 @@ func _apply_plan() -> void:
 	yellow_fracs.clear()
 	for _l in yellow_lines:
 		yellow_fracs.append(0.0)
-	lay.apply_extent(lay.extent_for(plan.items) if plan.custom else lay.default_extent())
+	lay.apply_extent(plan.extent(lay))
 	_update_yellow()
 
 
@@ -883,7 +883,7 @@ func _apply_plan() -> void:
 func set_plan(p: ClosurePlan, build := true) -> void:
 	if can_edit_plan() != "":
 		return
-	var ext_new: Dictionary = lay.extent_for(p.items) if p.custom else lay.default_extent()
+	var ext_new: Dictionary = p.extent(lay)
 	var van_moves: bool = crew_van != null and is_instance_valid(crew_van) and spot_of.get(crew_van, "") == "van" \
 		and absf(float(ext_new.van) - lay.s_van) > 0.5
 	var van_driving := false
@@ -1192,7 +1192,8 @@ func _traffic_activate() -> void:
 	var tr := world.traffic
 	var zone := 100 + sid
 	var prio := {lay.key: 0, lay.key2: (1 if lay.oncoming else 0)}
-	tr.set_zone(zone, prio)
+	if not lay.two_way:
+		tr.set_zone(zone, prio)   # bottleneck (oncoming) or zipper (same direction)
 	tr.set_obstacle(lay.key, lay.obst0, lay.obst1, 1000 + sid)
 	tr.set_detour(lay.key, lay.s_det0, lay.s_det1, lay.detour_pts(), zone, 7.0)
 	tr.set_detour(lay.key2, lay.s2_a, lay.s2_b, lay.zone2_pts(), zone, 7.0)

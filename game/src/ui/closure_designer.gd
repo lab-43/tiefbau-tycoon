@@ -3,7 +3,9 @@ extends Control
 ## Closure designer ("Absperrung planen", #9): plan view of one site in which the player places
 ## Leitbaken, Leitkegel, Absperrschranken, Absperrgitter, yellow markings and signs one by one or as
 ## chains (straight or curved). Shows trench, work area, machine slots and the traffic path; checks
-## the plan against basic rules. Opened by the HUD; "Übernehmen" hands the plan to Site.set_plan().
+## the plan against basic rules. The tool "Fahrspur" (#19) moves the traffic paths of both directions
+## (control points in lane coordinates, see SiteLayout._finish_extent). Opened by the HUD; "Übernehmen"
+## hands the plan to Site.set_plan().
 ## While open, the game is paused, the light is set to noon and trees are hidden.
 
 signal closed(accepted: bool)
@@ -23,7 +25,9 @@ const BLUE := Color(0.0, 0.36, 0.72)
 const TRAFFIC := Color(0.35, 0.78, 1.0)
 const MODES := [["single", "Einzeln", "Ein Teil pro Klick"], ["line", "Gerade", "Kette entlang einer Geraden: Klick Anfang, Klick Ende (weiter mit dem nächsten Klick)"],
 	["curve", "Kurve", "Kette entlang einer Kurve: Anfang klicken, dann die Richtung, dann das Ende (wie in Cities: Skylines)"],
-	["select", "Auswählen", "Teile anklicken oder aufziehen, verschieben, drehen (R), löschen (Entf)"], ["erase", "Radierer", "Teile anklicken oder überstreichen, um sie zu entfernen"]]
+	["select", "Auswählen", "Teile anklicken oder aufziehen, verschieben, drehen (R), löschen (Entf)"], ["erase", "Radierer", "Teile anklicken oder überstreichen, um sie zu entfernen"],
+	["lane", "Fahrspur", "Fahrweg des Verkehrs verlegen: blaue Punkte ziehen, Klick auf die Linie setzt einen Punkt, Rechtsklick oder Entf löscht ihn"]]
+const HANDLE_PX := 11.0        # pick radius of traffic path handles (screen px)
 
 var site: Site
 var lay: SiteLayout
@@ -45,7 +49,9 @@ var _mp_raw := Vector2.ZERO
 var _over_map := false
 var _sel: Array = []           # selected item indices
 var _sel_line := -1
-var _press := {}               # select / erase gesture in progress
+var _press := {}               # select / erase / traffic path gesture in progress
+var _lane_hover := {}          # traffic path handle under the mouse: {p: "k"|"k2", i}
+var _lane_sel := {}            # last grabbed handle (Entf deletes it)
 var _undo: Array = []
 var _redo: Array = []
 var _checks: Array = []
@@ -75,6 +81,8 @@ var cancel_btn: Button
 var undo_btn: Button
 var redo_btn: Button
 var summary_lbl: Label
+var traffic_lbl: Label
+var traffic_auto_btn: Button
 
 
 # ------------------------------------------------------------------------------------------
@@ -113,7 +121,7 @@ func open(s: Site) -> void:
 
 ## Camera over the whole closure, traffic of the closed lane running from left to right.
 func frame_view() -> void:
-	var ext: Dictionary = lay.extent_for(plan.items) if plan.custom else lay.default_extent()
+	var ext: Dictionary = plan.extent(lay)
 	var a: float = minf(float(ext.det0), float(ext.van) - 4.0)
 	var b: float = maxf(float(ext.det1), lay.s_taper1)
 	# include the planned items (signs far ahead), but not items far away on other streets
@@ -378,6 +386,23 @@ func _build_right() -> void:
 	checks_box = UI.vbox(7)
 	v.add_child(checks_box)
 	v.add_child(UI.sep())
+	v.add_child(UI.caps("Verkehrsführung"))
+	traffic_lbl = UI.label("", 12, UI.MUTED)
+	traffic_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(traffic_lbl)
+	var tr_row := UI.hbox(6)
+	var lane_btn := UI.button("Fahrspur legen", "route")
+	lane_btn.tooltip_text = "Werkzeug „Fahrspur“: die blauen Fahrwege des Verkehrs verschieben"
+	lane_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lane_btn.pressed.connect(func(): set_mode("lane"))
+	tr_row.add_child(lane_btn)
+	traffic_auto_btn = UI.button("Automatisch", "rotate-ccw")
+	traffic_auto_btn.tooltip_text = "Selbst gelegte Fahrspuren verwerfen: das Spiel legt sie wieder nach den Bauteilen"
+	traffic_auto_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	traffic_auto_btn.pressed.connect(reset_traffic)
+	tr_row.add_child(traffic_auto_btn)
+	v.add_child(tr_row)
+	v.add_child(UI.sep())
 	v.add_child(UI.caps("Stückliste"))
 	bom_box = UI.vbox(2)
 	v.add_child(bom_box)
@@ -409,7 +434,7 @@ func set_kind(k: String) -> void:
 		_end_chain()
 	kind = k
 	rot = 0.0
-	if mode in ["select", "erase"]:
+	if mode in ["select", "erase", "lane"]:
 		mode = "single" if k != "line" else "line"
 	if k == "line" and mode == "single":
 		mode = "line"
@@ -425,13 +450,15 @@ func set_mode(m: String) -> void:
 	if m != "select":
 		_sel.clear()
 		_sel_line = -1
+	_lane_sel = {}
+	_lane_hover = {}
 	_refresh_tools()
 	canvas.queue_redraw()
 
 
 func _refresh_tools() -> void:
 	for k in kind_btns:
-		(kind_btns[k] as Button).button_pressed = k == kind and not (mode in ["select", "erase"])
+		(kind_btns[k] as Button).button_pressed = k == kind and not (mode in ["select", "erase", "lane"])
 	for m in mode_btns:
 		(mode_btns[m] as Button).button_pressed = m == mode
 		(mode_btns[m] as Button).disabled = m == "single" and kind == "line"
@@ -494,6 +521,7 @@ func _refresh_side() -> void:
 	else:
 		summary_lbl.text = "%d Pflichtpunkt%s offen – Übernehmen geht trotzdem." % [open_req, "" if open_req == 1 else "e"]
 		summary_lbl.add_theme_color_override("font_color", UI.ERROR)
+	_refresh_traffic_info()
 	for c in bom_box.get_children():
 		c.queue_free()
 	var cnt := plan.counts()
@@ -504,6 +532,21 @@ func _refresh_side() -> void:
 			continue
 		var val := ("%s m" % _fmt(float(cnt[k]))) if k == "line" else str(int(cnt[k]))
 		bom_box.add_child(UI.kv(ClosurePlan.label(k), val))
+
+
+func _refresh_traffic_info() -> void:
+	var own := not plan.traffic.is_empty()
+	var t := ""
+	if bool(_ext.get("two_way", false)):
+		t = "Zwei getrennte Fahrspuren: Der Verkehr fließt in beiden Richtungen gleichzeitig." if lay.oncoming \
+			else "Beide Fahrstreifen bleiben getrennt befahrbar, kein Einfädeln."
+	else:
+		t = "Engstelle: Die Richtungen fahren abwechselnd, der Gegenverkehr hat Vorrang." if lay.oncoming \
+			else "Reißverschluss: Der Verkehr fädelt vor der Baustelle in einen Fahrstreifen ein."
+		t += " Für Verkehr in beiden Richtungen müssen die Fahrspuren mindestens %s m auseinander liegen." % _fmt(SiteLayout.TWO_WAY_GAP)
+	t += "\n" + ("Fahrspuren selbst gelegt." if own else "Fahrspuren automatisch nach den Bauteilen.")
+	traffic_lbl.text = t
+	traffic_auto_btn.disabled = not own
 
 
 # ------------------------------------------------------------------------------------------
@@ -525,7 +568,7 @@ func _changed(user_edit := true) -> void:
 	if user_edit:
 		plan.custom = true
 		dirty = true
-	_ext = lay.extent_for(plan.items) if plan.custom else lay.default_extent()
+	_ext = plan.extent(lay)
 	_checks = plan.checks(lay)
 	_sel = _sel.filter(func(i): return i < plan.items.size())
 	if _sel_line >= plan.lines.size():
@@ -568,6 +611,17 @@ func load_template() -> void:
 	_sel.clear()
 	dirty = true
 	_changed(false)
+
+
+## Drop the player's traffic paths: the game lays them from the items again.
+func reset_traffic() -> void:
+	if plan.traffic.is_empty():
+		return
+	_press = {}
+	_push_undo(_snapshot())
+	plan.traffic = {}
+	_lane_sel = {}
+	_changed()
 
 
 func clear_all() -> void:
@@ -696,13 +750,151 @@ func _end_chain() -> void:
 
 
 ## World tool hook: a short right click ends the chain or the selection.
-func on_right_click(_screen: Vector2) -> void:
+func on_right_click(screen: Vector2) -> void:
+	if mode == "lane":
+		_delete_handle(_handle_at(screen))
+		return
 	if not _chain.is_empty():
 		_end_chain()
 	elif not _sel.is_empty() or _sel_line >= 0:
 		_sel.clear()
 		_sel_line = -1
 		canvas.queue_redraw()
+
+
+# ------------------------------------------------------------------------------------------
+# Traffic paths (#19): control points in lane coordinates of K ("k") or K2 ("k2")
+# ------------------------------------------------------------------------------------------
+
+func _ctrl_key(pid: String) -> String:
+	return "k_ctrl" if pid == "k" else "k2_ctrl"
+
+
+func _ctrl_of(pid: String) -> Array:
+	return (_ext.get(_ctrl_key(pid), []) as Array).duplicate()
+
+
+func _ctrl_pt(pid: String, v: Vector2) -> Vector2:
+	return lay.lane_pt(v.x, v.y) if pid == "k" else lay.lane2_pt(v.x, v.y)
+
+
+func _to_ctrl(pid: String, p: Vector2) -> Vector2:
+	return lay.lane_coords(p) if pid == "k" else lay.lane2_coords(p)
+
+
+func _traffic_pts(pid: String) -> PackedVector2Array:
+	return lay.detour_pts_for(_ext) if pid == "k" else lay.zone2_pts_for(_ext)
+
+
+## Handle under a screen point: {p, i} or {}.
+func _handle_at(screen: Vector2) -> Dictionary:
+	var best := HANDLE_PX
+	var out := {}
+	for pid in ["k", "k2"]:
+		var ctrl := _ctrl_of(pid)
+		for i in ctrl.size():
+			var d := _scr(_ctrl_pt(pid, ctrl[i])).distance_to(screen)
+			if d < best:
+				best = d
+				out = {"p": pid, "i": i}
+	return out
+
+
+## Traffic path under a screen point ("k", "k2" or "").
+func _traffic_path_at(screen: Vector2) -> String:
+	for pid in ["k", "k2"]:
+		var sp := _scr_poly(_traffic_pts(pid))
+		for i in sp.size() - 1:
+			if Geometry2D.get_closest_point_to_segment(screen, sp[i], sp[i + 1]).distance_to(screen) < 8.0:
+				return pid
+	return ""
+
+
+## Mouse point as a control point of path pid; the lateral offset snaps to the lane centres.
+func _lane_point(pid: String, p: Vector2) -> Vector2:
+	var c := _to_ctrl(pid, p)
+	if snap and not Input.is_key_pressed(KEY_ALT):
+		var tol := SNAP_PX / maxf(0.01, _ppm)
+		var other := lay.lane2_pt(lay.lane2_coords(p).x, 0.0) if pid == "k" else lay.lane_pt(lay.lane_coords(p).x, 0.0)
+		var best := tol
+		for lt in [0.0, _to_ctrl(pid, other).y]:
+			if absf(c.y - float(lt)) < best:
+				best = absf(c.y - float(lt))
+				c.y = lt
+	return c
+
+
+## Grab a handle, or put a new point on the path and grab it.
+func _lane_press() -> void:
+	var h := _handle_at(_mouse)
+	var snap_plan := _snapshot()
+	if h.is_empty():
+		var pid := _traffic_path_at(_mouse)
+		if pid == "":
+			_lane_sel = {}
+			return
+		var ctrl := _ctrl_of(pid)
+		var c := _to_ctrl(pid, _mp_raw)
+		if c.x < (ctrl[0] as Vector2).x + 1.0 or c.x > (ctrl[ctrl.size() - 1] as Vector2).x - 1.0:
+			return
+		var idx := ctrl.size() - 1
+		for j in ctrl.size():
+			if (ctrl[j] as Vector2).x > c.x:
+				idx = j
+				break
+		ctrl.insert(idx, Vector2(c.x, SiteLayout.ctrl_lat(ctrl, c.x)))
+		plan.traffic[pid] = ctrl
+		plan.custom = true
+		_ext = plan.extent(lay)
+		h = {"p": pid, "i": idx}
+		_press = {"type": "lane", "p": pid, "i": idx, "orig": ctrl, "start": _mp_raw, "snap": snap_plan, "moved": true}
+	else:
+		_press = {"type": "lane", "p": h.p, "i": h.i, "orig": _ctrl_of(h.p), "start": _mp_raw, "snap": snap_plan, "moved": false}
+	_lane_sel = h
+
+
+func _lane_drag() -> void:
+	if (_mp_raw - Vector2(_press.start)).length() * _ppm > 3.0:
+		_press.moved = true
+	if not _press.moved:
+		return
+	var pid: String = _press.p
+	var ctrl: Array = (_press.orig as Array).duplicate()
+	var i: int = _press.i
+	var v := _lane_point(pid, _mp_raw)
+	if i == 0 or i == ctrl.size() - 1:
+		v.y = 0.0   # the ends stay on the lane: they slide along it
+	ctrl[i] = v
+	plan.traffic[pid] = ctrl
+	plan.custom = true
+	_ext = plan.extent(lay)
+
+
+func _lane_release(pr: Dictionary) -> void:
+	if not pr.moved:
+		return
+	var pid: String = pr.p
+	plan.traffic[pid] = _ctrl_of(pid)   # store what the layout made of it (sorted, inside the limits)
+	_push_undo(pr.snap)
+	_changed()
+
+
+## Remove an interior point of a traffic path (the ends stay).
+func _delete_handle(h: Dictionary) -> void:
+	if h.is_empty():
+		return
+	var pid: String = h.p
+	var ctrl := _ctrl_of(pid)
+	var i: int = h.i
+	if i <= 0 or i >= ctrl.size() - 1:
+		Events.warn("Anfang und Ende einer Fahrspur lassen sich nur verschieben")
+		return
+	_push_undo(_snapshot())
+	ctrl.remove_at(i)
+	plan.traffic[pid] = ctrl
+	_lane_sel = {}
+	_lane_hover = {}
+	_changed()
 
 
 # ------------------------------------------------------------------------------------------
@@ -817,6 +1009,7 @@ func _update_hover() -> void:
 	if gp != null:
 		_mp_raw = Vector2(gp.x, gp.z)
 		_mp = _snap_point(_mp_raw) if mode in ["single", "line", "curve"] else _mp_raw
+	_lane_hover = _handle_at(_mouse) if mode == "lane" and _over_map and _press.is_empty() else {}
 
 
 func _unhandled_input(ev: InputEvent) -> void:
@@ -847,6 +1040,7 @@ func _unhandled_key_input(ev: InputEvent) -> void:
 	var handled := true
 	match k.keycode:
 		KEY_ESCAPE, KEY_ENTER, KEY_KP_ENTER:
+			_lane_sel = {}
 			if not _chain.is_empty():
 				_end_chain()
 			elif not _sel.is_empty() or _sel_line >= 0:
@@ -859,7 +1053,10 @@ func _unhandled_key_input(ev: InputEvent) -> void:
 			else:
 				rot = wrapf(rot + ROT_STEP * sgn, -PI, PI)
 		KEY_DELETE, KEY_BACKSPACE:
-			_delete_selection()
+			if mode == "lane":
+				_delete_handle(_lane_hover if not _lane_hover.is_empty() else _lane_sel)
+			else:
+				_delete_selection()
 		KEY_Z:
 			if k.ctrl_pressed and k.shift_pressed:
 				redo()
@@ -931,6 +1128,8 @@ func _left_down(shift: bool) -> void:
 		"erase":
 			_press = {"type": "erase", "snap": _snapshot(), "removed": false}
 			_erase_at(_mp_raw)
+		"lane":
+			_lane_press()
 
 
 func _press_move() -> void:
@@ -957,6 +1156,8 @@ func _press_move() -> void:
 			_press.b = _mouse
 		"erase":
 			_erase_at(_mp_raw)
+		"lane":
+			_lane_drag()
 
 
 func _left_up() -> void:
@@ -991,6 +1192,8 @@ func _left_up() -> void:
 			if pr.removed:
 				_push_undo(pr.snap)
 				_changed()
+		"lane":
+			_lane_release(pr)
 	canvas.queue_redraw()
 
 
@@ -1044,8 +1247,13 @@ func _draw_plan() -> void:
 	_traffic_line(cv, k_path)
 	var k2a := maxf(0.0, float(ext.s2_a) - 45.0)
 	var k2b := minf(lay.len_k2, float(ext.s2_b) + 45.0)
-	_traffic_line(cv, Geo.sub_polyline(lay._g2[0], lay._g2[1], k2a, k2b))
+	var k2_path := Geo.sub_polyline(lay._g2[0], lay._g2[1], k2a, float(ext.s2_a))
+	k2_path.append_array(lay.zone2_pts_for(ext))
+	k2_path.append_array(Geo.sub_polyline(lay._g2[0], lay._g2[1], float(ext.s2_b), k2b))
+	_traffic_line(cv, k2_path)
 	_tag(cv, font, _scr(lay.lane_pt(float(ext.det0), -0.3)), "Verschwenkung", TRAFFIC)
+	if mode == "lane":
+		_draw_lane_handles(cv, font)
 	# planning radius (#18)
 	var tc := lay.trench_center()
 	var circ := PackedVector2Array()
@@ -1124,6 +1332,46 @@ func _draw_plan() -> void:
 	hint_lbl.text = _hint_text()
 
 
+## Handles of both traffic paths: squares at the ends (they slide along the lane), dots in between.
+func _draw_lane_handles(cv: Control, font: Font) -> void:
+	for pid in ["k", "k2"]:
+		var ctrl := _ctrl_of(pid)
+		if ctrl.size() < 2:
+			continue
+		var mid: Vector2 = ctrl[ctrl.size() / 2] if ctrl.size() > 2 else ((ctrl[0] as Vector2) + (ctrl[1] as Vector2)) * 0.5
+		var title := "Fahrspur Baustellenseite" if pid == "k" else ("Fahrspur Gegenverkehr" if lay.oncoming else "Fahrspur Nachbarstreifen")
+		_tag(cv, font, _scr(_ctrl_pt(pid, mid)) + Vector2(10, -10), title, TRAFFIC)
+		for i in ctrl.size():
+			var c := _scr(_ctrl_pt(pid, ctrl[i]))
+			var hot: bool = (str(_lane_hover.get("p", "")) == pid and int(_lane_hover.get("i", -1)) == i) \
+				or (str(_lane_sel.get("p", "")) == pid and int(_lane_sel.get("i", -1)) == i)
+			var r := 7.0 if hot else 5.5
+			if i == 0 or i == ctrl.size() - 1:
+				var rc := Rect2(c - Vector2(r, r), Vector2(r, r) * 2.0)
+				cv.draw_rect(rc, UI.ACCENT if hot else WHITE, true)
+				cv.draw_rect(rc, Color(DARK, 0.9), false, 1.5)
+			else:
+				cv.draw_circle(c, r, UI.ACCENT if hot else TRAFFIC)
+				cv.draw_arc(c, r + 1.0, 0.0, TAU, 20, Color(DARK, 0.9), 1.5, true)
+	if not _over_map:
+		return
+	var tip := ""
+	if str(_press.get("type", "")) == "lane":
+		tip = _where(_mp_raw)
+	elif not _lane_hover.is_empty():
+		var n := _ctrl_of(str(_lane_hover.p)).size()
+		var ii := int(_lane_hover.i)
+		tip = "Ziehen: verschieben" + ("" if ii == 0 or ii == n - 1 else " · Rechtsklick: löschen")
+	else:
+		var pid2 := _traffic_path_at(_mouse)
+		if pid2 != "":
+			var c2 := _to_ctrl(pid2, _mp_raw)
+			cv.draw_circle(_scr(_ctrl_pt(pid2, Vector2(c2.x, SiteLayout.ctrl_lat(_ctrl_of(pid2), c2.x)))), 5.0, Color(WHITE, 0.7))
+			tip = "Klick: Punkt einfügen und ziehen"
+	if tip != "":
+		_tag(cv, font, _mouse + Vector2(16, 18), tip, WHITE)
+
+
 func _draw_cursor_dot(cv: Control) -> void:
 	var c := _scr(_mp)
 	cv.draw_circle(c, 4.0, Color(WHITE, 0.9))
@@ -1142,6 +1390,8 @@ func _hint_text() -> String:
 			return "Teile anklicken (Umschalt: mehrere) oder Rahmen aufziehen · ziehen = verschieben · R drehen · Entf löschen"
 		"erase":
 			return "Teile oder Markierungen anklicken oder überstreichen, um sie zu entfernen"
+		"lane":
+			return "Fahrspur: Punkte ziehen · Klick auf die blaue Linie setzt einen Punkt · Rechtsklick/Entf löscht ihn · Anfang und Ende gleiten am Fahrstreifen · Alt: ohne Einrasten"
 	return ""
 
 

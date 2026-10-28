@@ -12,6 +12,7 @@ const TAPER := 12.0
 const TAPER_OUT := 6.0
 const HEAD_GAP := 2.5
 const CURB := 2.2
+const TWO_WAY_GAP := 2.5       # m between the two traffic paths for both directions at once (#19)
 
 var net: RoadNet
 var key := -1
@@ -47,6 +48,9 @@ var p_full0 := 0.0             # s where the detour reaches the full shift into 
 var p_full1 := 0.0             # s where it starts to swing back
 var obst0 := 0.0               # blocked range of K
 var obst1 := 0.0
+var k_ctrl: Array = []         # traffic path of K: Vector2(s, lateral) control points on K (#19)
+var k2_ctrl: Array = []        # traffic path of K2: Vector2(s2, lateral) control points on K2
+var two_way := false           # both paths far enough apart: no bottleneck/zipper needed
 var error := ""
 
 # machine geometry (from the extracted assets; fallbacks if missing)
@@ -122,6 +126,8 @@ func setup(n: RoadNet, k: int, start_s: float, length: float, width: float, dep:
 	s2_a = k2.s2_a
 	s2_b = k2.s2_b
 	shift = k2.shift
+	k_ctrl = auto_k_ctrl(current_extent())
+	k2_ctrl = [Vector2(s2_a, 0.0), Vector2(s2_b, 0.0)]
 	# curvature limits
 	var d0 := lane_dir(s_det0)
 	var d1 := lane_dir(s_det1)
@@ -240,25 +246,14 @@ func closure_polygon() -> PackedVector2Array:
 # Traffic geometry
 # ------------------------------------------------------------------------------------------
 
-func _shift_profile(s: float) -> float:
-	return _profile(s, s_det0, p_full0, p_full1, s_det1)
-
-
-static func _profile(s: float, d0: float, f0: float, f1: float, d1: float) -> float:
-	var a := clampf((s - d0) / maxf(0.5, f0 - d0), 0.0, 1.0)
-	var b := clampf((d1 - s) / maxf(0.5, d1 - f1), 0.0, 1.0)
-	var t := minf(a, b)
-	return t * t * (3.0 - 2.0 * t)
-
-
-## Path of K traffic around the closure (into K2).
+## Path of K traffic around the closure (into K2, or where the player laid it).
 func detour_pts() -> PackedVector2Array:
-	return lane_poly(s_det0, s_det1, func(s): return -shift * _shift_profile(s), 1.0)
+	return ctrl_path(k_ctrl)
 
 
 ## Own path of K2 traffic through the bottleneck/zipper zone.
 func zone2_pts() -> PackedVector2Array:
-	return Geo.sub_polyline(_g2[0], _g2[1], s2_a, s2_b)
+	return ctrl2_path(k2_ctrl)
 
 
 ## K2 range and lateral shift for a detour from d0 to d1 on K. {error, s2_a, s2_b, shift}
@@ -308,20 +303,153 @@ func in_lane(lc: Vector2) -> bool:
 
 func current_extent() -> Dictionary:
 	return {"det0": s_det0, "det1": s_det1, "full0": p_full0, "full1": p_full1, "obst0": obst0, "obst1": obst1,
-		"van": s_van, "s2_a": s2_a, "s2_b": s2_b, "shift": shift}
+		"van": s_van, "s2_a": s2_a, "s2_b": s2_b, "shift": shift, "k_ctrl": k_ctrl.duplicate(), "k2_ctrl": k2_ctrl.duplicate(),
+		"two_way": two_way}
 
 
 func default_extent() -> Dictionary:
 	var k2 := _k2_for(s0 - 8.0, s_taper1 + 5.0)
-	return {"det0": s0 - 8.0, "det1": s_taper1 + 5.0, "full0": s_c0 - 1.0, "full1": s_c1, "obst0": s0 + 1.0,
+	var ext := {"det0": s0 - 8.0, "det1": s_taper1 + 5.0, "full0": s_c0 - 1.0, "full1": s_c1, "obst0": s0 + 1.0,
 		"obst1": s_taper1 - 1.0, "van": s0 - 20.0, "s2_a": k2.s2_a, "s2_b": k2.s2_b, "shift": k2.shift}
+	_finish_extent(ext, {})
+	return ext
+
+
+# ------------------------------------------------------------------------------------------
+# Traffic paths as control points (#19): the automatic detour or the one the player laid
+# ------------------------------------------------------------------------------------------
+
+## Control points of the automatic detour (the same curve as the old smoothstep profile).
+static func auto_k_ctrl(ext: Dictionary) -> Array:
+	var sh := -float(ext.shift)
+	return [Vector2(ext.det0, 0.0), Vector2(ext.full0, sh), Vector2(ext.full1, sh), Vector2(ext.det1, 0.0)]
+
+
+## Lateral offset along control points: smoothstep between neighbours.
+static func ctrl_lat(ctrl: Array, s: float) -> float:
+	if ctrl.is_empty():
+		return 0.0
+	if s <= (ctrl[0] as Vector2).x:
+		return (ctrl[0] as Vector2).y
+	for i in ctrl.size() - 1:
+		var a: Vector2 = ctrl[i]
+		var b: Vector2 = ctrl[i + 1]
+		if s <= b.x:
+			var t := clampf((s - a.x) / maxf(0.01, b.x - a.x), 0.0, 1.0)
+			return lerpf(a.y, b.y, t * t * (3.0 - 2.0 * t))
+	return (ctrl[ctrl.size() - 1] as Vector2).y
+
+
+func ctrl_path(ctrl: Array) -> PackedVector2Array:
+	if ctrl.size() < 2:
+		return PackedVector2Array()
+	return lane_poly((ctrl[0] as Vector2).x, (ctrl[ctrl.size() - 1] as Vector2).x, func(s): return ctrl_lat(ctrl, s), 1.0)
+
+
+func ctrl2_path(ctrl: Array) -> PackedVector2Array:
+	if ctrl.size() < 2:
+		return PackedVector2Array()
+	var a: float = (ctrl[0] as Vector2).x
+	var b: float = (ctrl[ctrl.size() - 1] as Vector2).x
+	var straight := true
+	for c in ctrl:
+		if absf((c as Vector2).y) > 0.01:
+			straight = false
+	if straight:
+		return Geo.sub_polyline(_g2[0], _g2[1], a, b)
+	var out := PackedVector2Array()
+	var n := maxi(2, int(ceil(absf(b - a))))
+	for i in n + 1:
+		var s2 := lerpf(a, b, float(i) / n)
+		out.append(lane2_pt(s2, ctrl_lat(ctrl, s2)))
+	return out
+
+
+## Lane coordinates on K2: Vector2(s2, lateral, + = right of K2's travel direction).
+func lane2_coords(p: Vector2) -> Vector2:
+	var r: Array = Geo.closest_on_polyline(_g2[0], _g2[1], p)
+	var s2: float = r[1]
+	return Vector2(s2, (p - Vector2(r[2])).dot(Geo.right_of(lane2_dir(s2))))
+
+
+## Adds the traffic paths to an extent: the automatic ones or the player's (traffic = {k, k2} control
+## points, kept inside the limits: the path of K must start before and end after the blocked range).
+func _finish_extent(ext: Dictionary, traffic: Dictionary) -> void:
+	ext["k_ctrl"] = auto_k_ctrl(ext)
+	ext["k2_ctrl"] = [Vector2(ext.s2_a, 0.0), Vector2(ext.s2_b, 0.0)]
+	var kc: Array = traffic.get("k", [])
+	if kc.size() >= 2:
+		var lim := extent_limits()
+		var lo := maxf(3.0, lim.x - 8.0)
+		var hi := minf(len_k - 3.0, lim.y + 5.0)
+		var c := _clean_ctrl(kc, lo, hi, -(lw + 4.0), lw * 0.5 + 3.0)
+		# the path must leave K before the blocked range and come back after it
+		var first: Vector2 = c[0]
+		var last: Vector2 = c[c.size() - 1]
+		first.x = maxf(lo, minf(first.x, float(ext.obst0) - 2.0))
+		last.x = minf(hi, maxf(last.x, float(ext.obst1) + 2.0))
+		var mid: Array = c.slice(1, c.size() - 1).filter(func(v): return v.x > first.x + 0.5 and v.x < last.x - 0.5)
+		c = [first] + mid + [last]
+		ext["k_ctrl"] = c
+		ext.det0 = first.x
+		ext.det1 = last.x
+		ext.van = minf(s0 - 20.0, ext.det0 - 12.0)
+		var k2 := _k2_for(ext.det0, ext.det1)
+		if k2.error == "":
+			ext.s2_a = k2.s2_a
+			ext.s2_b = k2.s2_b
+		ext["k2_ctrl"] = [Vector2(ext.s2_a, 0.0), Vector2(ext.s2_b, 0.0)]
+	var k2c: Array = traffic.get("k2", [])
+	if k2c.size() >= 2:
+		var c2 := _clean_ctrl(k2c, 3.0, len_k2 - 3.0, -(lw2 * 0.5 + 3.0), lw2 * 0.5 + 4.0)
+		ext["k2_ctrl"] = c2
+		ext.s2_a = c2[0].x
+		ext.s2_b = c2[c2.size() - 1].x
+	ext["two_way"] = paths_apart(ctrl_path(ext.k_ctrl), ctrl2_path(ext.k2_ctrl))
+
+
+## Sorted, clamped control points; both ends on the lane (lateral 0), at least 1 m apart.
+static func _clean_ctrl(src: Array, lo: float, hi: float, lat_lo: float, lat_hi: float) -> Array:
+	var pts: Array = []
+	for q in src:
+		var v: Vector2 = q
+		pts.append(Vector2(clampf(v.x, lo, hi), clampf(v.y, lat_lo, lat_hi)))
+	pts.sort_custom(func(u, w): return u.x < w.x)
+	var out: Array = [pts[0]]
+	for i in range(1, pts.size()):
+		if (pts[i] as Vector2).x - (out[out.size() - 1] as Vector2).x >= 1.0:
+			out.append(pts[i])
+	if out.size() < 2:
+		out.append(Vector2(minf(hi, (out[0] as Vector2).x + 10.0), 0.0))
+	out[0] = Vector2((out[0] as Vector2).x, 0.0)
+	out[out.size() - 1] = Vector2((out[out.size() - 1] as Vector2).x, 0.0)
+	return out
+
+
+## True if two traffic paths keep a car width plus margin apart (no shared bottleneck needed).
+static func paths_apart(a: PackedVector2Array, b: PackedVector2Array, min_gap := TWO_WAY_GAP) -> bool:
+	if a.size() < 2 or b.size() < 2:
+		return true
+	var cum_b := Geo.cumulative(b)
+	for p in a:
+		if float(Geo.closest_on_polyline(b, cum_b, p)[0]) < min_gap:
+			return false
+	return true
 
 
 ## Traffic geometry for the items of a player plan: the detour starts 8 m before the first item that
 ## stands in K and reaches the full shift where the plan blocks K up to its traffic-side edge. Kept
 ## within limits so the crew van, the machine slots and the waiting spots still fit.
-func extent_for(items: Array) -> Dictionary:
-	var ext := default_extent()
+func extent_for(items: Array, traffic: Dictionary = {}) -> Dictionary:
+	var ext := _extent_items(items)
+	_finish_extent(ext, traffic)
+	return ext
+
+
+func _extent_items(items: Array) -> Dictionary:
+	var k2d := _k2_for(s0 - 8.0, s_taper1 + 5.0)
+	var ext := {"det0": s0 - 8.0, "det1": s_taper1 + 5.0, "full0": s_c0 - 1.0, "full1": s_c1, "obst0": s0 + 1.0,
+		"obst1": s_taper1 - 1.0, "van": s0 - 20.0, "s2_a": k2d.s2_a, "s2_b": k2d.s2_b, "shift": k2d.shift}
 	var a := INF
 	var b := -INF
 	var e0 := INF
@@ -367,19 +495,17 @@ func apply_extent(ext: Dictionary) -> void:
 	s2_a = ext.s2_a
 	s2_b = ext.s2_b
 	shift = ext.shift
+	k_ctrl = (ext.k_ctrl as Array).duplicate() if ext.has("k_ctrl") else auto_k_ctrl(ext)
+	k2_ctrl = (ext.k2_ctrl as Array).duplicate() if ext.has("k2_ctrl") else [Vector2(s2_a, 0.0), Vector2(s2_b, 0.0)]
+	two_way = bool(ext.get("two_way", false))
 
 
 func detour_pts_for(ext: Dictionary) -> PackedVector2Array:
-	var d0: float = ext.det0
-	var d1: float = ext.det1
-	var f0: float = ext.full0
-	var f1: float = ext.full1
-	var sh: float = ext.shift
-	return lane_poly(d0, d1, func(s): return -sh * _profile(s, d0, f0, f1, d1), 1.0)
+	return ctrl_path(ext.k_ctrl)
 
 
 func zone2_pts_for(ext: Dictionary) -> PackedVector2Array:
-	return Geo.sub_polyline(_g2[0], _g2[1], ext.s2_a, ext.s2_b)
+	return ctrl2_path(ext.k2_ctrl)
 
 
 # ------------------------------------------------------------------------------------------

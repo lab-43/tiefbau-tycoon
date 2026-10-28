@@ -28,6 +28,7 @@ const PLAN_RADIUS := 500.0  # m around the trench: where the designer places thi
 var items: Array = []       # {kind, pos: Vector2, yaw: float, phase: float, group: String}
 var lines: Array = []       # PackedVector2Array per yellow marking
 var custom := false         # false = standard template (layout order, traffic geometry unchanged)
+var traffic := {}           # player-laid traffic paths (#19): {"k": [Vector2(s, lat)], "k2": [...]}; empty = automatic
 
 
 static func is_linear(kind: String) -> bool:
@@ -69,7 +70,14 @@ func copy() -> ClosurePlan:
 	for l in lines:
 		p.lines.append(PackedVector2Array(l))
 	p.custom = custom
+	for k in traffic:
+		p.traffic[k] = (traffic[k] as Array).duplicate()
 	return p
+
+
+## Traffic geometry this plan leads to (detour, blocked range, crew van spot, traffic paths).
+func extent(lay: SiteLayout) -> Dictionary:
+	return lay.extent_for(items, traffic) if custom else lay.default_extent()
 
 
 func is_empty() -> bool:
@@ -304,7 +312,7 @@ func counts() -> Dictionary:
 ## [{id, ok, required, text, hint}]. Geometry from the layout: trench, machine slots, traffic paths.
 func checks(lay: SiteLayout) -> Array:
 	var out: Array = []
-	var ext := lay.extent_for(items)
+	var ext := extent(lay)
 	var sep_kinds := ["bake", "cone", "schranke", "fence"]
 	var lc_of: Array = []
 	for it in items:
@@ -381,7 +389,9 @@ func checks(lay: SiteLayout) -> Array:
 				in_path.append(i)
 				break
 	var why := "Der Verkehr wird ab der ersten Bake im Fahrstreifen verschwenkt."
-	if not in_path.is_empty():
+	if not traffic.is_empty():
+		why = "Die Fahrspuren hast du selbst gelegt: mit dem Werkzeug „Fahrspur“ um die Teile herumführen oder die Teile versetzen."
+	elif not in_path.is_empty():
 		# the detour has limits (crew van, waiting spots, next junction): explain when the plan exceeds them
 		var bx := lay.lane_coords(item_center(items[in_path[0]])).x
 		if bx > float(ext.obst1) + 0.5:
@@ -390,6 +400,19 @@ func checks(lay: SiteLayout) -> Array:
 			why = "Früher als %s m vor dem Graben kann die Verschwenkung hier nicht beginnen. Vorderes Ende kürzer machen." % _fmt(lay.s_t0 - float(ext.obst0))
 	out.append({"id": "fahrweg", "ok": in_path.is_empty(), "required": true, "text": "Fahrweg des Verkehrs frei", "bad": in_path,
 		"hint": _bad_text(in_path, "dort, wo Autos fahren (gestrichelte Linie)", lay) + why})
+	# 4b. the traffic paths (automatic or laid by the player, #19) stay out of the work area
+	var through := ""
+	for pk2 in 2:
+		var pp2: PackedVector2Array = paths[pk2]
+		for q in pp2:
+			var lq := lay.lane_coords(q)
+			if lq.x > lay.s_t0 - 0.5 and lq.x < lay.s_c1 and lq.y > -lay.lw * 0.5 + 0.9 and lq.y < lay.lw * 0.5 + 0.5:
+				through = where(lay, q)
+				break
+		if through != "":
+			break
+	out.append({"id": "spur", "ok": through == "", "required": true, "text": "Fahrspuren am Arbeitsbereich vorbei",
+		"hint": ("Eine Fahrspur führt %s durch den Arbeitsbereich. " % through if through != "" else "") + "Mit dem Werkzeug „Fahrspur“ die blauen Linien verschieben."})
 	# 5. machine slots free
 	var slot_block: Array = []
 	for i in items.size():
@@ -414,8 +437,8 @@ func checks(lay: SiteLayout) -> Array:
 			warn = true
 	out.append({"id": "vorwarnung", "ok": warn, "required": false, "text": "Vorwarnung Z 123",
 		"hint": "Zeichen 123 am rechten Rand vor dem Beginn der Verschwenkung aufstellen."})
-	# 8. priority signs at a bottleneck with oncoming traffic
-	if lay.oncoming:
+	# 8. priority signs at a bottleneck with oncoming traffic (not needed when both paths are apart, #19)
+	if lay.oncoming and not bool(ext.get("two_way", false)):
 		var has208 := false
 		var has308 := false
 		for i in items.size():
@@ -499,7 +522,13 @@ func to_dict() -> Dictionary:
 			flat.append(p2.x)
 			flat.append(p2.y)
 		ls.append(flat)
-	return {"v": 1, "custom": custom, "items": its, "lines": ls}
+	var tr := {}
+	for k in traffic:
+		var arr: Array = []
+		for v in (traffic[k] as Array):
+			arr.append([(v as Vector2).x, (v as Vector2).y])
+		tr[k] = arr
+	return {"v": 1, "custom": custom, "items": its, "lines": ls, "traffic": tr}
 
 
 static func from_dict(d: Dictionary) -> ClosurePlan:
@@ -518,4 +547,11 @@ static func from_dict(d: Dictionary) -> ClosurePlan:
 			pl.append(Vector2(float(flat[k]), float(flat[k + 1])))
 		if pl.size() >= 2:
 			p.lines.append(pl)
+	var tr: Dictionary = d.get("traffic", {})
+	for k in tr:
+		var arr: Array = []
+		for q in tr[k]:
+			arr.append(Vector2(float(q[0]), float(q[1])))
+		if arr.size() >= 2:
+			p.traffic[str(k)] = arr
 	return p

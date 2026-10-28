@@ -3,6 +3,7 @@ extends RefCounted
 ## key events (plan view, chains, curve, select, delete, undo), a player plan that the crew builds
 ## (incl. moving the crew van ahead of a longer taper), traffic geometry from the plan, save data,
 ## teardown by the crew, and a plan change after a partly built standard closure (orphan items).
+## #19: traffic paths laid with the tool "Fahrspur" (drag, insert, delete, two-way traffic).
 ## Driven by e2e_driver.gd (_absperrung_test), which owns the clock and the screenshots.
 
 var drv: Node
@@ -91,6 +92,13 @@ func tick(_delta: float) -> void:
 			_design()
 			drv.shot("absp_02_eigener_plan")
 			t_mark = drv.t
+			step = 21
+		21:
+			if not drv.shot_queue.is_empty() or drv.t - t_mark < 0.5:
+				return
+			des.set_mode("lane")
+			drv.shot("absp_02b_fahrspuren")
+			t_mark = drv.t
 			step = 3
 		3:
 			if not drv.shot_queue.is_empty() or drv.t - t_mark < 0.5:
@@ -147,6 +155,14 @@ func tick(_delta: float) -> void:
 			ok(pos_ok, "alle %d Teile stehen genau wie geplant" % site.item_defs.size())
 			ok(site.yellow_lines.size() == 1 and site.yellow_frac >= 1.0, "gelbe Markierung komplett")
 			ok(site.traffic_on, "Verkehr verschwenkt")
+			# #19: the oncoming path was moved away in the designer: no bottleneck, both directions drive
+			ok(lay2.two_way and not w.traffic.zones.has(100 + site.sid), "zwei Fahrspuren: keine Engstelle (%s)" % str(lay2.two_way))
+			var moved_k2 := false
+			for dd in w.traffic.detours.get(lay2.key2, []):
+				for q in (dd.pts as PackedVector2Array):
+					if absf(lay2.lane2_coords(q).y) > 2.5:
+						moved_k2 = true
+			ok(moved_k2, "Gegenrichtung fährt auf der verlegten Fahrspur")
 			ok(site.crew_van.pos2().distance_to(lay2.lane_pt(lay2.s_van, SiteLayout.CURB)) < 1.0, "Kolonnenbus am neuen Platz")
 			ok(van_t >= 0.0 and van_t < 150.0, "Kolonnenbus setzt zurück statt um den Block zu fahren (%.0f s)" % van_t)
 			var sd := site.save_state()
@@ -158,6 +174,8 @@ func tick(_delta: float) -> void:
 				if p2.items[i].kind != site.plan.items[i].kind or (p2.items[i].pos as Vector2).distance_to(site.plan.items[i].pos) > 0.001:
 					same = false
 			ok(same, "Plan aus dem Spielstand gleich")
+			var tk2: Array = p2.traffic.get("k2", [])
+			ok(tk2.size() == (site.plan.traffic.get("k2", []) as Array).size() and tk2.size() >= 4, "eigene Fahrspuren im Spielstand (%d Punkte)" % tk2.size())
 			ok(not Game.save_data().is_empty(), "Spielstand speicherbar")
 			# pictures in daylight, looking from the curb side and from behind along the lane
 			DebugTools.light_override(12.0)
@@ -504,7 +522,74 @@ func _design() -> void:
 	_key(KEY_Z, true)
 	rig2.set_view(keep_t, keep_d, rad_to_deg(rig2._t_yaw), 90.0)
 	des._update_mapping()
+	_lanes()
 	des.set_kind("bake")
+
+
+## #19: lay the traffic paths with the tool "Fahrspur" (real events): drag, insert, delete, two-way.
+## The plan keeps the other direction moved away: both directions drive at the same time.
+func _lanes() -> void:
+	var lay := site.lay
+	var rig: CameraRig = drv.world.camera_rig
+	var keep_t := rig._t_target
+	var keep_d := rig._t_distance
+	# about 10 px per metre over the detour, so that neighbouring handles are apart on screen
+	var mid := (float(des._ext.det0) + float(des._ext.det1)) * 0.5
+	var c := lay.lane_pt(mid, -lay.lw * 0.5)
+	rig.set_view(Vector3(c.x, 0.0, c.y), des.get_viewport_rect().size.y / (10.0 * CameraRig.TOPDOWN_SIZE), rad_to_deg(rig._t_yaw), 90.0)
+	des._update_mapping()
+	des.snap = false
+	des.mode_btns["lane"].pressed.emit()
+	ok(des.mode == "lane", "Werkzeug Fahrspur")
+	ok(des.plan.traffic.is_empty() and not bool(des._ext.two_way), "anfangs automatische Fahrspuren mit Engstelle")
+	var kc := des._ctrl_of("k")
+	ok(kc.size() == 4, "Fahrspur Baustellenseite mit 4 Punkten (%d)" % kc.size())
+	if kc.size() != 4:
+		return
+	var k0: Vector2 = kc[0]
+	var k1: Vector2 = kc[1]
+	var k2v: Vector2 = kc[2]
+	# the start slides along the lane: pulled sideways it stays on the lane centre
+	var p0 := des._ctrl_pt("k", k0)
+	_drag(p0, p0 + Geo.left_of(lay.lane_dir(k0.x)) * 2.0 - lay.lane_dir(k0.x) * 1.0)
+	var kc1 := des._ctrl_of("k")
+	ok(des.plan.traffic.has("k") and absf((kc1[0] as Vector2).y) < 0.01, "Anfang bleibt auf dem Fahrstreifen (seitlich %.2f m)" % (kc1[0] as Vector2).y)
+	_key(KEY_Z, true)
+	ok(des.plan.traffic.is_empty(), "Strg+Z nimmt die Fahrspur zurück")
+	# an inner point dragged into the work area: the check reports it
+	_drag(des._ctrl_pt("k", k1), lay.lane_pt(k1.x, 0.0))
+	ok(_failed(des._checks, true).has("spur"), "Fahrspur durch den Arbeitsbereich wird gemeldet")
+	_key(KEY_Z, true)
+	ok(not _failed(des._checks, true).has("spur"), "nach Rückgängig wieder frei")
+	# a click on the line inserts a point, a right click deletes it
+	var sm := (k1.x + k2v.x) * 0.5
+	var on_path := lay.lane_pt(sm, SiteLayout.ctrl_lat(kc, sm))
+	_click(on_path)
+	ok(des._ctrl_of("k").size() == 5, "Klick auf die Linie setzt einen Punkt (%d)" % des._ctrl_of("k").size())
+	_right_click(on_path)
+	ok(des._ctrl_of("k").size() == 4, "Rechtsklick löscht ihn (%d)" % des._ctrl_of("k").size())
+	_key(KEY_Z, true)
+	_key(KEY_Z, true)
+	ok(des.plan.traffic.is_empty(), "zurück zur automatischen Fahrspur")
+	# both directions at once: pull the other path away from the closure at two new points
+	var away := 1.0 if lay.oncoming else -1.0
+	for sx in [float(des._ext.det0) + 2.5, float(des._ext.det1) - 2.5]:
+		var s2 := lay.lane2_coords(lay.lane_pt(sx, -lay.shift)).x
+		_drag(lay.lane2_pt(s2, 0.0), lay.lane2_pt(s2, 3.0 * away))
+	var k2c := des._ctrl_of("k2")
+	ok(k2c.size() == 4, "andere Fahrspur mit 2 neuen Punkten (%d)" % k2c.size())
+	ok(bool(des._ext.two_way), "Fahrspuren weit genug auseinander: beide Richtungen gleichzeitig")
+	var ids: Array = des._checks.map(func(ch): return ch.id)
+	ok(not ids.has("vorrang"), "keine Vorrangregelung nötig")
+	ok(des.traffic_lbl.text.contains("gleichzeitig") or des.traffic_lbl.text.contains("getrennt"), "Hinweis: %s" % des.traffic_lbl.text.replace("\n", " / "))
+	des.traffic_auto_btn.pressed.emit()
+	ok(des.plan.traffic.is_empty() and not bool(des._ext.two_way), "„Automatisch“ verwirft die eigenen Fahrspuren")
+	_key(KEY_Z, true)
+	ok(bool(des._ext.two_way) and des.plan.traffic.has("k2"), "rückgängig: wieder zwei Fahrspuren")
+	var req := _failed(des._checks, true)
+	ok(req.is_empty(), "Plan mit eigenen Fahrspuren erfüllt alle Pflichtpunkte %s" % str(req))
+	rig.set_view(keep_t, keep_d, rad_to_deg(rig._t_yaw), 90.0)
+	des._update_mapping()
 
 
 func _failed(checks: Array, required: bool) -> Array:
