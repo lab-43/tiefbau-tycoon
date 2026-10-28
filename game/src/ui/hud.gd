@@ -38,6 +38,8 @@ var _t := 0.0
 var _hint_t := 45.0
 var _last_money := 0.0
 var markers: WorldMarkers      # screen markers + view bar (#7), below all panels
+var designer: ClosureDesigner      # open closure designer (#9) – the rest of the HUD is hidden meanwhile
+var _designer_hidden: Array = []
 
 
 func _ready() -> void:
@@ -723,10 +725,14 @@ func _right_site(s: Site) -> void:
 	_bind(pb, func(): return s.progress)
 	right_body.add_child(pb)
 	for a in s.actions():
-		var b := UI.button(a.label, "hammer", a.enabled)
+		var b := UI.button(a.label, "pencil" if a.id == "plan" else "hammer", a.enabled)
 		b.disabled = not a.enabled
 		var id: String = a.id
-		b.pressed.connect(func(): s.do_action(id))
+		b.pressed.connect(func():
+			if id == "plan":
+				open_closure_designer(s)
+			else:
+				s.do_action(id))
 		right_body.add_child(b)
 		if not a.enabled and a.reason != "":
 			var r := UI.label("→ " + a.reason, 12, UI.MUTED)
@@ -923,7 +929,7 @@ func _process(delta: float) -> void:
 	_hint_t -= real
 	if _hint_t < 3.0:
 		hint.modulate.a = maxf(0.25, _hint_t / 3.0)
-	if _t < 0.2:
+	if _t < 0.2 or designer != null:
 		return
 	_t = 0.0
 	time_lbl.text = Clock.time_string()
@@ -989,3 +995,39 @@ func _build_markers() -> void:
 	markers.name = "WorldMarkers"
 	markers.hud = self
 	add_child(markers)
+
+
+# ------------------------------------------------------------------------------------------
+# Closure designer (#9)
+# ------------------------------------------------------------------------------------------
+
+func open_closure_designer(s: Site) -> void:
+	if designer != null or s == null or not is_instance_valid(s):
+		return
+	var why := s.can_edit_plan()
+	if why != "":
+		Events.warn(why)
+		return
+	_designer_hidden.clear()
+	for c in get_children():
+		if c != toasts and c is CanvasItem and (c as CanvasItem).visible:
+			(c as CanvasItem).visible = false
+			_designer_hidden.append(c)
+	designer = ClosureDesigner.new()
+	designer.name = "ClosureDesigner"
+	add_child(designer)
+	move_child(toasts, -1)
+	designer.closed.connect(_on_designer_closed)
+	designer.open(s)
+
+
+func _on_designer_closed(_accepted: bool) -> void:
+	for c in _designer_hidden:
+		if is_instance_valid(c):
+			(c as CanvasItem).visible = true
+	_designer_hidden.clear()
+	if designer:
+		remove_child(designer)
+		designer.queue_free()
+		designer = null
+	_on_selection(Game.selected)

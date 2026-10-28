@@ -155,17 +155,41 @@ static func chain(kind: String, path: PackedVector2Array, spacing: float, lay: S
 				origin = a + t * ELEM_LEN
 			out.append(make_item(kind, origin, wrapf(yaw, -PI, PI)))
 		return out
+	# never wider than the chosen spacing (Leitbaken have a maximum distance)
 	var sp := maxf(0.3, spacing)
-	var cnt := int(floor(total / sp + 0.001))
-	var step2 := total / float(cnt) if cnt > 0 else total
-	if cnt == 0:
-		cnt = 1
+	var cnt := maxi(1, int(ceil(total / sp - 0.02)))
+	var step2 := total / float(cnt)
 	for i in range(0, cnt + 1):
 		if i == 0 and skip_first:
 			continue
 		var s := minf(i * step2, total)
 		var p: Vector2 = Geo.sample(path, cum, s)[0]
 		out.append(make_item(kind, p, auto_yaw(kind, p, lay)))
+	return out
+
+
+## Path of a straight chain from a to b. Along the closed lane (both ends near it, running roughly
+## parallel) the chain follows the lane's curvature at a linearly changing offset, like a real
+## Leitbaken line; otherwise it is the straight segment.
+static func lane_path(a: Vector2, b: Vector2, lay: SiteLayout) -> PackedVector2Array:
+	var la := lay.lane_coords(a)
+	var lb := lay.lane_coords(b)
+	var ds := lb.x - la.x
+	var straight := PackedVector2Array([a, b])
+	if absf(ds) < 2.0 or absf(la.y) > 7.0 or absf(lb.y) > 7.0:
+		return straight
+	if absf(lb.y - la.y) > absf(ds) * 0.6:
+		return straight
+	if la.x < 0.0 or lb.x < 0.0 or la.x > lay.len_k or lb.x > lay.len_k:
+		return straight
+	var n := clampi(int(ceil(absf(ds) / 1.0)), 2, 400)
+	var out := PackedVector2Array()
+	for i in n + 1:
+		var t := float(i) / n
+		out.append(lay.lane_pt(lerpf(la.x, lb.x, t), lerpf(la.y, lb.y, t)))
+	# exact end points (lane_coords rounding)
+	out[0] = a
+	out[out.size() - 1] = b
 	return out
 
 
@@ -345,7 +369,7 @@ func checks(lay: SiteLayout) -> Array:
 			slot_block = i
 			break
 	out.append({"id": "plaetze", "ok": slot_block < 0, "required": true, "text": "Platz für Bagger und Kipper frei",
-		"hint": "Im orange umrandeten Maschinenplatz darf nichts stehen."})
+		"hint": ("%s steht im Maschinenplatz. " % label(items[slot_block].kind) if slot_block >= 0 else "") + "Im orange umrandeten Platz darf nichts stehen."})
 	# 6. taper ahead of the cross barrier
 	var n_taper := 0
 	for i in items.size():

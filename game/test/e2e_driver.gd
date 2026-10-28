@@ -129,6 +129,8 @@ func _process(delta: float) -> void:
 			_debug_test(delta)
 		"markierungen":
 			_markierungen(delta)
+		"absperrung":
+			_absperrung_test(delta)
 
 
 func _smoke() -> void:
@@ -704,3 +706,12 @@ func _verkehrslichter_test(delta: float) -> void:
 		_vl = load("res://test/e2e_verkehrslichter.gd").new()
 		_vl.drv = self
 	_vl.tick(delta)
+
+
+## Closure designer and player plans (test/e2e_absperrung.gd, #9).
+var _absp: RefCounted
+func _absperrung_test(delta: float) -> void:
+	if _absp == null:
+		_absp = load("res://test/e2e_absperrung.gd").new()
+		_absp.drv = self
+	_absp.tick(delta)

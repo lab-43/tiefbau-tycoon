@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs end-to-end scenarios headless on the offline Utrecht map and reports pass/fail.
 # usage: tools/test.sh [scenario ...]            default: smoke issue
-#   scenarios: smoke issue job lowbed save+load pbf ebenen debug leuchten verkehrslichter rig markierungen  (save+load = save mid-dig,
+#   scenarios: smoke issue job lowbed save+load pbf ebenen debug leuchten verkehrslichter rig markierungen absperrung  (save+load = save mid-dig,
 #              then load and finish; rig = excavator linkage/cylinders, see game/test/rig_test.gd;
 #              ebenen = height order of flat map layers, see game/test/layer_test.gd – also part of pbf)
 #   env: E2E_SPEED (default 10), E2E_TIMEOUT seconds per scenario (default 1500), E2E_SHOTS=<dir>
@@ -58,6 +58,9 @@ for s in "${SCEN[@]}"; do
     markierungen)  # screen markers (#7); also fails on any script error, the checks would not notice one in _draw
       run markierungen "E2E OK markierungen" --e2e=markierungen
       if grep -q "SCRIPT ERROR" /tmp/tt_e2e_markierungen.log; then FAIL=1; echo "FAIL  markierungen: Skriptfehler im Log"; grep -A3 "SCRIPT ERROR" /tmp/tt_e2e_markierungen.log | head -8 | sed 's/^/      /'; fi ;;
+    absperrung)  # closure designer (#9); like markierungen it also fails on a script error (in _draw)
+      run absperrung "E2E OK absperrung" --e2e=absperrung
+      if grep -q "SCRIPT ERROR" /tmp/tt_e2e_absperrung.log; then FAIL=1; echo "FAIL  absperrung: Skriptfehler im Log"; grep -A3 "SCRIPT ERROR" /tmp/tt_e2e_absperrung.log | head -8 | sed 's/^/      /'; fi ;;
     *) echo "unbekanntes Szenario: $s"; FAIL=1 ;;
   esac
 done
