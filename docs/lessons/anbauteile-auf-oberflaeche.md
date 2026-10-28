@@ -18,6 +18,8 @@ pruefung: e2e:leuchten, e2e:verkehrslichter
 
 **Regel (ergänzt):**
 - Hat ein Modell eigenes Lampenglas (Materialien `*__light_head`, `__light_tail`, `__light_brake`, `__indicator_l/r`), dieses Glas leuchten lassen statt Teile anzubauen. Firmenfahrzeuge: `Vehicle._setup_lights()`, Verkehr: `carlamp.gdshader` (ein Material pro Modell und Funktion, Zustand pro Auto über `instance uniform lamp`).
-- Nur ohne eigenes Glas Ersatzteile anbauen, und dann an den Markern des Modells (`light_*`, `indicator_*`) per Strahl auf die Oberfläche (`TrafficModels._on_surface`).
+- Fehlt das geteilte Glas im Asset, ist aber bekannt, wo es liegt, wird es beim Laden aufgeteilt (`LampSplit`: Polizei übernimmt das Glas des Kompakt-Pkw, Scania wird an den Lichtmarkern geteilt). Jonathan zur ersten Fassung mit Kästen: „passe es so an, dass man KEINE Flächen die rausgucken mehr zu sehen sind“.
+- Kästen nur noch für die Ersatzmodelle ohne private Assets, dann an den Markern per Strahl auf die Oberfläche (`TrafficModels._on_surface`).
+- Farbige Lampen: Emission ≤ ~2 (Lektion leuchten-nicht-ueberstrahlen).
 - `e2e:verkehrslichter` prüft jedes Verkehrsmodell (Glas vorhanden oder Kasten ≤ 6 cm von der Karosserie) und schlägt mit dem alten Code an.
 
