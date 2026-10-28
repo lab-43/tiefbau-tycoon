@@ -48,7 +48,8 @@ jobs:
 
   automerge:
     needs: test
-    if: github.ref != 'refs/heads/main' && contains(github.event.head_commit.message, 'Automerge: ja')
+    # quoted: a plain YAML scalar must not contain ": " (the "Automerge: ja" text)
+    if: "${{ github.ref != 'refs/heads/main' && contains(github.event.head_commit.message, 'Automerge: ja') }}"
     runs-on: ubuntu-24.04
     permissions:
       contents: write

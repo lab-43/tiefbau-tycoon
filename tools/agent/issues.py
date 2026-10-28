@@ -44,9 +44,13 @@ def find_dir(arg):
     if os.environ.get("TT_ISSUES"):
         return Path(os.environ["TT_ISSUES"])
     here = Path(__file__).resolve().parents[2]
-    for c in [Path.home() / "mnt" / "Tiefbau Tycoon" / "userdata" / "issues", here / "userdata" / "issues",
-              Path.home() / ".local/share/godot/app_userdata/Baustellen Manager/issues"]:
+    cands = [Path.home() / "mnt" / "Tiefbau Tycoon" / "userdata" / "issues", here / "userdata" / "issues",
+             Path.home() / ".local/share/godot/app_userdata/Baustellen Manager/issues"]
+    for c in cands:
         if c.is_dir():
+            return c
+    for c in cands:  # no issue yet: the data folder exists, issues/ is created on the first write
+        if c.parent.is_dir():
             return c
     sys.exit("Kein Issue-Ordner gefunden (--dir oder TT_ISSUES setzen)")
 
@@ -146,12 +150,16 @@ def line(it):
 
 
 def cmd_list(a, root):
+    n = 0
     for it in issues(root):
         if not a.all and it["status"] in ("erledigt", "abgelehnt"):
             continue
         if a.status and it["status"] != a.status:
             continue
         print(line(it))
+        n += 1
+    if n == 0:
+        print("Keine offenen Meldungen%s." % ("" if not a.all else " (auch keine erledigten)"))
 
 
 def cmd_next(a, root):
@@ -177,8 +185,9 @@ def cmd_show(a, root):
         return
     print(line(it))
     print("Ordner:", folder)
-    print("Gemeldet: %s · Build %s · Herkunft %s" % (m.get("created"), m.get("build", {}).get("version"), m.get("origin")))
-    print("Karte: %s (%s)" % (m.get("map", {}).get("name"), m.get("map", {}).get("id")))
+    print("Gemeldet: %s · Build %s · Herkunft %s" % (m.get("created"), (m.get("build") or {}).get("version") or "-", m.get("origin")))
+    if (m.get("map") or {}).get("id"):
+        print("Karte: %s (%s)" % (m["map"].get("name"), m["map"].get("id")))
     print("\n" + (m.get("text") or "(kein Text)") + "\n")
     if m.get("pins"):
         print("Stellen:", "; ".join("%d %s (x %.1f z %.1f)" % (i + 1, p.get("label"), p["x"], p["z"]) for i, p in enumerate(m["pins"])))

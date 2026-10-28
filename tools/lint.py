@@ -93,6 +93,17 @@ def check_text(rel, text):
         report("ERROR", f"{rel}:{line}", f"E-Mail-Adresse im Repo ({mail}) – private Adressen gehören nicht hierher", "keine-mail")
 
 
+def check_yaml(rel, text):
+    try:
+        import yaml  # optional; CI runners and most sessions have PyYAML
+    except ImportError:
+        return
+    try:
+        yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        report("ERROR", rel, "YAML kaputt: " + str(e).replace("\n", " ")[:160], "yaml-gueltig")
+
+
 def check_lesson(rel, text):
     if not text.startswith("---"):
         report("ERROR", rel, "Lektion ohne Frontmatter (---)", "lernen")
@@ -127,6 +138,8 @@ def main():
                 check_gd(p, rel, lines)
             elif p.suffix == ".sh":
                 check_sh(p, rel, lines)
+            if p.suffix in (".yml", ".yaml"):
+                check_yaml(rel, text)
             if rel.startswith("docs/lessons/") and p.suffix == ".md" and p.name != "README.md":
                 check_lesson(rel, text)
     errors = [x for x in problems if x[0] == "ERROR"]

@@ -12,6 +12,16 @@ Privates Tiefbau-/Straßenbau-Tycoon-Spiel auf echten OpenStreetMap-Karten. Godo
 - **Spielstände, Karten, Meldungen und Protokolle** liegen gemeinsam in `userdata/`.
 - **Probleme oder Wünsche:** im Spiel **F8** drücken. Die Meldung landet in `userdata/issues/`, Agenten arbeiten sie ab. Rückfragen und Testbitten erscheinen unter „Meldungen“.
 
+## Einmalig: auf GitHub bringen
+
+1. Auf GitHub ein **leeres, privates** Repository anlegen, z. B. `tiefbau-tycoon`. Ohne README, .gitignore oder Lizenz.
+2. Im Ordner `Tiefbau Tycoon` (Git Bash oder Terminal):
+   ```
+   git remote add origin https://github.com/<dein-name>/tiefbau-tycoon.git
+   git push -u origin main --tags
+   ```
+3. Neue Claude-Sessions mit diesem Repository starten. Für Meldungen, Assets und Builds muss die Session mit dem PC verknüpft sein; dafür muss die Claude-Desktop-App laufen.
+
 ## Entwickeln
 
 Die Arbeit erledigen Claude-Sessions; Regeln und Abläufe stehen in `CLAUDE.md` und `.claude/skills/`. Kurz:

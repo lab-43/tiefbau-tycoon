@@ -22,13 +22,19 @@ Status: `offen` → `in_arbeit` → (`rueckfrage` ↔ Antwort) → `bitte_pruefe
 
 ## Werkzeug
 
-Alles läuft über `tools/agent/issues.py` **in der Geräte-Shell** (`device_bash`, Python 3.10 auf dem PC), denn nur dort sind Übernahmen atomar:
+Alles läuft über `tools/agent/issues.py` **in der Geräte-Shell** (`device_bash`, Python 3.10 auf dem PC), denn nur dort sind Übernahmen atomar. Der PC-Klon wird selten aktualisiert. Deshalb gibt es eine Agentenkopie, die jede Session aktuell hält:
 
 ```
-cd "$HOME/mnt/Tiefbau Tycoon" && python3 tools/agent/issues.py next
+# einmal pro Session: sha1sum der Repo-Fassung im Container mit der PC-Fassung vergleichen
+cd "$HOME/mnt/Tiefbau Tycoon"; I=tools/agent/issues.py; [ -f userdata/.agent/issues.py ] && I=userdata/.agent/issues.py; sha1sum $I
+# weicht sie ab: die Container-Fassung per device_commit_files nach userdata/.agent/issues.py schreiben
+# danach immer:
+cd "$HOME/mnt/Tiefbau Tycoon"; I=tools/agent/issues.py; [ -f userdata/.agent/issues.py ] && I=userdata/.agent/issues.py; python3 $I next
 ```
 
-Der Ordner wird automatisch gefunden. Die Session-ID ist eine kurze eindeutige Kennung, z. B. die letzten 8 Zeichen der Claude-Session-URL. Sie bleibt während der ganzen Session gleich. Ist `tools/agent/issues.py` auf dem PC veraltet (Fehlermeldung oder fehlender Befehl), lege die aktuelle Fassung mit `device_commit_files` dorthin.
+- Der Meldungsordner wird automatisch gefunden (`userdata/issues`).
+- Die Session-ID (`--session S`) ist eine kurze eindeutige Kennung, z. B. die letzten 8 Zeichen der Claude-Session-URL. Sie bleibt während der ganzen Session gleich.
+- Das Datenformat (jsonl anhängen, `claims/<n>/owner.json`) bleibt abwärtskompatibel, weil andere Sessions mit älteren Fassungen gleichzeitig arbeiten können.
 
 ## Ablauf
 
@@ -44,11 +50,16 @@ Der Ordner wird automatisch gefunden. Die Session-ID ist eine kurze eindeutige K
    - Die Build-Version der Meldung mit dem aktuellen main vergleichen. Vielleicht ist es schon behoben.
 4. **Reproduzieren:**
    ```
-   tools/gd.sh run -- --autostart --e2e=repro --issue="/mnt/user-data/uploads/Tiefbau Tycoon/userdata/issues/<ordner>" \
+   tools/gd.sh run -- --e2e=repro --issue="/mnt/user-data/uploads/Tiefbau Tycoon/userdata/issues/<ordner>" \
        --watch=60 --out=/tmp/repro-<n>
    ```
    - Das lädt `spielstand.sav`, stellt die Kamera wie in der Meldung, macht `repro_kamera.png` und je Pin `repro_stelle_N.png` und schreibt alle 10 s den Zustand nach `repro.log`.
    - Headless (ohne `run`, mit `godot --headless --path game -- …`) entstehen keine Bilder, nur `repro.log`.
+   - Kein `--autostart` verwenden, denn der Spielstand bringt Firma und Karte mit (Lektion load-ohne-autostart).
+   - **Echte Karten (Hamburg …):** Der Container erreicht weder Geofabrik noch Overpass. Deshalb die fertige Karte vom PC holen:
+     - `userdata/maps/<map-id>/baked_v3.bin` und `map.json` per `device_stage_files` holen (`<map-id>` steht in `issue.json` → `map.id`),
+     - nach `~/.local/share/godot/app_userdata/Baustellen Manager/maps/<map-id>/` kopieren.
+     - Ohne diese Dateien bricht das Laden ab.
    - Ohne Spielstand: mit `--autostart --fixture=utrecht` an der Stelle nachstellen und, wenn sinnvoll, ein neues e2e-Szenario schreiben.
 5. **Unklar? Fragen statt raten:**
    - `issues.py ask <n> --session S --text "…"` setzt den Status `rueckfrage`. Jonathan sieht die Frage im Spiel unter „Meldungen“ und antwortet dort.
