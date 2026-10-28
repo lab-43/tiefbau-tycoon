@@ -66,7 +66,7 @@ cd "$HOME/mnt/Tiefbau Tycoon"; I=tools/agent/issues.py; [ -f userdata/.agent/iss
      - `userdata/maps/<map-id>/baked_v<n>.bin` und `map.json` per `device_stage_files` holen (`<map-id>` steht in `issue.json` → `map.id`),
      - nach `~/.local/share/godot/app_userdata/Baustellen Manager/maps/<map-id>/` kopieren.
      - Ohne diese Dateien bricht das Laden ab.
-     - Ändert der Fix `MapBuilder.BAKE_VERSION`, passt die geholte Datei nicht mehr. Dann den Auszug `userdata/extracts/<region>.osm.pbf` holen und in `maps/<map-id>/osm2/complete.json` eintragen: `{"pbf": "<Pfad im Container>", "source": "geofabrik", "region": "<Region>"}`. Das Spiel baut die Karte dann offline neu (Hamburg ca. 1 min).
+     - Ändert der Fix `MapBuilder.BAKE_VERSION`, passt die geholte Datei nicht mehr. Dann den Auszug holen: Den Dateinamen nennt `"pbf"` in `userdata/maps/<map-id>/osm2/complete.json` auf dem PC (der Ordner davor kann veraltet sein, die Datei liegt unter `userdata/extracts/`). Im Container in `maps/<map-id>/osm2/complete.json` eintragen: `{"pbf": "<Pfad im Container>", "source": "geofabrik", "region": "<Region>"}`. Das Spiel baut die Karte dann offline neu (Hamburg im Container gut 1 min).
    - Ohne Spielstand: mit `--autostart --fixture=utrecht` an der Stelle nachstellen und, wenn sinnvoll, ein neues e2e-Szenario schreiben.
 5. **Unklar? Fragen statt raten:**
    - `issues.py ask <n> --session S --text "…"` setzt den Status `rueckfrage`. Jonathan sieht die Frage im Spiel unter „Meldungen“ und antwortet dort.

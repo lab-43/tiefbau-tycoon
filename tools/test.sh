@@ -32,7 +32,7 @@ run() {  # name, expected-ok-regex, extra args...
 }
 ebenen() {  # flat map layers: water above the base ground and the landuse areas, below paths and roads (#4)
   local log=/tmp/tt_e2e_ebenen.log
-  if timeout 300 "$G" --headless --path "$ROOT/game" -s res://test/layer_test.gd > "$log" 2>&1 \
+  if timeout 300 "$G" --headless --path "$ROOT/game" -s res://test/layer_test.gd -- "$ROOT/testdata/utrecht.osm.pbf" > "$log" 2>&1 \
      && grep -q "EBENEN OK" "$log"; then echo "OK    ebenen $(grep -o 'EBENEN OK.*' "$log")"; else FAIL=1; echo "FAIL  ebenen – $log"; grep -E "EBENEN|SCRIPT ERROR" "$log" | tail -8 | sed 's/^/      /'; fi
 }
 for s in "${SCEN[@]}"; do

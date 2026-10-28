@@ -9,6 +9,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/tools/lib.sh"
 find_godot
 P="$ROOT/game"
+if [ "$1" = run ] || [ "$1" = shot ]; then
+  # without the Mesa Vulkan driver Godot falls back to gles3 and pictures differ from Forward+ on Jonathan's PC
+  ls /usr/share/vulkan/icd.d/lvp_icd*.json >/dev/null 2>&1 \
+    || echo "!! Kein Mesa-Vulkan-Treiber – Bilder entstehen im Kompatibilitätsmodus, nicht wie bei Jonathan (tools/setup_env.sh)"
+fi
 case "$1" in
   check) "$ROOT/tools/check.sh" ;;
   import) timeout 900 "$G" --headless --path "$P" --import 2>&1 | grep -E "ERROR|SCRIPT ERROR|Parse Error" | grep -v "audio" | head -40 ;;
