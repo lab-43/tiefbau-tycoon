@@ -4,7 +4,8 @@ extends RefCounted
 ## The scene-tree part (creating MeshInstances) happens on the main thread in build_scene().
 
 const CHUNK := 500.0
-const BAKE_VERSION := 3
+const BAKE_VERSION := 4   # 4: water on top of the base ground, no bank walls (#4)
+const GROUND_Y := 0.0     # opaque base ground plane; flat map layers below it are invisible (test/layer_test.gd)
 
 var progress := 0.0
 var step := ""
@@ -151,10 +152,10 @@ static func plan_hq(data: OsmData, click: Vector2) -> Dictionary:
 # ------------------------------------------------------------------------------------------
 
 const RANGE := {"mark": 900.0, "curb": 1300.0, "sidewalk": 2200.0, "rail": 1200.0, "path": 2200.0, "cycleway": 2200.0,
-	"bridge": 2500.0, "bank": 3000.0}
+	"bridge": 2500.0}
 const NO_SHADOW := {"asphalt": 1, "mark": 1, "sidewalk": 1, "path": 1, "cycleway": 1, "water": 1, "ballast": 1, "rail": 1,
 	"area_grass": 1, "area_park": 1, "area_forest": 1, "area_pitch": 1, "area_cemetery": 1, "area_farmland": 1,
-	"area_industrial": 1, "area_commercial": 1, "area_residential": 1, "area_paved": 1, "area_sand": 1, "track": 1, "bank": 1}
+	"area_industrial": 1, "area_commercial": 1, "area_residential": 1, "area_paved": 1, "area_sand": 1, "track": 1}
 
 
 ## Creates the static city node tree. Call repeatedly (it yields work in batches) until it returns true.
@@ -170,7 +171,7 @@ static func create_city_root(res: Dictionary) -> Node3D:
 	var g := MeshInstance3D.new()
 	g.name = "Ground"
 	g.mesh = gm
-	g.position = Vector3(b.get_center().x, 0.0, b.get_center().y)
+	g.position = Vector3(b.get_center().x, GROUND_Y, b.get_center().y)
 	g.material_override = Mats.get_mat("ground")
 	g.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	root.add_child(g)

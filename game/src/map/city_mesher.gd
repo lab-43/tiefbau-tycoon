@@ -1,10 +1,12 @@
 class_name CityMesher
 extends RefCounted
-## Buildings (white massing), landuse areas, water with banks, footpaths, railways, trees, lamps.
+## Buildings (white massing), landuse areas, water, footpaths, railways, trees, lamps.
 
 const Y := {"farmland": 0.010, "residential": 0.012, "industrial": 0.014, "commercial": 0.014, "grass": 0.018,
 	"park": 0.020, "cemetery": 0.020, "forest": 0.022, "pitch": 0.026, "sand": 0.024, "paved": 0.030}
-const WATER_Y := -0.55
+# Water lies on top of all landuse areas (harbour landuse often overlaps the basins) and below ballast,
+# paths and roads. It must stay above the opaque base ground plane at y = 0, which hides anything below it.
+const WATER_Y := 0.031
 const PATH_Y := 0.04
 
 var data: OsmData
@@ -160,33 +162,10 @@ func _areas() -> void:
 		if kind == "water":
 			var l := layer(ck, "water")
 			l.polygon_up(outer, WATER_Y, 0.05, Color.WHITE, a.holes)
-			var bank := layer(ck, "bank")
-			_bank(bank, outer, false)
-			for h in a.holes:
-				_bank(bank, h, true)
 		else:
 			var y: float = Y.get(kind, 0.015)
 			var l2 := layer(ck, "area_" + kind)
 			l2.polygon_up(outer, y, 0.1, Color.WHITE, a.holes)
-
-
-## Vertical bank walls from ground level down to the water surface, facing the water.
-func _bank(l: MeshLayer, ring: PackedVector2Array, hole: bool) -> void:
-	var n := ring.size()
-	var ccw := Geo.polygon_area(ring) > 0.0
-	for i in n:
-		var a := ring[i]
-		var b := ring[(i + 1) % n]
-		var d := b - a
-		var dl := d.length()
-		if dl < 0.01:
-			continue
-		d /= dl
-		var inward := Vector2(-d.y, d.x) if ccw else Vector2(d.y, -d.x)
-		if hole:
-			inward = -inward
-		l.quad(Vector3(a.x, 0.0, a.y), Vector3(b.x, 0.0, b.y), Vector3(b.x, WATER_Y - 0.6, b.y), Vector3(a.x, WATER_Y - 0.6, a.y),
-			Vector3(inward.x, 0, inward.y))
 
 
 func _paths() -> void:
