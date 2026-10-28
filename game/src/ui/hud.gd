@@ -37,6 +37,7 @@ var _left_dirty := true
 var _t := 0.0
 var _hint_t := 45.0
 var _last_money := 0.0
+var markers: WorldMarkers      # screen markers + view bar (#7), below all panels
 
 
 func _ready() -> void:
@@ -44,6 +45,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	theme = UI.theme()
+	_build_markers()
 	_build_top()
 	_build_rail()
 	_build_left()
@@ -435,6 +437,11 @@ func _left_help() -> void:
 			["F", "Auswahl folgen"], ["Leertaste, 1, 2, 3", "Pause und Geschwindigkeit"], ["F5", "Speichern"],
 			["F8", "Problem melden"], ["F3", "Debug-Menü"]]:
 		left_body.add_child(UI.kv(kvp[0], kvp[1]))
+
+	left_body.add_child(UI.kv("H", "Markierungen ein/aus"))
+	left_body.add_child(UI.kv("B", "Gebäude ein/aus"))
+	left_body.add_child(UI.kv("Klick auf Markierung", "Hinfliegen / auswählen"))
+	left_body.add_child(UI.kv("Rechtsklick auf Markierung", "Gewähltes Fahrzeug hinschicken"))
 
 
 func _vehicle_icon(v: Vehicle) -> String:
@@ -970,3 +977,15 @@ func _unhandled_key_input(ev: InputEvent) -> void:
 			KEY_F5:
 				Game.save_game()
 				get_viewport().set_input_as_handled()
+
+
+# ------------------------------------------------------------------------------------------
+# Screen markers (#7)
+# ------------------------------------------------------------------------------------------
+
+func _build_markers() -> void:
+	# first child: every HUD panel is drawn above the markers and gets the mouse first
+	markers = WorldMarkers.new()
+	markers.name = "WorldMarkers"
+	markers.hud = self
+	add_child(markers)

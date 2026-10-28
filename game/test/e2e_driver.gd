@@ -63,7 +63,12 @@ func shot(name: String, focus: Vector3 = Vector3.INF, dist := 0.0, yaw := -35.0,
 		return
 	if focus != Vector3.INF:
 		world.camera_rig.set_view(focus, dist, yaw, pitch)
-	shot_queue.append([name, 8])
+	shot_queue.append([name, 8, _shot_state()])
+
+
+## Camera goal + selection when a shot is queued; the picture is taken 8 frames later (e2e-shot-verzoegert).
+func _shot_state() -> Array:
+	return [world.camera_rig._t_target, world.camera_rig._t_distance, Game.selected] if world and world.camera_rig else []
 
 
 func _process(delta: float) -> void:
@@ -73,6 +78,8 @@ func _process(delta: float) -> void:
 		shot_queue[0][1] -= 1
 		if shot_queue[0][1] <= 0:
 			var s: Array = shot_queue.pop_front()
+			if s.size() > 2 and s[2] != _shot_state():
+				print("SHOT WARNUNG %s: Kamera oder Auswahl nach shot() geändert – das Bild zeigt den neuen Stand (Lektion e2e-shot-verzoegert)" % s[0])
 			var img := get_viewport().get_texture().get_image()
 			var path := shots_dir.path_join(s[0] + ".png")
 			img.save_png(path)
@@ -116,6 +123,8 @@ func _process(delta: float) -> void:
 			_verkehrslichter()
 		"debug":
 			_debug_test(delta)
+		"markierungen":
+			_markierungen(delta)
 
 
 func _smoke() -> void:
@@ -794,3 +803,11 @@ func _debug_test(delta: float) -> void:
 		_dbg = load("res://test/e2e_debug.gd").new()
 		_dbg.drv = self
 	_dbg.tick(delta)
+
+
+## Screen markers and view bar (#7): the checks live in test/e2e_markierungen.gd.
+var _mk: RefCounted
+func _markierungen(delta: float) -> void:
+	if _mk == null:
+		_mk = load("res://test/e2e_markierungen.gd").new(self)
+	_mk.tick(delta)
