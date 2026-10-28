@@ -1,8 +1,8 @@
 #!/bin/bash
 # Runs end-to-end scenarios headless on the offline Utrecht map and reports pass/fail.
 # usage: tools/test.sh [scenario ...]            default: smoke issue
-#   scenarios: smoke issue job lowbed save+load pbf leuchten rig  (save+load = save mid-dig, then load and finish;
-#              rig = excavator linkage/cylinders, see game/test/rig_test.gd)
+#   scenarios: smoke issue job lowbed save+load pbf leuchten verkehrslichter rig  (save+load = save mid-dig, then load
+#              and finish; rig = excavator linkage/cylinders, see game/test/rig_test.gd)
 #   env: E2E_SPEED (default 10), E2E_TIMEOUT seconds per scenario (default 1500), E2E_SHOTS=<dir>
 # Logs: /tmp/tt_e2e_<scenario>.log. Exit 1 if any scenario fails.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -36,6 +36,7 @@ for s in "${SCEN[@]}"; do
     job)    run job    "E2E OK money" --e2e=job ;;
     lowbed) run lowbed "E2E OK lowbed" --e2e=lowbed ;;
     leuchten) run leuchten "E2E OK leuchten" --e2e=leuchten ;;
+    verkehrslichter) run verkehrslichter "E2E OK verkehrslichter" --e2e=verkehrslichter ;;
     save+load) run save "E2E OK save" --e2e=save && AUTO=0 run load "E2E OK money" --e2e=load ;;
     pbf)
       log=/tmp/tt_e2e_pbf.log
