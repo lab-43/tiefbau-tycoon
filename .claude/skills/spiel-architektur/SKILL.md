@@ -28,7 +28,8 @@ Autoloads (`project.godot`):
 - **Aufbereiten** (`MapBuilder`, Worker-Thread):
   - `RoadNet` (Graph, Querschnitte, Kreuzungsflächen, Spuren, Abbiegebeziehungen, Konflikte, Ampeln/Vorfahrt),
     - `JunctionMerge` fasst die OSM-Knoten einer echten Kreuzung zu einem Knoten zusammen (`group`, `reach`), Fläche als Vereinigung (`_group_polygon`),
-    - Knoten mit nur zwei Straßen sind Übergänge (`cont`): abgerundet, Breite und Gehweg laufen aus (`_continuation_geometry`),
+    - Knoten mit nur zwei Straßen sind Übergänge (`cont`): abgerundet, Breite und Gehweg laufen aus (`_continuation_geometry`); dasselbe für Mitglieder einer Gruppe, an denen eine Straße einfach weitergeht (`_pass_through_cuts`, `_taper_piece`),
+    - Abbiegewege: Gerade–Bogen–Gerade mit größtem Radius (`turn_path`), gerade Fahrt zur seitlich nächsten Spur (`_nearest_out_lane`),
     - Prüfstand für alles hier: `tools/kreuzungen.sh` (Skill tycoon-dev),
   - `RoadMesher` (Fahrbahn, Gehweg, Bordstein, Markierung),
   - `CityMesher` (Gebäude, Flächen, Wasser, Bäume, Laternen),
@@ -42,6 +43,7 @@ Autoloads (`project.godot`):
   - IDM-Folgemodell, Ampelzyklen, Vorfahrt, rechts vor links, Busse an Haltestellen.
   - Sperrungen und Engstellen (Z 208/308 mit Fairness, Reißverschluss bei zwei Streifen gleicher Richtung).
   - Sicherungsbereiche halten den Verkehr an, wenn ein Fahrzeug rückwärts fährt.
+  - Kurs = Sehne ±1,5 m (`_smooth_dir`, `yaw_chord`), Tempo vor Bögen gedrosselt (`_speed_cap` mit dem Kurvenprofil `vprof` der Stücke aus `Router.curve_profile`). Prüfung: `tools/test.sh fahren` (Lektion ruhig-fahren).
 - **`Agent`:** ein Verkehrsteilnehmer. Firmenfahrzeuge nutzen denselben Agent.
 - **`Router`** (`src/nav/`): A* über den Spurgraph. Er liefert Stücke: LANE, BLEND (Spurwechsel), CONN (Kreuzung) und POLY (freie Linie abseits der Straße, z. B. in die Absperrung oder auf den Hof).
 

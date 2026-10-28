@@ -137,6 +137,63 @@ def check_yaml(rel, text):
         report("ERROR", rel, "YAML kaputt: " + str(e).replace("\n", " ")[:160], "yaml-gueltig")
 
 
+def _code(text):
+    return "\n".join(l.split("#", 1)[0] for l in text.splitlines())
+
+
+def check_script_tests(files):
+    """Test scripts run with -s (extends SceneTree) do not get the autoloads. Godot only resolves
+    `Autoload.CONSTANT` there, and only if that autoload's script needs no other autoload; anything
+    else ("Identifier not found: Clock") fails to compile, also inside a class the test uses, and
+    the process then hangs until its timeout (lesson autoload-in-skripttests). Such tests run as a
+    scene instead (e.g. test/drive_test.tscn)."""
+    proj = ROOT / "game/project.godot"
+    if not proj.is_file():
+        return
+    m = re.search(r"\[autoload\](.*?)(\n\[|\Z)", proj.read_text(encoding="utf-8"), re.S)
+    autos = dict(re.findall(r'^(\w+)="\*?res://([^"]+)"', m.group(1), re.M)) if m else {}
+    if not autos:
+        return
+    use_re = re.compile(r"\b(" + "|".join(autos) + r")\.(\w+)")
+    needs_other = set()
+    for name, path in autos.items():
+        f = ROOT / "game" / path
+        if f.is_file() and use_re.search(_code(f.read_text(encoding="utf-8"))):
+            needs_other.add(name)
+
+    def bad_use(code):
+        for u in use_re.finditer(code):
+            if not re.fullmatch(r"[A-Z][A-Z0-9_]*", u.group(2)) or u.group(1) in needs_other:
+                return u.group(1)
+        return None
+
+    users = {}   # class_name -> autoload it needs
+    for rel in files:
+        if rel.startswith("game/src/") and rel.endswith(".gd") and (ROOT / rel).is_file():
+            text = (ROOT / rel).read_text(encoding="utf-8")
+            cn = re.search(r"^class_name\s+(\w+)", text, re.M)
+            auto = bad_use(_code(text)) if cn else None
+            if auto:
+                users[cn.group(1)] = auto
+    for rel in files:
+        if not (rel.startswith("game/test/") and rel.endswith(".gd")) or not (ROOT / rel).is_file():
+            continue
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        if not re.search(r"^extends\s+SceneTree", text, re.M):
+            continue
+        code = _code(text)
+        auto = bad_use(code)
+        if auto:
+            report("ERROR", rel, f"SceneTree-Skript (-s) benutzt das Autoload {auto} – das gibt es dort nicht; als Szene starten",
+                   "autoload-in-skripttests")
+            continue
+        for cls, auto in users.items():
+            if re.search(rf"\b{cls}\b", code):
+                report("ERROR", rel, f"SceneTree-Skript (-s) benutzt {cls}, das das Autoload {auto} braucht; als Szene starten",
+                       "autoload-in-skripttests")
+                break
+
+
 def check_lesson(rel, text):
     if not text.startswith("---"):
         report("ERROR", rel, "Lektion ohne Frontmatter (---)", "lernen")
@@ -153,6 +210,7 @@ def main():
     tracked = set(files)
     check_private(files, "im Git")
     check_modes()
+    check_script_tests(files)
     if staged:
         check_author()
         st = git("diff", "--cached", "--name-only", "--diff-filter=AM") or []

@@ -488,7 +488,7 @@ func _route_point(ag: Agent, ds: float) -> Variant:
 func _speed_cap(pc: Dictionary, s: float, ahead: float) -> float:
 	var cap: float = sqrt(pc.vmax * pc.vmax + 4.0 * ahead)
 	for sec in pc.get("vprof", []):
-		if sec[1] < s:
+		if sec[1] < s or sec[0] > pc.s1:   # passed, or behind the end of a partial lane piece
 			continue
 		cap = minf(cap, sqrt(sec[2] * sec[2] + 4.0 * (ahead + maxf(0.0, sec[0] - s))))
 	return cap
