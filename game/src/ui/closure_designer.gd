@@ -398,7 +398,7 @@ func _build_right() -> void:
 	v.add_child(UI.caps("Steuerung"))
 	for t in ["Linksklick: setzen · Rechtsklick / Esc: Kette beenden", "R / Umschalt+R: drehen · Entf: löschen",
 			"Umschalt: Winkel einrasten · Alt: frei setzen", "Strg+Z / Strg+Y: rückgängig / wiederholen", "1–9: Bauteil wählen",
-			"Rechte Maus ziehen: verschieben · Mausrad: zoomen · Q/E: drehen"]:
+			"Rechte Maus ziehen: verschieben · Mausrad: zoomen · Q/E: drehen · B: Gebäude aus/ein"]:
 		var l := UI.label(t, 12, UI.DIM)
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		v.add_child(l)
