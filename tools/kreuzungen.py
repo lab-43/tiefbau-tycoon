@@ -18,6 +18,8 @@ Measured inside the circle of radius_m around the junction centre:
   gehweg_auf_fahrbahn_m2  sidewalk area lying on top of asphalt. Asphalt hidden under a sidewalk is
                 not visible, so this overstates; what you see is ueber_gehweg_m and the pictures
   splitter      tiny holes (0.02 – 4 m²) inside the asphalt surface (ground showing through)
+  stufen        steps and spikes in the asphalt outline: two sharp turns (> 45°) in opposite directions
+                0.3–3 m apart (a width jump), or one turn sharper than 120° (a spike)
   knicke        places where a lane or turn path changes heading by more than 15° within 1 m
   versatz       straight-through connectors whose lanes are offset sideways by more than 0.5 m (S-wobble)
   markierung_m  approximate length of road markings (area / 0.12 m)
@@ -38,8 +40,8 @@ MARK_W = 0.12
 KINK_DEG = 15.0
 KINK_SPAN = 1.0
 OFFSET_TOL = 0.5
-METRICS = ["knoten", "kurz", "luecke_m", "ueber_gehweg_m", "gehweg_auf_fahrbahn_m2", "splitter", "knicke", "versatz", "markierung_m"]
-LOWER_IS_BETTER = {"knoten", "kurz", "luecke_m", "ueber_gehweg_m", "gehweg_auf_fahrbahn_m2", "splitter", "knicke", "versatz"}
+METRICS = ["knoten", "kurz", "luecke_m", "ueber_gehweg_m", "gehweg_auf_fahrbahn_m2", "splitter", "stufen", "knicke", "versatz", "markierung_m"]
+LOWER_IS_BETTER = {"knoten", "kurz", "luecke_m", "ueber_gehweg_m", "gehweg_auf_fahrbahn_m2", "splitter", "stufen", "knicke", "versatz"}
 
 
 def pts_of(flat):
@@ -116,6 +118,33 @@ def head(pts, length):
     return list(shapely.ops.substring(ls, 0, length).coords)
 
 
+def outline_steps(geom):
+    """Points where the outline of the asphalt makes a step (two sharp opposite turns within 3 m)
+    or a spike (one turn sharper than 120°)."""
+    out = []
+    for poly in getattr(geom, "geoms", [geom]):
+        if not isinstance(poly, Polygon) or poly.is_empty:
+            continue
+        for ring in [poly.exterior] + list(poly.interiors):
+            c = list(ring.simplify(0.1).coords)[:-1]
+            n = len(c)
+            if n < 4:
+                continue
+            turns = []
+            for i in range(n):
+                a, b, e = c[i - 1], c[i], c[(i + 1) % n]
+                t = math.atan2(e[1] - b[1], e[0] - b[0]) - math.atan2(b[1] - a[1], b[0] - a[0])
+                turns.append((t + math.pi) % (2 * math.pi) - math.pi)
+            for i in range(n):
+                j = (i + 1) % n
+                if abs(turns[i]) > math.radians(120) and min(math.dist(c[i], c[i - 1]), math.dist(c[i], c[j])) > 0.3:
+                    out.append(c[i])
+                elif (0.3 < math.dist(c[i], c[j]) < 3.0 and abs(turns[i]) > math.radians(45) and abs(turns[j]) > math.radians(45)
+                      and turns[i] * turns[j] < 0):
+                    out.append(((c[i][0] + c[j][0]) / 2, (c[i][1] + c[j][1]) / 2))
+    return out
+
+
 def measure(d):
     R = float(d.get("radius_m", 150.0))
     win = Point(0, 0).buffer(R, 64)
@@ -150,6 +179,12 @@ def measure(d):
                 if 0.02 <= h.area < 4.0:   # smaller ones are numeric seams, not visible
                     holes.append(h)
     m["splitter"] = len(holes)
+    steps = [q for q in outline_steps(asphalt) if math.hypot(*q) <= R - 2.0]
+    step_cells = {}
+    for q in steps:
+        step_cells.setdefault((round(q[0] / 3.0), round(q[1] / 3.0)), q)
+    steps = list(step_cells.values())
+    m["stufen"] = len(steps)
     # kinks along lanes and along turn paths (lane tail + connector + lane head)
     kp = []
     for p in lanes.values():
@@ -189,7 +224,7 @@ def measure(d):
         # generator without lanes/turn paths (e.g. osm2streets): these measures do not apply
         for k in ("luecke_m", "ueber_gehweg_m", "knicke", "versatz"):
             m[k] = None
-    extra = {"gap": gap, "sw_on": sw_on, "kinks": kp, "holes": holes, "offsets": offsets}
+    extra = {"gap": gap, "sw_on": sw_on, "kinks": kp, "holes": holes, "offsets": offsets, "steps": steps}
     return m, extra
 
 
@@ -246,6 +281,8 @@ def draw(fixture, variants, labels, out_png, radius=None):
             ax.plot([h.centroid.x], [h.centroid.y], "s", mfc="none", mec="#e00000", ms=9, mew=1.5)
         if ex["kinks"]:
             ax.plot([p[0] for p in ex["kinks"]], [p[1] for p in ex["kinks"]], "o", mfc="none", mec="#e00000", ms=7, mew=1.2)
+        if ex["steps"]:
+            ax.plot([p[0] for p in ex["steps"]], [p[1] for p in ex["steps"]], "^", mfc="none", mec="#7a00c0", ms=9, mew=1.5)
         for p, q in ex["offsets"]:
             ax.plot([p[0], q[0]], [p[1], q[1]], color="#00a000", lw=2)
         for n_ in d.get("nodes", []):
@@ -253,7 +290,7 @@ def draw(fixture, variants, labels, out_png, radius=None):
                 ax.plot(n_["pos"][0], n_["pos"][1], "o", color="black", ms=4)
         txt = "  ".join(f"{k}={'–' if m[k] is None else m[k]}" for k in METRICS)
         ax.set_title(f"{lab}: Fahrwege (blau Spur, orange Abbiegen, schwarz gestrichelt OSM)\n"
-                     "rot = Lücke/Knick/Splitter (Quadrat), lila = Gehweg auf Fahrbahn, grün = Versatz, Punkt = Kreuzungsknoten", fontsize=10)
+                     "rot = Lücke/Knick/Splitter (Quadrat), violettes Dreieck = Stufe/Zacke, lila Fläche = Gehweg auf Fahrbahn, grün = Versatz, Punkt = Kreuzungsknoten", fontsize=10)
         ax.text(0.01, 0.01, txt, transform=ax.transAxes, fontsize=8.5, color="black",
                 bbox=dict(facecolor="white", alpha=0.85, edgecolor="none"))
     d0 = variants[0][0]
@@ -276,6 +313,8 @@ def problem_spots(ex, R, limit):
         if isinstance(part, LineString) and part.length > 1.0:
             q = part.interpolate(0.5, normalized=True)
             spots.append((q.x, q.y, "Lücke %.1f m" % part.length, part.length))
+    for q in ex.get("steps", []):
+        spots.append((q[0], q[1], "Stufe/Zacke im Rand", 2.5))
     spots = [s_ for s_ in spots if math.hypot(s_[0], s_[1]) <= R]
     spots.sort(key=lambda s_: -s_[3])
     keep = []
