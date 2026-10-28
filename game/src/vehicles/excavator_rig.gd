@@ -42,7 +42,7 @@ var _D_linkb := Vector3.ZERO
 var _len_bc := 0.0
 var _len_cd := 0.0
 var _has_fourbar := false
-var _last_c := Vector3.ZERO
+var _fb_side := 1.0            # assembly branch of the four-bar: side of C relative to B->D in the arm plane (rest pose)
 # sequencer
 var _seq: Array = []           # list of keyframes {dur, yaw, r, h, bucket, ev}
 var _seq_i := -1
@@ -109,7 +109,15 @@ func setup(vehicle: Node3D, mdl: Node3D, meta: Dictionary) -> void:
 		_D_linkb = link_b.global_transform.affine_inverse() * D
 		_len_bc = B.distance_to(C)
 		_len_cd = C.distance_to(D)
-		_last_c = C
+		# B, C, D never become collinear within the joint limits, so the branch never changes: keep the rest one.
+		# (Picking the solution nearest to the last C flipped it after the first big jump, issue #3.)
+		var tinv0 := turret.global_transform.affine_inverse()
+		var b0 := tinv0 * B
+		var c0 := tinv0 * C
+		var d0 := tinv0 * D
+		var bd := Vector2(-(d0.z - b0.z), d0.y - b0.y)
+		var bc := Vector2(-(c0.z - b0.z), c0.y - b0.y)
+		_fb_side = 1.0 if bd.cross(bc) >= 0.0 else -1.0
 		rest[link_a] = link_a.basis
 		rest[link_b] = link_b.basis
 		_has_fourbar = true
@@ -205,14 +213,9 @@ func _solve_fourbar() -> void:
 	var h := sqrt(maxf(0.0, _len_bc * _len_bc - a * a))
 	var dir := (pd - pb) / dist
 	var mid := pb + dir * a
-	var perp := Vector2(-dir.y, dir.x)
-	var c1 := mid + perp * h
-	var c2 := mid - perp * h
-	var last2 := tinv * _last_c
-	var lp := Vector2(-last2.z, last2.y)
-	var pc := c1 if c1.distance_to(lp) < c2.distance_to(lp) else c2
+	var perp := Vector2(-dir.y, dir.x)     # left of B->D: cross(dir, perp) = +1
+	var pc := mid + perp * (h * _fb_side)
 	var C := turret.global_transform * Vector3(b2.x, pc.y, -pc.x)
-	_last_c = C
 	_hinge_to(link_a, _C_linka, C)
 	_hinge_to(link_b, _D_linkb, D)
 

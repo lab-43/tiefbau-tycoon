@@ -28,7 +28,7 @@ Privates Godot-4.5.1-Spiel (GDScript) von Jonathan: Tiefbau-/Straßenbau-Tycoon 
 | Pfad | Inhalt |
 |---|---|
 | `game/` | Godot-Projekt. `src/core` Zustand, Uhr, Meldungen · `src/map` Karte (Geofabrik/PBF, Overpass, Bake) · `src/nav` Routing · `src/traffic` Verkehr · `src/site` Baustelle · `src/vehicles` Fahrzeuge, Bagger-IK · `src/world` Welt, Kamera, Tag/Nacht · `src/ui` Oberfläche |
-| `game/test/` | `e2e_driver.gd` (e2e-Szenarien; über `tools/test.sh`: smoke, issue, job, lowbed, save+load, pbf; direkt: repro, loadshot, retry, showcase), `compile_all.gd`, `mock_overpass.py`, `pbf_test.gd` |
+| `game/test/` | `e2e_driver.gd` (e2e-Szenarien; über `tools/test.sh`: smoke, issue, job, lowbed, save+load, pbf; direkt: repro, loadshot, retry, showcase), `compile_all.gd`, `mock_overpass.py`, `pbf_test.gd`, `rig_test.gd` (Bagger-Gestänge, `tools/test.sh rig`) |
 | `tools/` | `setup_env.sh` (neue Session), `lint.py` (Regeln aus Lektionen), `check.sh` (kompilieren), `test.sh` (e2e), `build.sh` (Windows-Build), `gd.sh` (Godot-Helfer, Screenshots) |
 | `tools/agent/` | `issues.py` (Meldungen, Übernahmen – läuft in der Geräte-Shell auf dem PC), `merge.sh` (automatisch nach main), `session_start.sh` (Lagebericht), `fetch_templates.py` |
 | `.claude/skills/` | Abläufe für Agenten (siehe unten), PC-Übertragung in `tycoon-dev/pc-bruecke.md` |

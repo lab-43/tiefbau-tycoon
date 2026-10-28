@@ -1,7 +1,8 @@
 #!/bin/bash
 # Runs end-to-end scenarios headless on the offline Utrecht map and reports pass/fail.
 # usage: tools/test.sh [scenario ...]            default: smoke issue
-#   scenarios: smoke issue job lowbed save+load pbf leuchten  (save+load = save mid-dig, then load and finish)
+#   scenarios: smoke issue job lowbed save+load pbf leuchten rig  (save+load = save mid-dig, then load and finish;
+#              rig = excavator linkage/cylinders, see game/test/rig_test.gd)
 #   env: E2E_SPEED (default 10), E2E_TIMEOUT seconds per scenario (default 1500), E2E_SHOTS=<dir>
 # Logs: /tmp/tt_e2e_<scenario>.log. Exit 1 if any scenario fails.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -40,6 +41,10 @@ for s in "${SCEN[@]}"; do
       log=/tmp/tt_e2e_pbf.log
       if timeout 300 "$G" --headless --path "$ROOT/game" -s res://test/pbf_test.gd -- "$ROOT/testdata/utrecht.osm.pbf" > "$log" 2>&1 \
          && grep -q "PBF OK" "$log"; then echo "OK    pbf $(grep -o 'PBF OK.*' "$log")"; else FAIL=1; echo "FAIL  pbf – $log"; tail -8 "$log" | sed 's/^/      /'; fi ;;
+    rig)  # excavator linkage + cylinders over all poses (needs the private model, skips without it)
+      log=/tmp/tt_e2e_rig.log
+      if timeout 300 "$G" --headless --path "$ROOT/game" -s res://test/rig_test.gd > "$log" 2>&1 \
+         && grep -qE "RIG (OK|SKIP)" "$log"; then echo "OK    rig $(grep -oE 'RIG (OK|SKIP).*' "$log")"; else FAIL=1; echo "FAIL  rig – $log"; grep -E "FEHLER|FAIL|SCRIPT ERROR" "$log" | tail -8 | sed 's/^/      /'; fi ;;
     *) echo "unbekanntes Szenario: $s"; FAIL=1 ;;
   esac
 done

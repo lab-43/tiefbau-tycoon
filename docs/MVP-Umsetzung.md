@@ -168,9 +168,10 @@ Fahrzeuge (Kolonnenbus, Pritsche, Kipper, Sattelzug mit Tieflader, Mobilbagger):
   - `src/nav/`: Routing
   - `src/map/`: Karte
   - `src/ui/`: Oberfläche
-- Tests: `tools/test.sh [smoke issue job lowbed save+load pbf]`. Der Treiber ist `test/e2e_driver.gd` und startet mit `--autostart --fixture=utrecht --e2e=<szenario>`. `load` läuft ohne `--autostart`.
+- Tests: `tools/test.sh [smoke issue job lowbed save+load pbf rig]`. Der Treiber ist `test/e2e_driver.gd` und startet mit `--autostart --fixture=utrecht --e2e=<szenario>`. `load` läuft ohne `--autostart`.
   - `job` spielt einen kompletten Auftrag automatisch durch.
   - `lowbed`: Bagger per Tieflader hin und zurück.
+  - `rig`: Bagger-Gestänge über alle Stellungen – Viergelenk am Löffel bleibt geschlossen und auf der richtigen Seite, alle 5 Zylinder zielen aufeinander (#3). Braucht das private Modell, ohne wird übersprungen. Mit `-- --shots=<dir>` (gerendert) entstehen Seitenansichten.
   - `save`/`load`: speichern mitten im Graben, laden und bis zur Abnahme weiterspielen.
   - Letzter Stand (v1.3):
     - `job` bestanden (Jan van Foreeststraat). Zwei Läufe davor haben drei Fehler aufgedeckt, die behoben sind: eigener Sicherungsbereich blockierte die Ausfahrt, kleine Kippmengen gingen verloren, Route zu einem Ziel hinter dem Fahrzeug fehlte.

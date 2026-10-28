@@ -32,9 +32,11 @@ description: Use this skill to set up, check, test, build or deliver the Tiefbau
 | `tools/test.sh` | ~40 s | smoke + issue (Standard, auch in merge.sh) |
 | `tools/test.sh job` | ~7 min | ein kompletter Auftrag mit Startfuhrpark |
 | `tools/test.sh lowbed save+load pbf` | 4 min · ~8 min · 20 s | Tieflader, Speichern/Laden mitten im Graben, PBF-Leser |
+| `tools/test.sh rig` | 5 s | Bagger-Gestänge und Zylinder in allen Stellungen (braucht private Assets). Seitenansichten: `xvfb-run -a godot --path game --rendering-driver vulkan -s res://test/rig_test.gd -- --shots=<dir>` |
 
 - **Wann welcher Test:**
   - Änderungen an Baustelle, Fahrzeugen oder Verkehr: `job` ist Pflicht.
+  - Änderungen am Bagger-Rig (`excavator_rig.gd`, `rig_util.gd`): `rig`, bei sichtbaren Änderungen mit Seitenansichten.
   - Änderungen an Speichern/Laden: `save+load`.
   - Änderungen an der Karte: `pbf`, plus Ladeweg mit Mock-Servern (Abschnitt 4).
 - **Logs:** `/tmp/tt_e2e_<szenario>.log`. Der Treiber ist `game/test/e2e_driver.gd`; neue Szenarien gehören dort hinein und in `tools/test.sh`.
