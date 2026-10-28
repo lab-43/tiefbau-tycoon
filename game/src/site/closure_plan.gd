@@ -23,6 +23,7 @@ const ELEM_LEN := 2.14      # Absperrschranke / Absperrgitter: length along +X f
 const ELEM_STEP := 2.05     # spacing of chained elements (end to end, the feet overlap a little)
 const TRAFFIC_CLEAR := 1.3  # m: nothing closer than this to the path of a car's centre
 const MAX_ITEMS := 600
+const PLAN_RADIUS := 500.0  # m around the trench: where the designer places things (#18)
 
 var items: Array = []       # {kind, pos: Vector2, yaw: float, phase: float, group: String}
 var lines: Array = []       # PackedVector2Array per yellow marking
@@ -112,10 +113,17 @@ static func auto_yaw(kind: String, p: Vector2, lay: SiteLayout) -> float:
 	return SiteLayout.yaw_of(d)
 
 
-## Travel direction of the nearest site lane (K or K2) at p.
+## Travel direction of the nearest lane at p: the site lanes (K, K2) or, further away (signs on other
+## streets within the planning radius), any lane of the road network.
 static func _traffic_dir(p: Vector2, lay: SiteLayout) -> Vector2:
 	var r1: Array = Geo.closest_on_polyline(lay._g[0], lay._g[1], p)
 	var r2: Array = Geo.closest_on_polyline(lay._g2[0], lay._g2[1], p)
+	var best_d := minf(float(r1[0]), float(r2[0]))
+	if best_d > 6.0 and Game.world and Game.world.router:
+		var nl: Dictionary = Game.world.router.nearest_lane(p, minf(best_d, 40.0))
+		if not nl.is_empty():
+			var g: Array = lay.net.lane_geo[nl.key]
+			return Geo.sample(g[0], g[1], float(nl.s))[1]
 	if float(r2[0]) < float(r1[0]):
 		return lay.lane2_dir(float(r2[1]))
 	return lay.lane_dir(float(r1[1]))
@@ -192,6 +200,19 @@ static func lane_path(a: Vector2, b: Vector2, lay: SiteLayout) -> PackedVector2A
 	# exact end points (lane_coords rounding)
 	out[0] = a
 	out[out.size() - 1] = b
+	return out
+
+
+## Quadratic Bézier from a to b with control point c (the curve leaves a towards c, like the curve
+## tool of Cities: Skylines: start, direction, end).
+static func bezier(a: Vector2, c: Vector2, b: Vector2, step := 0.5) -> PackedVector2Array:
+	var approx := a.distance_to(c) + c.distance_to(b)
+	var n := clampi(int(ceil(approx / step)), 2, 400)
+	var out := PackedVector2Array()
+	for i in n + 1:
+		var t := float(i) / n
+		var u := 1.0 - t
+		out.append(a * u * u + c * 2.0 * u * t + b * t * t)
 	return out
 
 

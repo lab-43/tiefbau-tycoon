@@ -22,7 +22,7 @@ const CONE := Color(1.0, 0.42, 0.08)
 const BLUE := Color(0.0, 0.36, 0.72)
 const TRAFFIC := Color(0.35, 0.78, 1.0)
 const MODES := [["single", "Einzeln", "Ein Teil pro Klick"], ["line", "Gerade", "Kette entlang einer Geraden: Klick Anfang, Klick Ende (weiter mit dem nächsten Klick)"],
-	["curve", "Kurve", "Kette entlang einer Kurve: Klick Anfang, Klick Ende, dann die Biegung klicken"],
+	["curve", "Kurve", "Kette entlang einer Kurve: Anfang klicken, dann die Richtung, dann das Ende (wie in Cities: Skylines)"],
 	["select", "Auswählen", "Teile anklicken oder aufziehen, verschieben, drehen (R), löschen (Entf)"], ["erase", "Radierer", "Teile anklicken oder überstreichen, um sie zu entfernen"]]
 
 var site: Site
@@ -36,7 +36,7 @@ var snap := true
 var rot := 0.0                 # extra rotation of single items (R)
 var dirty := false
 
-var _chain := PackedVector2Array()   # line: start point; curve: [start] or [start, end]
+var _chain := PackedVector2Array()   # line: start point; curve: [start] or [start, direction point]
 var _chain_segments := 0
 var _chain_line := -1          # yellow marking that the current chain extends
 var _mouse := Vector2.ZERO
@@ -642,7 +642,7 @@ func _pending_path() -> PackedVector2Array:
 	if mode == "curve":
 		if _chain.size() == 1:
 			return PackedVector2Array([_chain[0], _mp])
-		return ClosurePlan.curve_through(_chain[0], _mp, _chain[1])
+		return ClosurePlan.bezier(_chain[0], _chain[1], _mp)
 	return PackedVector2Array()
 
 
@@ -660,6 +660,10 @@ func _chain_click(p: Vector2) -> void:
 	var path := _pending_path()
 	if Geo.polyline_length(path) < 0.3:
 		return
+	for q in path:
+		if not _in_range(q):
+			_range_warn()
+			return
 	var list: Array = []
 	if kind != "line":
 		list = ClosurePlan.chain(kind, path, float(spacing.get(kind, 5.0)), lay, _chain_segments > 0)
@@ -752,9 +756,9 @@ func _snap_point(p: Vector2) -> Vector2:
 			if d2 < best:
 				best = d2
 				out = lay.lane2_pt(s2, float(lt))
-	# Shift: chain direction in 15° steps relative to the lane
+	# Shift: chain direction in 15° steps relative to the lane (from the last clicked point)
 	if Input.is_key_pressed(KEY_SHIFT) and not _chain.is_empty() and mode in ["line", "curve"]:
-		var a: Vector2 = _chain[_chain.size() - 1] if mode == "line" or _chain.size() == 1 else _chain[0]
+		var a: Vector2 = _chain[_chain.size() - 1]
 		var v := out - a
 		if v.length() > 0.05:
 			var base := lay.lane_dir(lay.lane_coords(a).x).angle()
@@ -792,6 +796,14 @@ func _update_mapping() -> void:
 
 func _scr(p: Vector2) -> Vector2:
 	return _o_scr + _ex * (p.x - _o_map.x) + _ez * (p.y - _o_map.y)
+
+
+## Map direction that points up on the screen (inverse of the screen mapping applied to (0, -1)).
+func _sdir_map_up() -> Vector2:
+	var det := _ex.x * _ez.y - _ex.y * _ez.x
+	if absf(det) < 1e-6:
+		return Vector2(0, -1)
+	return Vector2(_ez.x / det, -_ex.x / det).normalized()
 
 
 func _sdir(v: Vector2) -> Vector2:
@@ -869,8 +881,19 @@ func _unhandled_key_input(ev: InputEvent) -> void:
 		canvas.queue_redraw()
 
 
+func _in_range(p: Vector2) -> bool:
+	return p.distance_to(lay.trench_center()) <= ClosurePlan.PLAN_RADIUS
+
+
+func _range_warn() -> void:
+	Events.warn("Geplant wird im Umkreis von %d m um die Baustelle" % int(ClosurePlan.PLAN_RADIUS))
+
+
 func _left_down(shift: bool) -> void:
 	if not _over_map:
+		return
+	if mode in ["single", "line", "curve"] and not _in_range(_mp):
+		_range_warn()
 		return
 	match mode:
 		"single":
@@ -944,8 +967,20 @@ func _left_up() -> void:
 	match str(pr.get("type", "")):
 		"move", "move_line":
 			if pr.moved:
-				_push_undo(pr.snap)
-				_changed()
+				var inside := true
+				for i in _sel:
+					if not _in_range(ClosurePlan.item_center(plan.items[i])):
+						inside = false
+				if _sel_line >= 0 and _sel_line < plan.lines.size():
+					for q in (plan.lines[_sel_line] as PackedVector2Array):
+						if not _in_range(q):
+							inside = false
+				if not inside:
+					plan = pr.snap
+					_range_warn()
+				else:
+					_push_undo(pr.snap)
+				_changed(inside)
 		"box":
 			var r := Rect2(Vector2(pr.a), Vector2.ZERO).expand(Vector2(pr.b))
 			if r.size.length() > 4.0:
@@ -1011,6 +1046,14 @@ func _draw_plan() -> void:
 	var k2b := minf(lay.len_k2, float(ext.s2_b) + 45.0)
 	_traffic_line(cv, Geo.sub_polyline(lay._g2[0], lay._g2[1], k2a, k2b))
 	_tag(cv, font, _scr(lay.lane_pt(float(ext.det0), -0.3)), "Verschwenkung", TRAFFIC)
+	# planning radius (#18)
+	var tc := lay.trench_center()
+	var circ := PackedVector2Array()
+	for k in 97:
+		circ.append(_scr(tc + Vector2.from_angle(TAU * k / 96.0) * ClosurePlan.PLAN_RADIUS))
+	for k in 96:
+		cv.draw_dashed_line(circ[k], circ[k + 1], Color(WHITE, 0.55), 2.0, 10.0)
+	_tag(cv, font, _scr(tc + _sdir_map_up() * ClosurePlan.PLAN_RADIUS) + Vector2(-60, -6), "Planungsrahmen %d m" % int(ClosurePlan.PLAN_RADIUS), WHITE)
 	# how far the closure may reach on this street (crew van, waiting spots, junctions)
 	var lim := lay.extent_limits()
 	for k in 2:
@@ -1049,7 +1092,10 @@ func _draw_plan() -> void:
 		elif mode in ["line", "curve"]:
 			if path.size() >= 2:
 				if mode == "curve" and _chain.size() == 2:
-					cv.draw_dashed_line(_scr(_chain[0]), _scr(_chain[1]), Color(WHITE, 0.35), 1.0, 6.0)
+					# control polygon: start → direction point → mouse
+					cv.draw_dashed_line(_scr(_chain[0]), _scr(_chain[1]), Color(WHITE, 0.45), 1.0, 6.0)
+					cv.draw_dashed_line(_scr(_chain[1]), _mouse, Color(WHITE, 0.3), 1.0, 6.0)
+					cv.draw_circle(_scr(_chain[1]), 4.0, Color(UI.ACCENT, 0.9))
 				if kind == "line":
 					cv.draw_polyline(_scr_poly(path), Color(YELLOW, 0.6), maxf(0.15 * _ppm, 2.5), true)
 				else:
@@ -1063,9 +1109,9 @@ func _draw_plan() -> void:
 					var n := ClosurePlan.chain(kind, path, float(spacing.get(kind, 5.0)), lay, _chain_segments > 0).size()
 					txt += " · %d × %s" % [n, str(ClosurePlan.KINDS[kind].short)]
 				if mode == "curve" and _chain.size() == 1:
-					txt += " · Ende klicken"
+					txt = "Richtung klicken"
 				elif mode == "curve":
-					txt += " · Biegung klicken"
+					txt += " · Ende klicken"
 				_tag(cv, font, _mouse + Vector2(16, 18), txt, WHITE)
 			else:
 				_draw_cursor_dot(cv)
@@ -1091,7 +1137,7 @@ func _hint_text() -> String:
 		"line":
 			return "%s als Gerade: Anfang und Ende klicken, weiterklicken für den nächsten Abschnitt · Rechtsklick/Esc beendet · Umschalt: Winkel" % ClosurePlan.label(kind)
 		"curve":
-			return "%s als Kurve: Anfang, Ende, dann Biegung klicken · Rechtsklick/Esc beendet" % ClosurePlan.label(kind)
+			return "%s als Kurve: Anfang klicken, dann die Richtung, dann das Ende · weiterklicken setzt die nächste Kurve an · Rechtsklick/Esc beendet" % ClosurePlan.label(kind)
 		"select":
 			return "Teile anklicken (Umschalt: mehrere) oder Rahmen aufziehen · ziehen = verschieben · R drehen · Entf löschen"
 		"erase":

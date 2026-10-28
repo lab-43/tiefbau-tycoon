@@ -416,9 +416,11 @@ func _design() -> void:
 	ok(is_equal_approx(float(des.spacing.cone), 1.5), "Abstand Hütchen 1,5 m")
 	var ca := lay.lane_pt(lay.s_c1 + 14.0, lw * 0.5 + 0.6)
 	var cb := lay.lane_pt(lay.s_c1 + 22.0, lw * 0.5 + 0.6)
+	# #18: start, direction, end (like Cities: Skylines)
 	_click(ca)
+	_click(lay.lane_pt(lay.s_c1 + 18.0, lw * 0.5 + 2.4))
+	ok(des._chain.size() == 2 and int(des.plan.counts().get("cone", 0)) == 0, "Kurve: nach Anfang und Richtung noch nichts gesetzt")
 	_click(cb)
-	_click(lay.lane_pt(lay.s_c1 + 18.0, lw * 0.5 + 1.8))
 	_key(KEY_ESCAPE)
 	var n_cone := int(des.plan.counts().get("cone", 0))
 	ok(n_cone >= 6, "Hütchen als Kurve (%d)" % n_cone)
@@ -485,7 +487,23 @@ func _design() -> void:
 	var sp := des._snap_point(near)
 	ok(absf(lay.lane_coords(sp).y + lw * 0.5) < 0.02, "rastet an der Fahrstreifenkante ein")
 	des.snap = false
-	# preview for the screenshot: a curve chain of cones under the mouse
+	# #18: planning radius of 500 m – outside nothing is placed, inside on other streets it is
+	var rig2: CameraRig = drv.world.camera_rig
+	var keep_t := rig2._t_target
+	var keep_d := rig2._t_distance
+	rig2.set_view(keep_t, 2500.0, rad_to_deg(rig2._t_yaw), 90.0)
+	des._update_mapping()
+	des.set_kind("z123")
+	des.set_mode("single")
+	var up := des._sdir_map_up()
+	var n_items := des.plan.items.size()
+	_click(lay.trench_center() + up * 560.0)
+	ok(des.plan.items.size() == n_items, "außerhalb von 500 m wird nichts gesetzt")
+	_click(lay.trench_center() + up * 300.0)
+	ok(des.plan.items.size() == n_items + 1, "innerhalb von 500 m auch weit weg setzbar")
+	_key(KEY_Z, true)
+	rig2.set_view(keep_t, keep_d, rad_to_deg(rig2._t_yaw), 90.0)
+	des._update_mapping()
 	des.set_kind("bake")
 
 
