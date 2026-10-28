@@ -12,6 +12,7 @@ for a in "$@"; do
   case "$a" in
     --only=*) ONLY="${a#--only=}" ;;
     --compare=*) v="${a#--compare=}"; CMP="${v%%,*}"; [ "$v" != "$CMP" ] && CMPLAB="${v#*,}" ;;
+    -*) echo "unbekannte Option: $a (erlaubt: --only=, --compare=)"; exit 2 ;;
     *) OUT="$a" ;;
   esac
 done

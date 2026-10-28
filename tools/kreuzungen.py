@@ -5,17 +5,19 @@ game/test/junction_bench.gd exported for the fixed junctions in testdata/kreuzun
     tools/kreuzungen.sh                          # bake + measure + pictures (current code)
     python3 tools/kreuzungen.py IN [IN2 ...] --out DIR [--labels heute,neu]
 
-Each IN is a directory with one <fixture>.json per junction (same schema as junction_bench.gd writes;
+Pictures: <fixture>.png (whole circle), <fixture>_nah.png (centre), <fixture>_fehler.png (worst spots of
+the first IN). Each IN is a directory with one <fixture>.json per junction (same schema as junction_bench.gd writes;
 other generators such as an osm2streets converter write the same schema). With several INs the
 pictures show the variants side by side and the table compares them.
 
 Measured inside the circle of radius_m around the junction centre:
   knoten        graph nodes with >= 3 roads (one real junction should be one node)
   kurz          road pieces shorter than 10 m between two nodes (stubs between mini junctions)
-  luecke_m      metres of lane/connector centre line that are not on asphalt (visible gaps)
-  ueber_gehweg_m metres of lane/connector centre line over a raised sidewalk
-  gehweg_auf_fahrbahn_m2  sidewalk area lying on top of asphalt (the white spikes)
-  splitter      tiny holes (< 4 m²) inside the asphalt surface
+  luecke_m      metres of lane/turn path centre line that are not on asphalt (visible gaps; U-turns excluded)
+  ueber_gehweg_m metres of lane/connector centre line over a raised sidewalk (cars drive through the curb)
+  gehweg_auf_fahrbahn_m2  sidewalk area lying on top of asphalt. Asphalt hidden under a sidewalk is
+                not visible, so this overstates; what you see is ueber_gehweg_m and the pictures
+  splitter      tiny holes (0.02 – 4 m²) inside the asphalt surface (ground showing through)
   knicke        places where a lane or turn path changes heading by more than 15° within 1 m
   versatz       straight-through connectors whose lanes are offset sideways by more than 0.5 m (S-wobble)
   markierung_m  approximate length of road markings (area / 0.12 m)
@@ -131,7 +133,8 @@ def measure(d):
         drive.append(LineString(p))
     conns = [c for c in d.get("connectors", []) if len(c["pts"]) >= 4]
     for c in conns:
-        drive.append(LineString(pts_of(c["pts"])))
+        if c.get("turn") != "U":   # turning at dead ends is not a junction matter
+            drive.append(LineString(pts_of(c["pts"])))
     dr = shapely.union_all(drive).intersection(win) if drive else LineString()
     gap = dr.difference(asphalt.buffer(0.05)) if not asphalt.is_empty else dr
     m["luecke_m"] = round(gap.length, 1)
@@ -144,7 +147,7 @@ def measure(d):
         if isinstance(poly, Polygon):
             for ring in poly.interiors:
                 h = Polygon(ring)
-                if h.area < 4.0:
+                if 0.02 <= h.area < 4.0:   # smaller ones are numeric seams, not visible
                     holes.append(h)
     m["splitter"] = len(holes)
     # kinks along lanes and along turn paths (lane tail + connector + lane head)
@@ -237,6 +240,10 @@ def draw(fixture, variants, labels, out_png, radius=None):
             if isinstance(part, Polygon) and not part.is_empty:
                 x, y = part.exterior.xy
                 ax.fill(x, y, color="#d000d0", alpha=0.8)
+        for h in ex["holes"]:
+            x, y = h.exterior.xy
+            ax.fill(x, y, color="#e00000", alpha=0.9)
+            ax.plot([h.centroid.x], [h.centroid.y], "s", mfc="none", mec="#e00000", ms=9, mew=1.5)
         if ex["kinks"]:
             ax.plot([p[0] for p in ex["kinks"]], [p[1] for p in ex["kinks"]], "o", mfc="none", mec="#e00000", ms=7, mew=1.2)
         for p, q in ex["offsets"]:
@@ -246,12 +253,72 @@ def draw(fixture, variants, labels, out_png, radius=None):
                 ax.plot(n_["pos"][0], n_["pos"][1], "o", color="black", ms=4)
         txt = "  ".join(f"{k}={'–' if m[k] is None else m[k]}" for k in METRICS)
         ax.set_title(f"{lab}: Fahrwege (blau Spur, orange Abbiegen, schwarz gestrichelt OSM)\n"
-                     "rot = Lücke/Knick, lila = Gehweg auf Fahrbahn, grün = Versatz, Punkt = Kreuzungsknoten", fontsize=10)
+                     "rot = Lücke/Knick/Splitter (Quadrat), lila = Gehweg auf Fahrbahn, grün = Versatz, Punkt = Kreuzungsknoten", fontsize=10)
         ax.text(0.01, 0.01, txt, transform=ax.transAxes, fontsize=8.5, color="black",
                 bbox=dict(facecolor="white", alpha=0.85, edgecolor="none"))
     d0 = variants[0][0]
     R0 = radius or int(d0.get("radius_m", 150))
     fig.suptitle(f"{d0.get('name', fixture)} ({fixture}) – Ausschnitt ±{int(R0)} m", fontsize=16)
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    fig.savefig(out_png)
+    plt.close(fig)
+
+
+def problem_spots(ex, R, limit):
+    """The worst places of one variant: [(x, z, what, size)], at most one per 15 m."""
+    spots = []
+    for part in getattr(ex["sw_on"], "geoms", [ex["sw_on"]]):
+        if isinstance(part, Polygon) and part.area > 0.5:
+            spots.append((part.centroid.x, part.centroid.y, "Gehweg auf Fahrbahn %.1f m²" % part.area, part.area * 2))
+    for h in ex["holes"]:
+        spots.append((h.centroid.x, h.centroid.y, "Splitter %.1f m²" % h.area, 3.0 + h.area))
+    for part in getattr(ex["gap"], "geoms", [ex["gap"]]):
+        if isinstance(part, LineString) and part.length > 1.0:
+            q = part.interpolate(0.5, normalized=True)
+            spots.append((q.x, q.y, "Lücke %.1f m" % part.length, part.length))
+    spots = [s_ for s_ in spots if math.hypot(s_[0], s_[1]) <= R]
+    spots.sort(key=lambda s_: -s_[3])
+    keep = []
+    for s_ in spots:
+        if all(math.hypot(s_[0] - k[0], s_[1] - k[1]) > 15.0 for k in keep):
+            keep.append(s_)
+        if len(keep) >= limit:
+            break
+    return keep
+
+
+def draw_spots(fixture, d, ex, spots, out_png, half=18.0):
+    """Close-ups (±half m) of problem spots: surface, lanes and turn paths in one picture each."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import PolyCollection, LineCollection
+    cols = 3
+    rows = (len(spots) + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 6 * rows), dpi=80, squeeze=False)
+    layers = {name: layer_parts(d, name) for name in ("asphalt", "sidewalk", "mark")}
+    lanes = [pts_of(l["pts"]) for l in d.get("lanes", [])]
+    cs = [pts_of(c["pts"]) for c in d.get("connectors", []) if c.get("turn") != "U"]
+    for i in range(rows * cols):
+        ax = axes[i // cols][i % cols]
+        ax.set_xticks([])
+        ax.set_yticks([])
+        if i >= len(spots):
+            ax.axis("off")
+            continue
+        x, z, what, _ = spots[i]
+        ax.set_facecolor("#d8d8d4")
+        ax.set_xlim(x - half, x + half)
+        ax.set_ylim(z + half, z - half)
+        ax.set_aspect("equal")
+        for name, color in (("asphalt", "#3b3e44"), ("sidewalk", "#b9b9b4"), ("mark", "#ffffff")):
+            if layers[name]:
+                ax.add_collection(PolyCollection(layers[name], facecolors=color, edgecolors=color, linewidths=0.15))
+        ax.add_collection(LineCollection(lanes, colors="#4f8fff", linewidths=1.0))
+        ax.add_collection(LineCollection(cs, colors="#ff9a20", linewidths=0.8))
+        ax.plot([x], [z], "o", mfc="none", mec="#ff2020", ms=26, mew=2)
+        ax.set_title(f"{what} bei ({x:.0f}, {z:.0f})", fontsize=11)
+    fig.suptitle(f"{d.get('name', fixture)} – Fehlerstellen ({fixture})", fontsize=14)
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     fig.savefig(out_png)
     plt.close(fig)
@@ -265,6 +332,7 @@ def main():
     ap.add_argument("--only", default="")
     ap.add_argument("--no-pictures", action="store_true")
     ap.add_argument("--zoom", type=float, default=55.0, help="half edge of the close-up picture (m)")
+    ap.add_argument("--spots", type=int, default=6, help="close-ups of the worst problem spots of the first input")
     a = ap.parse_args()
     labels = a.labels.split(",") if a.labels else [Path(p).name for p in a.inputs]
     out = Path(a.out)
@@ -287,6 +355,11 @@ def main():
             labs = [labels[a.inputs.index(i)] for i in a.inputs if (Path(i) / f"{fx}.json").exists()]
             draw(fx, variants, labs, out / f"{fx}.png")
             draw(fx, variants, labs, out / f"{fx}_nah.png", radius=a.zoom)
+            if a.spots > 0:
+                d0, m0, ex0 = variants[0]
+                sp = problem_spots(ex0, float(d0.get("radius_m", 150.0)), a.spots)
+                if sp:
+                    draw_spots(fx, d0, ex0, sp, out / f"{fx}_fehler.png")
     (out / "metrics.json").write_text(json.dumps(table, indent=1, ensure_ascii=False))
     w = max(len(f) for f in fixtures) if fixtures else 10
     print(f"{'Kreuzung':<{w}}  {'Variante':<12} " + " ".join(f"{k[:10]:>10}" for k in METRICS))
