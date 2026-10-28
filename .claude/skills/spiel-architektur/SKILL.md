@@ -31,7 +31,7 @@ Autoloads (`project.godot`):
     - Knoten mit nur zwei Straßen sind Übergänge (`cont`): abgerundet, Breite und Gehweg laufen aus (`_continuation_geometry`); dasselbe für Mitglieder einer Gruppe, an denen eine Straße einfach weitergeht (`_pass_through_cuts`, `_taper_piece`),
     - Abbiegewege: Gerade–Bogen–Gerade mit größtem Radius (`turn_path`), gerade Fahrt zur seitlich nächsten Spur (`_nearest_out_lane`),
     - Prüfstand für alles hier: `tools/kreuzungen.sh` (Skill tycoon-dev),
-  - `RoadMesher` (Fahrbahn, Gehweg, Bordstein, Markierung),
+  - `RoadMesher` (Fahrbahn, Gehweg, Bordstein, Markierung entlang der Straßen, Halt-/Wartelinien) mit `RoadMarkings` (Linien durch Übergänge und Gruppen, Knotenpunkt-Leitlinien, Richtungspfeile, Sperrflächen; Maße nach RMS als Konstanten, Lektion markierungen-rms),
   - `CityMesher` (Gebäude, Flächen, Wasser, Bäume, Laternen),
   - je Chunk ein `MeshLayer` pro Material aus `Mats`.
 - **Koordinaten:** `Geo.to_local(lat, lon)` → `Vector2(x, z)`, x = Ost, z = Süd.

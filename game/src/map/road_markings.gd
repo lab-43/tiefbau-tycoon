@@ -351,7 +351,7 @@ func sperrflaechen(l: MeshLayer, ni: int) -> void:
 	for ci in n.get("conns", []):
 		var c: Dictionary = net.connectors[ci]   # U-turns too: in a group they are crossovers
 		var hw: float = float(net.edges[int(c.from) >> 4].lw) * 0.5
-		for b in Geometry2D.offset_polyline(c.pts, hw, Geometry2D.JOIN_ROUND, Geometry2D.END_ROUND):
+		for b in Geometry2D.offset_polyline(_coarse(c.pts, 1.5), hw, Geometry2D.JOIN_MITER, Geometry2D.END_SQUARE):
 			if not Geometry2D.is_polygon_clockwise(b):
 				drive.append(b)
 	if drive.is_empty():
@@ -374,6 +374,7 @@ func sperrflaechen(l: MeshLayer, ni: int) -> void:
 				if not Geometry2D.is_polygon_clockwise(r):
 					nxt2.append(r)
 		rest = nxt2
+	var grid := _seg_grid(outer, islands)
 	for part in rest:
 		# opening: the slivers along the paths go
 		for sp in Geometry2D.offset_polygon(part, -0.4, Geometry2D.JOIN_MITER):
@@ -392,45 +393,86 @@ func sperrflaechen(l: MeshLayer, ni: int) -> void:
 						if not Geometry2D.is_polygon_clockwise(ov) and absf(Geo.polygon_area(ov)) > 0.5:
 							inside.append(ov)
 							island_inside = island_inside or h in islands
-				var touch := _touching(g, outer, islands)
+				var touch := _touching(g, grid)
 				var gore := Geometry2D.offset_polygon(g, -GORE_MAX_R, Geometry2D.JOIN_MITER).is_empty()
 				if touch.island >= 1.0 or island_inside or (gore and touch.curb < 0.3 * touch.total):
-					_hatch(l, g, outer, islands, inside)
+					_hatch(l, g, grid, inside)
 
 
-## Boundary length of g lying on the outer curb line and on islands (sampled every 0.5 m).
-func _touching(g: PackedVector2Array, outer: PackedVector2Array, islands: Array) -> Dictionary:
+## Polyline thinned to points at least `step` apart (end points kept): turn paths have a point every
+## 0.75 m, which makes the union of their strips slow.
+static func _coarse(pts: PackedVector2Array, step: float) -> PackedVector2Array:
+	if pts.size() <= 2:
+		return pts
+	var out := PackedVector2Array([pts[0]])
+	for i in range(1, pts.size() - 1):
+		if pts[i].distance_to(out[out.size() - 1]) >= step:
+			out.append(pts[i])
+	out.append(pts[pts.size() - 1])
+	return out
+
+
+const GRID := 4.0
+
+
+## Spatial index of the outline of a group: cell -> [[a, b, kind]], kind 0 = curb, 1 = island.
+static func _seg_grid(outer: PackedVector2Array, islands: Array) -> Dictionary:
+	var g := {}
+	_add_ring(g, outer, 0)
+	for h in islands:
+		_add_ring(g, h, 1)
+	return g
+
+
+static func _add_ring(g: Dictionary, ring: PackedVector2Array, kind: int) -> void:
+	for i in ring.size():
+		var a := ring[i]
+		var b := ring[(i + 1) % ring.size()]
+		for x in range(floori(minf(a.x, b.x) / GRID), floori(maxf(a.x, b.x) / GRID) + 1):
+			for y in range(floori(minf(a.y, b.y) / GRID), floori(maxf(a.y, b.y) / GRID) + 1):
+				var c := Vector2i(x, y)
+				if not g.has(c):
+					g[c] = []
+				g[c].append([a, b, kind])
+
+
+## What lies within d (< GRID) of p: 0 a curb, 1 an island, -1 nothing (a curb wins).
+static func _near(grid: Dictionary, p: Vector2, d: float) -> int:
+	var cx := floori(p.x / GRID)
+	var cy := floori(p.y / GRID)
+	var res := -1
+	for dx in range(-1, 2):
+		for dy in range(-1, 2):
+			for sg in grid.get(Vector2i(cx + dx, cy + dy), []):
+				if p.distance_squared_to(Geometry2D.get_closest_point_to_segment(p, sg[0], sg[1])) < d * d:
+					if sg[2] == 0:
+						return 0
+					res = 1
+	return res
+
+
+## Boundary length of g lying on the curb line and on islands (sampled every metre).
+func _touching(g: PackedVector2Array, grid: Dictionary) -> Dictionary:
 	var res := {"curb": 0.0, "island": 0.0, "total": 0.0}
 	for i in g.size():
 		var a := g[i]
 		var b := g[(i + 1) % g.size()]
 		var len_ab := a.distance_to(b)
-		var steps := maxi(1, ceili(len_ab / 0.5))
+		var steps := maxi(1, ceili(len_ab))
 		for k in steps:
-			var p := a.lerp(b, (k + 0.5) / steps)
 			var part := len_ab / steps
 			res.total += part
-			if _dist_to_ring(p, outer) < 0.35:
-				res.curb += part
-			else:
-				for h in islands:
-					if _dist_to_ring(p, h) < 0.35:
-						res.island += part
-						break
+			match _near(grid, a.lerp(b, (k + 0.5) / steps), 0.35):
+				0:
+					res.curb += part
+				1:
+					res.island += part
 	return res
-
-
-static func _dist_to_ring(p: Vector2, ring: PackedVector2Array) -> float:
-	var best := INF
-	for i in ring.size():
-		var q := Geometry2D.get_closest_point_to_segment(p, ring[i], ring[(i + 1) % ring.size()])
-		best = minf(best, p.distance_squared_to(q))
-	return sqrt(best)
 
 
 ## Oblique stripes over area g at 45° to its long axis, and a narrow border line where the area
 ## meets the lanes (not along curbs and islands).
-func _hatch(l: MeshLayer, g: PackedVector2Array, outer: PackedVector2Array, islands: Array, inside: Array) -> void:
+func _hatch(l: MeshLayer, g: PackedVector2Array, grid: Dictionary, inside: Array) -> void:
 	var cut_out: Array = []
 	var area := absf(Geo.polygon_area(g))
 	for h in inside:
@@ -482,13 +524,5 @@ func _hatch(l: MeshLayer, g: PackedVector2Array, outer: PackedVector2Array, isla
 		for i in ring.size():
 			var a: Vector2 = ring[i]
 			var b: Vector2 = ring[(i + 1) % ring.size()]
-			var m := (a + b) * 0.5
-			if _dist_to_ring(m, outer) < 0.45:
-				continue
-			var on_island := false
-			for h in islands:
-				if _dist_to_ring(m, h) < 0.45:
-					on_island = true
-					break
-			if not on_island:
+			if _near(grid, (a + b) * 0.5, 0.45) < 0:
 				band(l, PackedVector2Array([a, b]), NARROW)

@@ -407,10 +407,17 @@ func _edge_markings(ei: int, e: Dictionary, ck: Vector2i, s0: float, s1: float) 
 	if e.cyc_l > 0.0:
 		_line(mk, pts, cum, e0, e1, -e.width * 0.5 + e.park_l + e.cyc_l, RoadMarkings.BROAD, 0.0, 0.0, excl)
 	# stop and give-way lines across the arriving lanes
+	# (a Haltlinie spans the cycle lane next to the lanes as well)
 	if end_b.kind != "" and length > 4.0:
-		_end_bar(mk, pts, cum, end_b, x_div, x_div + lf * lw)
+		var x1b: float = x_div + lf * lw
+		if end_b.kind == "halt" and e.cyc_r > 0.0:
+			x1b = maxf(x1b, e.width * 0.5 - e.park_r)
+		_end_bar(mk, pts, cum, end_b, x_div, x1b)
 	if end_a.kind != "" and length > 4.0:
-		_end_bar(mk, pts, cum, end_a, x_div - lb * lw, x_div)
+		var x0a: float = x_div - lb * lw
+		if end_a.kind == "halt" and e.cyc_l > 0.0:
+			x0a = minf(x0a, -e.width * 0.5 + e.park_l)
+		_end_bar(mk, pts, cum, end_a, x0a, x_div)
 	# direction arrows on multi-lane approaches, the first one 3 m in front of the stop line
 	if marked:
 		if lf >= 2 and n_b.ends.size() >= 3 and not n_b.get("cont", false):

@@ -28,6 +28,7 @@ Alle Punkte stammen aus echten Fehlern. Die Details und Belege stehen in `docs/l
 - **Controls über der 3D-Welt** (Markierungen): `MOUSE_FILTER_PASS`, nur den eigenen Klick mit `accept_event()` annehmen, Rechtsklick-Befehle über `World.marker_command`. STOP schluckt Ziehen und Rechtsklick der Kamera. In Tests `push_input` statt `_gui_input` (ui-ueber-welt-pass).
 - **Node-Namen** ohne `. : @ / "`, sonst bricht `get_node` (node-namen).
 - **Namen wiederverwenden:** vor `queue_free()` erst `remove_child()` (queue-free-namen).
+- **`clip_polygons` / `merge_polygons` / `offset_polygon`** liefern Löcher als eigene Polygone im Uhrzeigersinn. Wer nur die gegen den Uhrzeigersinn behält, verliert das Loch (clip-polygons-loecher).
 - **Skript-Tests (`-s`, `extends SceneTree`)** kennen keine Autoloads, auch nicht in den Klassen, die sie benutzen (`TrafficSim` → `Clock`). Solche Tests als Szene starten (`test/drive_test.tscn`), immer mit `timeout` – ein Kompilierfehler lässt den Prozess sonst hängen (autoload-in-skripttests).
 - **Anker:** `set_anchors_preset()` setzt keine Offsets. `set_anchors_and_offsets_preset()` verwenden oder die Offsets direkt danach setzen (ui-anker).
 - **Pause:** Simulation-Nodes pausieren mit dem Baum. UI, Welt-Input und der e2e-Treiber laufen mit `PROCESS_MODE_ALWAYS`.
