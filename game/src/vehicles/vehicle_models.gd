@@ -346,7 +346,7 @@ static func beacon_body() -> Node3D:
 	dc.bottom_radius = 0.075
 	dc.height = 0.13
 	dc.radial_segments = 12
-	var gm := mat(Color(1.0, 0.45, 0.02), 0.2)
+	var gm := mat(Color(0.78, 0.27, 0.02), 0.2)
 	gm.resource_name = "RotLight_ReflectorGlass_proc"
 	dc.material = gm
 	dome.mesh = dc

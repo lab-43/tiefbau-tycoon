@@ -10,12 +10,14 @@ const LIGHT_SUFFIX := {"__light_head": "head", "__light_tail": "tail", "__light_
 	"__indicator_r": "ind_r", "__light_reverse": "reverse", "__worklight": "work"}
 const LIGHT_COLOR := {"head": Color(1.0, 0.95, 0.85), "tail": Color(1.0, 0.04, 0.02), "brake": Color(1.0, 0.04, 0.02),
 	"ind_l": Color(1.0, 0.48, 0.0), "ind_r": Color(1.0, 0.48, 0.0), "reverse": Color(1.0, 1.0, 1.0),
-	"work": Color(1.0, 0.98, 0.92), "beacon": Color(1.0, 0.55, 0.0)}
+	"work": Color(1.0, 0.98, 0.92), "beacon": Color(1.0, 0.3, 0.0)}
 # LED beacons: bursts of 2 or 3 short flashes per cycle; the 2nd beacon of a pair runs half a cycle later
 const FLASH_ON := 0.06
 const FLASH_GAP := 0.07
 const FLASH_CYCLE := 0.8
-const BEACON_GLOW := 6.0
+const BEACON_GLOW := 1.4       # emission while flashing; AgX turns much more into white-yellow
+const BEACON_LAYER := 1 << 19  # render layer 20: beacon meshes, not lit by their own flash light
+const BEACON_GLASS := Color(0.78, 0.27, 0.02, 0.85)   # amber dome, also visible while dark
 const ROOF_BEACON_X := 0.45    # lateral offset of the roof beacons the game mounts itself (crew van)
 
 var def_id := ""
@@ -78,6 +80,7 @@ var _spots: Array = []
 var _work_spots: Array = []
 var _beacons: Array = []       # [{key, node, mats: Array[BaseMaterial3D], light: OmniLight3D, offset, lit}]
 var _flash_phase := randf() * FLASH_CYCLE
+var beacon_freeze := -1        # tests/screenshots: -1 flash pattern, 0 always dark, 1 always lit
 var low_on := false
 var beacon_on := false
 var work_on := false
@@ -231,6 +234,7 @@ func _setup_lights() -> void:
 				dm.emission_energy_multiplier = 0.0
 				m3.set_surface_override_material(si, dm)
 				if t == "beacon":
+					dm.albedo_color = BEACON_GLASS
 					_beacon_of(m3, root).mats.append(dm)
 				else:
 					_lmats[t].append(dm)
@@ -277,6 +281,7 @@ func _setup_lights() -> void:
 					mi2.material_override = bm2
 					n.add_child(mi2)
 					if t2 == "beacon":
+						bm2.albedo_color = BEACON_GLASS
 						_beacon_of(n, model).mats.append(bm2)
 					else:
 						_lmats[t2].append(bm2)
@@ -285,14 +290,20 @@ func _setup_lights() -> void:
 	for i in _beacons.size():
 		var b: Dictionary = _beacons[i]
 		b.offset = 0.5 * FLASH_CYCLE if i % 2 == 1 else 0.0
+		# the flash light sits right inside the dome: it must not light the dome and reflector itself
+		# (that washed them out to white), so they live on their own render layer
+		var bn: Node3D = b.node
+		for mi in bn.find_children("*", "MeshInstance3D", true, false) + ([bn] if bn is MeshInstance3D else []):
+			(mi as MeshInstance3D).layers = BEACON_LAYER
 		if lights < 2 and model.is_ancestor_of(b.node):
 			var ol := OmniLight3D.new()
 			ol.omni_range = 9.0
 			ol.omni_attenuation = 1.4
 			ol.light_color = LIGHT_COLOR.beacon
 			ol.light_energy = 0.0
+			ol.light_cull_mask = 0xFFFFF & ~BEACON_LAYER
 			ol.shadow_enabled = false
-			ol.position.y = 0.12
+			ol.position.y = 0.7    # above the dome: lights the surroundings, no hot spot on the own roof
 			(b.node as Node3D).add_child(ol)
 			b.light = ol
 			lights += 1
@@ -349,13 +360,15 @@ func _update_beacons(night: float) -> void:
 	var now := Time.get_ticks_msec() * 0.001 + _flash_phase   # real time: same rhythm at every game speed
 	for b in _beacons:
 		var lit: bool = beacon_on and flash_lit(now + float(b.offset), n)
+		if beacon_freeze >= 0:
+			lit = beacon_freeze == 1
 		if lit == b.lit:
 			continue
 		b.lit = lit
 		for m in b.mats:
 			(m as BaseMaterial3D).emission_energy_multiplier = BEACON_GLOW if lit else 0.0
 		if b.light:
-			(b.light as OmniLight3D).light_energy = (1.6 + night * 4.0) if lit else 0.0
+			(b.light as OmniLight3D).light_energy = (0.1 + night * 0.4) if lit else 0.0
 
 
 func _set_light(t: String, v: float) -> void:
