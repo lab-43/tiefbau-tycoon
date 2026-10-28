@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs end-to-end scenarios headless on the offline Utrecht map and reports pass/fail.
 # usage: tools/test.sh [scenario ...]            default: smoke issue
-#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren debug leuchten verkehrslichter rig markierungen absperrung  (save+load = save mid-dig,
+#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren debug leuchten verkehrslichter rig markierungen absperrung vollsperrung  (save+load = save mid-dig,
 #              then load and finish; rig = excavator linkage/cylinders, see game/test/rig_test.gd;
 #              ebenen = height order of flat map layers, see game/test/layer_test.gd – also part of pbf;
 #              sichtweite = city meshes sit at their chunk (visibility ranges), game/test/range_test.gd – also part of pbf;
@@ -75,6 +75,9 @@ for s in "${SCEN[@]}"; do
     absperrung)  # closure designer (#9); like markierungen it also fails on a script error (in _draw)
       run absperrung "E2E OK absperrung" --e2e=absperrung
       if grep -q "SCRIPT ERROR" /tmp/tt_e2e_absperrung.log; then FAIL=1; echo "FAIL  absperrung: Skriptfehler im Log"; grep -A3 "SCRIPT ERROR" /tmp/tt_e2e_absperrung.log | head -8 | sed 's/^/      /'; fi ;;
+    vollsperrung)  # full road closure (#20): designer, traffic stays off the road, site vehicles get in
+      run vollsperrung "E2E OK vollsperrung" --e2e=vollsperrung
+      if grep -q "SCRIPT ERROR" /tmp/tt_e2e_vollsperrung.log; then FAIL=1; echo "FAIL  vollsperrung: Skriptfehler im Log"; grep -A3 "SCRIPT ERROR" /tmp/tt_e2e_vollsperrung.log | head -8 | sed 's/^/      /'; fi ;;
     *) echo "unbekanntes Szenario: $s"; FAIL=1 ;;
   esac
 done

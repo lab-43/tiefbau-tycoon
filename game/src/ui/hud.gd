@@ -699,7 +699,7 @@ func _right_site(s: Site) -> void:
 	dl.text = str(_binds[_binds.size() - 1][1].call())
 	pay_row.add_child(dl)
 	right_body.add_child(pay_row)
-	var desc := UI.label("%s · Graben %.1f × %.1f m, %.2f m tief · Absperrung: %s" % [j.title(), j.length, j.width, j.depth, "Engstelle mit Z 208/308" if s.lay.oncoming else "Fahrstreifensperrung"], 12, UI.MUTED)
+	var desc := UI.label("%s · Graben %.1f × %.1f m, %.2f m tief · Absperrung: %s" % [j.title(), j.length, j.width, j.depth, s.closure_kind()], 12, UI.MUTED)
 	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	right_body.add_child(desc)
 	right_body.add_child(UI.sep())

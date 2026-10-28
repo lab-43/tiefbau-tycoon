@@ -739,7 +739,7 @@ func drive_plan(dest: Dictionary, label: String, tail: Array = [], cb: Callable 
 			if dest.s - start.s > 0.05:
 				plan = [router.lane_piece(start.key, start.s, dest.s)]
 		else:
-			plan = router.plan(start.key, start.s, dest.key, dest.s, _avoid_edges())
+			plan = router.plan(start.key, start.s, dest.key, dest.s, _avoid_edges(start.key, dest.key))
 			if plan.is_empty():
 				Events.warn("%s: keine Route nach %s gefunden" % [vname, label])
 				status_text = "Keine Route"
@@ -793,12 +793,17 @@ func _road_clear(obs: Dictionary) -> bool:
 	return world.traffic.lane_clear(obs.key, obs.s0, obs.s1, agent)
 
 
-func _avoid_edges() -> Dictionary:
+## Roads this vehicle must not use: motorways for slow machines, fully closed roads (#20) unless the
+## trip starts or ends on them (the site's own vehicles drive in).
+func _avoid_edges(start_key := -1, dest_key := -1) -> Dictionary:
 	var av := {}
 	if not def.get("road_legal", true):
 		for ei in world.net.edges.size():
 			if world.net.edges[ei].cls in ["motorway", "trunk", "motorway_link", "trunk_link"]:
 				av[ei] = true
+	for ei in world.traffic.closed_edges:
+		if ei != start_key >> 4 and ei != dest_key >> 4:
+			av[ei] = true
 	return av
 
 

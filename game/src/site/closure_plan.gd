@@ -17,8 +17,9 @@ const KINDS := {
 	"z208": {"label": "Z 208 Vorrang Gegenverkehr", "short": "Z 208", "sign": true, "spacing": 30.0},
 	"z308": {"label": "Z 308 Vorrang vor Gegenverkehr", "short": "Z 308", "sign": true, "spacing": 30.0},
 	"z274": {"label": "Z 274 Höchstgeschwindigkeit", "short": "Z 274", "sign": true, "spacing": 30.0},
+	"z250": {"label": "Z 250 Verbot für Fahrzeuge aller Art", "short": "Z 250", "sign": true, "spacing": 30.0},
 }
-const ORDER := ["bake", "cone", "schranke", "fence", "line", "z123", "z208", "z308", "z274"]
+const ORDER := ["bake", "cone", "schranke", "fence", "line", "z123", "z208", "z308", "z274", "z250"]
 const ELEM_LEN := 2.14      # Absperrschranke / Absperrgitter: length along +X from the origin
 const ELEM_STEP := 2.05     # spacing of chained elements (end to end, the feet overlap a little)
 const TRAFFIC_CLEAR := 1.3  # m: nothing closer than this to the path of a car's centre
@@ -29,6 +30,7 @@ var items: Array = []       # {kind, pos: Vector2, yaw: float, phase: float, gro
 var lines: Array = []       # PackedVector2Array per yellow marking
 var custom := false         # false = standard template (layout order, traffic geometry unchanged)
 var traffic := {}           # player-laid traffic paths (#19): {"k": [Vector2(s, lat)], "k2": [...]}; empty = automatic
+var full := false           # full road closure (#20): no through traffic on the site's road, it takes other roads
 
 
 static func is_linear(kind: String) -> bool:
@@ -53,6 +55,55 @@ static func make_item(kind: String, p: Vector2, yaw: float, phase := 0.0, group 
 	return {"kind": kind, "pos": p, "yaw": yaw, "phase": phase, "group": group}
 
 
+## Standard plan for a full road closure (#20): barriers across the whole carriageway in front of the
+## work area (and behind it when the other lane carries oncoming traffic), Z 250 and Z 123 for every
+## closed direction, fall protection at the trench as in the standard closure.
+static func full_from_layout(lay: SiteLayout) -> ClosurePlan:
+	var p := ClosurePlan.new()
+	p.custom = true
+	p.full = true
+	var side := lay.lw * 0.5 + 0.7
+	var sf := lay.s_c0 + 0.6
+	for sk in [["z123", 45.0], ["z250", 4.0]]:
+		var ss := maxf(3.0, sf - float(sk[1]))
+		p.items.append(make_item(str(sk[0]), lay.lane_pt(ss, side), SiteLayout.yaw_of(lay.lane_dir(ss)), 0.0, "signs"))
+	if lay.oncoming:
+		# the oncoming direction meets the closure behind the work area (K2 runs the other way)
+		var sr := lay.s_c1 + 1.5
+		var s2r: float = lay.lane2_coords(lay.lane_pt(sr)).x
+		for sk2 in [["z123", 45.0], ["z250", 4.0]]:
+			var s2 := maxf(3.0, s2r - float(sk2[1]))
+			p.items.append(make_item(str(sk2[0]), lay.lane2_pt(s2, lay.lw2 * 0.5 + 0.7), SiteLayout.yaw_of(lay.lane2_dir(s2)), 0.0, "signs"))
+	p.items.append_array(_across(lay, sf, false))
+	if lay.oncoming:
+		p.items.append_array(_across(lay, lay.s_c1 + 1.5, true))
+	for it in lay.items():
+		if it.group == "pit":
+			p.items.append((it as Dictionary).duplicate())
+	return p
+
+
+## Absperrschranken across the whole carriageway (both lanes) at s on K. from_k2: the chain starts on
+## the far side, so that the warning side faces the traffic of the other lane.
+static func _across(lay: SiteLayout, s: float, from_k2: bool) -> Array:
+	var away := 1.0 if lay.oncoming else -1.0
+	var a := lay.lane_pt(s, lay.lw * 0.5 - 0.05)
+	var s2: float = lay.lane2_coords(lay.lane_pt(s)).x
+	var b := lay.lane2_pt(s2, away * (lay.lw2 * 0.5 - 0.05))
+	var out := chain("schranke", PackedVector2Array([b, a]) if from_k2 else PackedVector2Array([a, b]), ELEM_STEP, lay)
+	for it in out:
+		it.group = "head"
+	return out
+
+
+## Lateral extent of the whole carriageway (K and K2) in K coordinates near s: Vector2(lo, hi).
+static func road_span(lay: SiteLayout, s: float) -> Vector2:
+	var away := 1.0 if lay.oncoming else -1.0
+	var s2: float = lay.lane2_coords(lay.lane_pt(s)).x
+	var far: float = lay.lane_coords(lay.lane2_pt(s2, away * lay.lw2 * 0.5)).y
+	return Vector2(minf(far, -lay.lw * 0.5), maxf(far, lay.lw * 0.5))
+
+
 ## The standard closure of the layout (what the game built before #9), in its build order.
 static func from_layout(lay: SiteLayout) -> ClosurePlan:
 	var p := ClosurePlan.new()
@@ -70,6 +121,7 @@ func copy() -> ClosurePlan:
 	for l in lines:
 		p.lines.append(PackedVector2Array(l))
 	p.custom = custom
+	p.full = full
 	for k in traffic:
 		p.traffic[k] = (traffic[k] as Array).duplicate()
 	return p
@@ -317,6 +369,8 @@ func checks(lay: SiteLayout) -> Array:
 	var lc_of: Array = []
 	for it in items:
 		lc_of.append(lay.lane_coords(item_center(it)))
+	if full:
+		return _checks_full(lay, lc_of)
 	# 1. cross barrier ahead of the trench
 	var quer := false
 	for i in items.size():
@@ -358,22 +412,7 @@ func checks(lay: SiteLayout) -> Array:
 	out.append({"id": "laengs", "ok": gap_at < 0.0, "required": true, "text": "Längsabsicherung zum Verkehr",
 		"hint": ("Lücke etwa %d m nach Grabenbeginn. " % int(round(gap_at - lay.s_t0)) if gap_at >= 0.0 else "") + "Leitbaken (höchstens 9 m Abstand), Hütchen, Gitter oder gelbe Linie an der Kante zum Verkehr entlang des ganzen Arbeitsbereichs."})
 	# 3. fall protection along both long sides of the trench
-	var sides_ok := true
-	for side in [-1.0, 1.0]:
-		var cov: Array = []
-		for i in items.size():
-			var it3: Dictionary = items[i]
-			if not (it3.kind in ["fence", "schranke"]):
-				continue
-			var lc5: Vector2 = lc_of[i]
-			var off: float = lc5.y * side - lay.W * 0.5
-			if off < 0.05 or off > 1.6:
-				continue
-			cov.append(Vector2(lc5.x - 1.2, lc5.x + 1.2))
-		if _first_gap(cov, lay.s_t0 + 0.2, lay.s_t1 - 0.2) >= 0.0:
-			sides_ok = false
-	out.append({"id": "grube", "ok": sides_ok, "required": true, "text": "Graben gegen Absturz gesichert",
-		"hint": "Absperrgitter an beiden Längsseiten des Grabens."})
+	out.append(_check_grube(lay, lc_of))
 	# 4. nothing on the path of the traffic
 	var in_path: Array = []
 	var paths: Array = [lay.detour_pts_for(ext), lay.zone2_pts_for(ext),
@@ -414,13 +453,7 @@ func checks(lay: SiteLayout) -> Array:
 	out.append({"id": "spur", "ok": through == "", "required": true, "text": "Fahrspuren am Arbeitsbereich vorbei",
 		"hint": ("Eine Fahrspur führt %s durch den Arbeitsbereich. " % through if through != "" else "") + "Mit dem Werkzeug „Fahrspur“ die blauen Linien verschieben."})
 	# 5. machine slots free
-	var slot_block: Array = []
-	for i in items.size():
-		var lc6: Vector2 = lc_of[i]
-		if lc6.x > lay.s_t1 + 2.3 and lc6.x < lay.s_c1 - 0.5 and absf(lc6.y) < 1.1:
-			slot_block.append(i)
-	out.append({"id": "plaetze", "ok": slot_block.is_empty(), "required": true, "text": "Platz für Bagger und Kipper frei", "bad": slot_block,
-		"hint": _bad_text(slot_block, "im Maschinenplatz", lay) + "Im orange umrandeten Platz darf nichts stehen."})
+	out.append(_check_plaetze(lay, lc_of))
 	# 6. taper ahead of the cross barrier
 	var n_taper := 0
 	for i in items.size():
@@ -453,6 +486,97 @@ func checks(lay: SiteLayout) -> Array:
 
 
 ## "Leitbake (12 m vor dem Graben) und 2 weitere stehen <where>. " – the offending items are marked red.
+func _check_grube(lay: SiteLayout, lc_of: Array) -> Dictionary:
+	var sides_ok := true
+	for side in [-1.0, 1.0]:
+		var cov: Array = []
+		for i in items.size():
+			var it3: Dictionary = items[i]
+			if not (it3.kind in ["fence", "schranke"]):
+				continue
+			var lc5: Vector2 = lc_of[i]
+			var off: float = lc5.y * side - lay.W * 0.5
+			if off < 0.05 or off > 1.6:
+				continue
+			cov.append(Vector2(lc5.x - 1.2, lc5.x + 1.2))
+		if _first_gap(cov, lay.s_t0 + 0.2, lay.s_t1 - 0.2) >= 0.0:
+			sides_ok = false
+	return {"id": "grube", "ok": sides_ok, "required": true, "text": "Graben gegen Absturz gesichert",
+		"hint": "Absperrgitter an beiden Längsseiten des Grabens."}
+
+
+func _check_plaetze(lay: SiteLayout, lc_of: Array) -> Dictionary:
+	var slot_block: Array = []
+	for i in items.size():
+		var lc6: Vector2 = lc_of[i]
+		if lc6.x > lay.s_t1 + 2.3 and lc6.x < lay.s_c1 - 0.5 and absf(lc6.y) < 1.1:
+			slot_block.append(i)
+	return {"id": "plaetze", "ok": slot_block.is_empty(), "required": true, "text": "Platz für Bagger und Kipper frei", "bad": slot_block,
+		"hint": _bad_text(slot_block, "im Maschinenplatz", lay) + "Im orange umrandeten Platz darf nichts stehen."}
+
+
+## Checks of a full road closure (#20): no traffic passes, so no separation, detour or priority rules;
+## instead barriers across the whole carriageway where traffic arrives.
+func _checks_full(lay: SiteLayout, lc_of: Array) -> Array:
+	var out: Array = []
+	var front := _across_cover(lay, lc_of, lay.s_t0 - 60.0, lay.s_t0 - 0.3)
+	out.append({"id": "voll_vorne", "ok": front >= 0.0, "required": true, "text": "Fahrbahn vor dem Arbeitsbereich ganz gesperrt",
+		"hint": "Absperrschranken quer über die ganze Fahrbahn (alle Fahrstreifen) vor den Graben stellen."})
+	var s_front := front if front >= 0.0 else lay.s_t0
+	if lay.oncoming:
+		var back := _across_cover(lay, lc_of, lay.s_c1 - 0.5, lay.s_c1 + 60.0)
+		out.append({"id": "voll_hinten", "ok": back >= 0.0, "required": true, "text": "Fahrbahn hinter dem Arbeitsbereich ganz gesperrt",
+			"hint": "Der Gegenverkehr kommt von der anderen Seite: auch hinter dem Platz für Bagger und Kipper quer über die ganze Fahrbahn absperren."})
+	out.append(_check_grube(lay, lc_of))
+	out.append(_check_plaetze(lay, lc_of))
+	var z250 := false
+	var warn := false
+	for i in items.size():
+		var lc: Vector2 = lc_of[i]
+		if items[i].kind == "z250" and lc.x < s_front + 1.0 and lc.x > s_front - 30.0:
+			z250 = true
+		if items[i].kind == "z123" and lc.x < s_front and lc.x > s_front - 150.0 and lc.y > -lay.lw * 0.5:
+			warn = true
+	out.append({"id": "z250", "ok": z250, "required": false, "text": "Z 250 an der Sperrung",
+		"hint": "Zeichen 250 (Verbot für Fahrzeuge aller Art) an der vorderen Absperrung aufstellen."})
+	out.append({"id": "vorwarnung", "ok": warn, "required": false, "text": "Vorwarnung Z 123",
+		"hint": "Zeichen 123 am rechten Rand vor der Sperrung aufstellen."})
+	return out
+
+
+## Barriers standing across the carriageway between s_a and s_b on K: s of the first row that covers the
+## whole width (gaps under 0.6 m), -1 if none.
+func _across_cover(lay: SiteLayout, lc_of: Array, s_a: float, s_b: float) -> float:
+	var rows: Array = []   # [s, [Vector2(lat_lo, lat_hi)]]
+	for i in items.size():
+		var it: Dictionary = items[i]
+		if not (it.kind in ["schranke", "fence"]):
+			continue
+		var lc: Vector2 = lc_of[i]
+		if lc.x < s_a or lc.x > s_b or absf(axis_x(float(it.yaw)).dot(lay.lane_dir(lc.x))) > 0.6:
+			continue
+		var a := lay.lane_coords(it.pos)
+		var b := lay.lane_coords((it.pos as Vector2) + axis_x(float(it.yaw)) * ELEM_LEN)
+		var span := Vector2(minf(a.y, b.y) - 0.3, maxf(a.y, b.y) + 0.3)
+		var hit := false
+		for r in rows:
+			if absf(float(r[0]) - lc.x) < 2.5:
+				(r[1] as Array).append(span)
+				hit = true
+				break
+		if not hit:
+			rows.append([lc.x, [span]])
+	for r in rows:
+		# measured from the far road edge: _first_gap returns a position >= 0 or -1 for "covered"
+		var road := road_span(lay, float(r[0]))
+		var rel: Array = []
+		for sp in r[1]:
+			rel.append((sp as Vector2) - Vector2(road.x, road.x))
+		if _first_gap(rel, 0.3, road.y - road.x - 0.3) < 0.0:
+			return float(r[0])
+	return -1.0
+
+
 func _bad_text(bad: Array, where_txt: String, lay: SiteLayout) -> String:
 	if bad.is_empty():
 		return ""
@@ -528,12 +652,13 @@ func to_dict() -> Dictionary:
 		for v in (traffic[k] as Array):
 			arr.append([(v as Vector2).x, (v as Vector2).y])
 		tr[k] = arr
-	return {"v": 1, "custom": custom, "items": its, "lines": ls, "traffic": tr}
+	return {"v": 1, "custom": custom, "items": its, "lines": ls, "traffic": tr, "full": full}
 
 
 static func from_dict(d: Dictionary) -> ClosurePlan:
 	var p := ClosurePlan.new()
 	p.custom = bool(d.get("custom", true))
+	p.full = bool(d.get("full", false))
 	for a in d.get("items", []):
 		var arr: Array = a
 		if arr.size() < 4 or not KINDS.has(str(arr[0])):

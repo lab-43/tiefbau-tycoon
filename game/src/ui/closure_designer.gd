@@ -4,7 +4,8 @@ extends Control
 ## Leitbaken, Leitkegel, Absperrschranken, Absperrgitter, yellow markings and signs one by one or as
 ## chains (straight or curved). Shows trench, work area, machine slots and the traffic path; checks
 ## the plan against basic rules. The tool "Fahrspur" (#19) moves the traffic paths of both directions
-## (control points in lane coordinates, see SiteLayout._finish_extent). Opened by the HUD; "Übernehmen"
+## (control points in lane coordinates, see SiteLayout._finish_extent). "Vollsperrung" (#20) closes the
+## whole road: no traffic paths, other checks, own template. Opened by the HUD; "Übernehmen"
 ## hands the plan to Site.set_plan().
 ## While open, the game is paused, the light is set to noon and trees are hidden.
 
@@ -83,6 +84,9 @@ var redo_btn: Button
 var summary_lbl: Label
 var traffic_lbl: Label
 var traffic_auto_btn: Button
+var lane_btn: Button
+var full_btn: CheckButton
+var info_lbl: Label
 
 
 # ------------------------------------------------------------------------------------------
@@ -227,9 +231,9 @@ func _build_top() -> void:
 	brand.add_child(UI.label("%s · %s" % [site.job.short_title(), site.job.location()], 16, UI.TEXT, 600))
 	h.add_child(brand)
 	h.add_child(UI.spacer())
-	var info := UI.label("Spiel pausiert · Draufsicht · %s" % ("Engstelle mit Gegenverkehr" if lay.oncoming else "Fahrstreifensperrung"), 13, UI.MUTED)
-	info.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	h.add_child(info)
+	info_lbl = UI.label("", 13, UI.MUTED)
+	info_lbl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	h.add_child(info_lbl)
 	h.add_child(UI.spacer())
 	cancel_btn = UI.button("Abbrechen", "x")
 	cancel_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -283,7 +287,7 @@ func _build_left() -> void:
 		b.focus_mode = Control.FOCUS_NONE
 		b.custom_minimum_size = Vector2(124, 58)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.tooltip_text = "%s (Taste %d)" % [ClosurePlan.label(k), n]
+		b.tooltip_text = "%s (Taste %d)" % [ClosurePlan.label(k), n % 10]
 		var col := UI.vbox(2)
 		col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		col.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -391,7 +395,14 @@ func _build_right() -> void:
 	traffic_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(traffic_lbl)
 	var tr_row := UI.hbox(6)
-	var lane_btn := UI.button("Fahrspur legen", "route")
+	full_btn = CheckButton.new()
+	full_btn.text = "Vollsperrung (kein Durchgangsverkehr)"
+	full_btn.focus_mode = Control.FOCUS_NONE
+	full_btn.add_theme_font_size_override("font_size", 13)
+	full_btn.tooltip_text = "Die ganze Straße sperren: Der Verkehr fährt über andere Straßen, nur Baustellenfahrzeuge dürfen hinein."
+	full_btn.toggled.connect(set_full)
+	v.add_child(full_btn)
+	lane_btn = UI.button("Fahrspur legen", "route")
 	lane_btn.tooltip_text = "Werkzeug „Fahrspur“: die blauen Fahrwege des Verkehrs verschieben"
 	lane_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	lane_btn.pressed.connect(func(): set_mode("lane"))
@@ -422,7 +433,7 @@ func _build_right() -> void:
 	v.add_child(UI.sep())
 	v.add_child(UI.caps("Steuerung"))
 	for t in ["Linksklick: setzen · Rechtsklick / Esc: Kette beenden", "R / Umschalt+R: drehen · Entf: löschen",
-			"Umschalt: Winkel einrasten · Alt: frei setzen", "Strg+Z / Strg+Y: rückgängig / wiederholen", "1–9: Bauteil wählen",
+			"Umschalt: Winkel einrasten · Alt: frei setzen", "Strg+Z / Strg+Y: rückgängig / wiederholen", "1–9, 0: Bauteil wählen",
 			"Rechte Maus ziehen: verschieben · Mausrad: zoomen · Q/E: drehen · B: Gebäude aus/ein"]:
 		var l := UI.label(t, 12, UI.DIM)
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -443,6 +454,9 @@ func set_kind(k: String) -> void:
 
 
 func set_mode(m: String) -> void:
+	if m == "lane" and plan.full:
+		Events.warn("Bei einer Vollsperrung gibt es keine Fahrspuren")
+		return
 	_end_chain()
 	if m == "single" and kind == "line":
 		m = "line"
@@ -461,7 +475,7 @@ func _refresh_tools() -> void:
 		(kind_btns[k] as Button).button_pressed = k == kind and not (mode in ["select", "erase", "lane"])
 	for m in mode_btns:
 		(mode_btns[m] as Button).button_pressed = m == mode
-		(mode_btns[m] as Button).disabled = m == "single" and kind == "line"
+		(mode_btns[m] as Button).disabled = (m == "single" and kind == "line") or (m == "lane" and plan.full)
 	var chain_mode := mode in ["line", "curve"]
 	spacing_box.visible = chain_mode and kind != "line" and not ClosurePlan.is_linear(kind)
 	spacing_lbl.text = "%s m" % _fmt(float(spacing.get(kind, 5.0)))
@@ -537,6 +551,13 @@ func _refresh_side() -> void:
 func _refresh_traffic_info() -> void:
 	var own := not plan.traffic.is_empty()
 	var t := ""
+	full_btn.set_pressed_no_signal(plan.full)
+	lane_btn.disabled = plan.full
+	info_lbl.text = "Spiel pausiert · Draufsicht · %s" % ("Vollsperrung" if plan.full else ("Engstelle mit Gegenverkehr" if lay.oncoming else "Fahrstreifensperrung"))
+	if plan.full:
+		traffic_lbl.text = "Vollsperrung: Kein Durchgangsverkehr, der Verkehr fährt automatisch über andere Straßen. Baustellenfahrzeuge dürfen hinein.\n„Standard-Vorlage“ lädt eine fertige Vollsperrung."
+		traffic_auto_btn.disabled = true
+		return
 	if bool(_ext.get("two_way", false)):
 		t = "Zwei getrennte Fahrspuren: Der Verkehr fließt in beiden Richtungen gleichzeitig." if lay.oncoming \
 			else "Beide Fahrstreifen bleiben getrennt befahrbar, kein Einfädeln."
@@ -570,6 +591,8 @@ func _changed(user_edit := true) -> void:
 		dirty = true
 	_ext = plan.extent(lay)
 	_checks = plan.checks(lay)
+	if plan.full and mode == "lane":
+		mode = "select"   # no traffic paths to lay on a closed road
 	_sel = _sel.filter(func(i): return i < plan.items.size())
 	if _sel_line >= plan.lines.size():
 		_sel_line = -1
@@ -607,10 +630,21 @@ func redo() -> void:
 func load_template() -> void:
 	_end_chain()
 	_push_undo(_snapshot())
-	plan = ClosurePlan.from_layout(lay)
+	plan = ClosurePlan.full_from_layout(lay) if plan.full else ClosurePlan.from_layout(lay)
 	_sel.clear()
 	dirty = true
 	_changed(false)
+
+
+## Full road closure on/off (#20). The items stay; "Standard-Vorlage" loads the matching template.
+func set_full(on: bool) -> void:
+	if on == plan.full:
+		return
+	_end_chain()
+	_press = {}
+	_push_undo(_snapshot())
+	plan.full = on
+	_changed()
 
 
 ## Drop the player's traffic paths: the game lays them from the items again.
@@ -1068,7 +1102,7 @@ func _unhandled_key_input(ev: InputEvent) -> void:
 		KEY_SPACE, KEY_F5, KEY_F:
 			pass   # stay paused while planning; saving would store a half-made plan; no camera follow
 		_:
-			var n := k.keycode - KEY_1
+			var n := 9 if k.keycode == KEY_0 else k.keycode - KEY_1
 			if n >= 0 and n < ClosurePlan.ORDER.size() and not k.ctrl_pressed:
 				set_kind(ClosurePlan.ORDER[n])
 			else:
@@ -1239,21 +1273,11 @@ func _draw_plan() -> void:
 	_tag(cv, font, _scr(lay.lane_pt((lay.s_t0 + lay.s_t1) * 0.5, lay.W * 0.5 + 0.2)), "Graben %s m" % _fmt(lay.L), Color(0.95, 0.8, 0.6))
 	_tag(cv, font, _scr(lay.lane_pt((lay.s_t1 + 2.3 + lay.s_c1) * 0.5, 1.2)), "Bagger · Kipper", UI.ACCENT)
 	_tag(cv, font, _scr(lay.lane_pt(van_s, SiteLayout.CURB + 1.2)), "Kolonnenbus", WHITE)
-	# traffic paths (dashed, arrows in travel direction)
-	var k_path := PackedVector2Array()
-	k_path.append_array(lay.lane_poly(maxf(0.0, float(ext.det0) - 60.0), float(ext.det0), func(_s): return 0.0, 2.0))
-	k_path.append_array(lay.detour_pts_for(ext))
-	k_path.append_array(lay.lane_poly(float(ext.det1), minf(lay.len_k, float(ext.det1) + 45.0), func(_s): return 0.0, 2.0))
-	_traffic_line(cv, k_path)
-	var k2a := maxf(0.0, float(ext.s2_a) - 45.0)
-	var k2b := minf(lay.len_k2, float(ext.s2_b) + 45.0)
-	var k2_path := Geo.sub_polyline(lay._g2[0], lay._g2[1], k2a, float(ext.s2_a))
-	k2_path.append_array(lay.zone2_pts_for(ext))
-	k2_path.append_array(Geo.sub_polyline(lay._g2[0], lay._g2[1], float(ext.s2_b), k2b))
-	_traffic_line(cv, k2_path)
-	_tag(cv, font, _scr(lay.lane_pt(float(ext.det0), -0.3)), "Verschwenkung", TRAFFIC)
-	if mode == "lane":
-		_draw_lane_handles(cv, font)
+	# traffic paths (dashed, arrows in travel direction); a full closure shows the closed road instead
+	if plan.full:
+		_draw_closed_road(cv, font, ext)
+	else:
+		_draw_traffic(cv, font, ext)
 	# planning radius (#18)
 	var tc := lay.trench_center()
 	var circ := PackedVector2Array()
@@ -1330,6 +1354,47 @@ func _draw_plan() -> void:
 		cv.draw_rect(r, Color(UI.ACCENT, 0.8), false, 1.0)
 	_scale_bar(cv, font)
 	hint_lbl.text = _hint_text()
+
+
+## Traffic paths of both directions (dashed, arrows in travel direction), handles in the tool "Fahrspur".
+func _draw_traffic(cv: Control, font: Font, ext: Dictionary) -> void:
+	var k_path := PackedVector2Array()
+	k_path.append_array(lay.lane_poly(maxf(0.0, float(ext.det0) - 60.0), float(ext.det0), func(_s): return 0.0, 2.0))
+	k_path.append_array(lay.detour_pts_for(ext))
+	k_path.append_array(lay.lane_poly(float(ext.det1), minf(lay.len_k, float(ext.det1) + 45.0), func(_s): return 0.0, 2.0))
+	_traffic_line(cv, k_path)
+	var k2a := maxf(0.0, float(ext.s2_a) - 45.0)
+	var k2b := minf(lay.len_k2, float(ext.s2_b) + 45.0)
+	var k2_path := Geo.sub_polyline(lay._g2[0], lay._g2[1], k2a, float(ext.s2_a))
+	k2_path.append_array(lay.zone2_pts_for(ext))
+	k2_path.append_array(Geo.sub_polyline(lay._g2[0], lay._g2[1], float(ext.s2_b), k2b))
+	_traffic_line(cv, k2_path)
+	_tag(cv, font, _scr(lay.lane_pt(float(ext.det0), -0.3)), "Verschwenkung", TRAFFIC)
+	if mode == "lane":
+		_draw_lane_handles(cv, font)
+
+
+## Full road closure (#20): the closed stretch of the whole carriageway, hatched.
+func _draw_closed_road(cv: Control, font: Font, ext: Dictionary) -> void:
+	var a: float = minf(float(ext.obst0), lay.s_t0 - 2.0)
+	var b: float = maxf(float(ext.obst1), lay.s_c1 + 2.0)
+	var n := maxi(2, int(ceil((b - a) / 1.5)))
+	var poly := PackedVector2Array()
+	for i in n + 1:
+		var s := lerpf(a, b, float(i) / n)
+		poly.append(_scr(lay.lane_pt(s, ClosurePlan.road_span(lay, s).y)))
+	for i in range(n, -1, -1):
+		var s2 := lerpf(a, b, float(i) / n)
+		poly.append(_scr(lay.lane_pt(s2, ClosurePlan.road_span(lay, s2).x)))
+	cv.draw_colored_polygon(poly, Color(RED, 0.10))
+	_dashed_poly(cv, poly, Color(RED, 0.8), 1.5, true)
+	var step := maxf(3.0, 26.0 / maxf(0.01, _ppm))
+	var s3 := a
+	while s3 < b:
+		var sp := ClosurePlan.road_span(lay, s3)
+		cv.draw_line(_scr(lay.lane_pt(s3, sp.x)), _scr(lay.lane_pt(minf(b, s3 + (sp.y - sp.x)), sp.y)), Color(RED, 0.35), 1.0, true)
+		s3 += step
+	_tag(cv, font, _scr(lay.lane_pt(a, ClosurePlan.road_span(lay, a).x - 0.5)), "Vollsperrung – Durchgangsverkehr fährt über andere Straßen", Color(1.0, 0.55, 0.5))
 
 
 ## Handles of both traffic paths: squares at the ends (they slide along the lane), dots in between.
@@ -1533,7 +1598,7 @@ static func draw_symbol(cv: CanvasItem, kind: String, c: Vector2, ux: Vector2, u
 					cv.draw_line(p0.lerp(p1, float(i) / m) - uz * th2 * 0.5, p0.lerp(p1, float(i) / m) + uz * th2 * 0.5, Color(0.45, 0.46, 0.45, a), 1.0)
 				cv.draw_circle(p0, th2 * 0.6, Color(RED, a))
 				cv.draw_circle(p1, th2 * 0.6, Color(RED, a))
-		"z123", "z208", "z308", "z274":
+		"z123", "z208", "z308", "z274", "z250":
 			var r2 := maxf(0.45 * ppm, 10.0)
 			# sign board seen from above, with the face side towards the traffic
 			cv.draw_line(c - ux * r2 * 0.8, c + ux * r2 * 0.8, Color(DARK, a), 3.0)
@@ -1552,10 +1617,12 @@ static func draw_sign_face(cv: CanvasItem, kind: String, ic: Vector2, r2: float,
 			var inner := PackedVector2Array([ic + Vector2(0, -r2 * 0.52), ic + Vector2(r2 * 0.56, r2 * 0.45), ic + Vector2(-r2 * 0.56, r2 * 0.45)])
 			cv.draw_colored_polygon(inner, Color(WHITE, a))
 			cv.draw_circle(ic + Vector2(0, r2 * 0.1), r2 * 0.14, Color(DARK, a))
-		"z208", "z274":
+		"z208", "z274", "z250":
 			cv.draw_circle(ic, r2, Color(RED, a))
 			cv.draw_circle(ic, r2 * 0.74, Color(WHITE, a))
-			if kind == "z208":
+			if kind == "z250":
+				pass
+			elif kind == "z208":
 				cv.draw_line(ic + Vector2(-r2 * 0.25, r2 * 0.45), ic + Vector2(-r2 * 0.25, -r2 * 0.45), Color(RED, a), 2.0)
 				cv.draw_line(ic + Vector2(r2 * 0.25, -r2 * 0.45), ic + Vector2(r2 * 0.25, r2 * 0.45), Color(DARK, a), 2.0)
 			else:

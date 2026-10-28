@@ -1,7 +1,7 @@
 class_name SiteProps
 extends RefCounted
 ## Construction site props: barrier models (FS25 German road safety set, private use), procedural signs
-## 208/308 on the real sign stand, pipes, plate compactor, yellow temporary markings.
+## 208/308/250 on the real sign stand, pipes, plate compactor, yellow temporary markings.
 
 const BARRIERS := {
 	"schranke": "res://assets/barriers/01_absperrschranke.glb",
@@ -12,9 +12,11 @@ const BARRIERS := {
 	"z274": "res://assets/barriers/06_z274.glb",
 	"z208": "res://assets/barriers/05_z123.glb",
 	"z308": "res://assets/barriers/05_z123.glb",
+	"z250": "res://assets/barriers/05_z123.glb",
 }
 const LABEL := {"schranke": "Absperrschranke", "fence": "Absperrgitter", "bake": "Leitbake", "cone": "Leitkegel",
-	"z123": "Zeichen 123", "z274": "Zeichen 274", "z208": "Zeichen 208", "z308": "Zeichen 308"}
+	"z123": "Zeichen 123", "z274": "Zeichen 274", "z208": "Zeichen 208", "z308": "Zeichen 308",
+	"z250": "Zeichen 250"}
 
 static var _scenes := {}
 static var _warn_mat: ShaderMaterial
@@ -57,7 +59,7 @@ static func item(kind: String, phase := 0.0) -> Node3D:
 	if kind in ["fence", "cone"]:
 		for w in n.find_children("Warnleuchte*", "Node3D", true, false):
 			w.visible = false
-	if kind == "z208" or kind == "z308":
+	if kind in ["z208", "z308", "z250"]:
 		for nm in ["Dreieck_900mm", "2-123"]:
 			var hide := n.find_child(nm, true, false)
 			if hide:
@@ -121,7 +123,7 @@ static func _fallback(kind: String) -> Node3D:
 
 
 ## Sign faces drawn procedurally (Zeichen 208: round, red rim, red arrow up / black arrow down;
-## Zeichen 308: blue square, white arrow up / red arrow down).
+## Zeichen 308: blue square, white arrow up / red arrow down; Zeichen 250: round, red rim, white).
 static func sign_texture(kind: String) -> Texture2D:
 	if _sign_tex.has(kind):
 		return _sign_tex[kind]
@@ -136,7 +138,11 @@ static func sign_texture(kind: String) -> Texture2D:
 			var u := (x + 0.5) / S * 2.0 - 1.0
 			var v := (y + 0.5) / S * 2.0 - 1.0
 			var c := Color(0, 0, 0, 0)
-			if kind == "z208":
+			if kind == "z250":
+				var r0 := sqrt(u * u + v * v)
+				if r0 <= 1.0:
+					c = red if r0 > 0.78 else white
+			elif kind == "z208":
 				var r := sqrt(u * u + v * v)
 				if r <= 1.0:
 					c = red if r > 0.8 else white
