@@ -1408,9 +1408,12 @@ func _draw_lane_handles(cv: Control, font: Font) -> void:
 		var ctrl := _ctrl_of(pid)
 		if ctrl.size() < 2:
 			continue
-		var mid: Vector2 = ctrl[ctrl.size() / 2] if ctrl.size() > 2 else ((ctrl[0] as Vector2) + (ctrl[1] as Vector2)) * 0.5
+		# name at a third of the path (between handles), K above, K2 below its line
+		var pts := _traffic_pts(pid)
+		var cum := Geo.cumulative(pts)
+		var at: Vector2 = Geo.sample(pts, cum, cum[cum.size() - 1] * (0.33 if pid == "k" else 0.67))[0]
 		var title := "Fahrspur Baustellenseite" if pid == "k" else ("Fahrspur Gegenverkehr" if lay.oncoming else "Fahrspur Nachbarstreifen")
-		_tag(cv, font, _scr(_ctrl_pt(pid, mid)) + Vector2(10, -10), title, TRAFFIC)
+		_tag(cv, font, _scr(at) + Vector2(-40, -14 if pid == "k" else 22), title, TRAFFIC)
 		for i in ctrl.size():
 			var c := _scr(_ctrl_pt(pid, ctrl[i]))
 			var hot: bool = (str(_lane_hover.get("p", "")) == pid and int(_lane_hover.get("i", -1)) == i) \

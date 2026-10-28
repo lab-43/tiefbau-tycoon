@@ -84,7 +84,11 @@ func tick(_delta: float) -> void:
 						in_future += 1
 			ok(in_future == 0, "keine Route biegt mehr in die gesperrte Straße ein (%d)" % in_future)
 			print("VOLL note %d Autos waren beim Sperren auf der Straße" % inside0.size())
-			drv.shot("voll_02_gesperrt", site.center3(), 70.0, -30.0, 50.0)
+			# from above, across the road, in daylight (buildings stand on the curb side)
+			DebugTools.light_override(12.0)
+			var dl := site.lay.lane_dir(site.lay.s_t0)
+			var vw := Geo.left_of(dl)
+			drv.shot("voll_02_gesperrt", site.center3() - Geo.v3(dl) * 6.0, 60.0, rad_to_deg(atan2(vw.x, vw.y)), 78.0)
 			t_mark = drv.t
 			step = 3
 		3:
@@ -107,6 +111,7 @@ func tick(_delta: float) -> void:
 					print("VOLL note Eindringling %d: %s" % [ag.id, " | ".join(hist)])
 			if drv.t - t_mark < 150.0:
 				return
+			DebugTools.light_override(-1.0)
 			ok(seen_traffic > 0, "Verkehr unterwegs")
 			ok(intruders.is_empty(), "kein Durchgangsverkehr fährt in die gesperrte Straße (%d)" % intruders.size())
 			var stuck := 0
