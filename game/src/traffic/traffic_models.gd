@@ -13,6 +13,9 @@ const BOX_SIZE := {"head": Vector2(0.32, 0.14), "tail": Vector2(0.3, 0.14), "ind
 const BOX_MAT := {"head": "head", "tail": "tail", "ind_l": "ind", "ind_r": "ind"}
 static var _lamp_mats := {}      # "<material id>_<fn>_<tail_brakes>" -> ShaderMaterial (shared by all cars)
 static var _spots := {}          # entry index -> Array of [kind, Transform3D] for lamp boxes
+# Models whose lamp glass is not split in the asset: recovered once at load (LampSplit)
+const LAMP_DONOR := {"car_police_eu": "car_hatchback"}            # same body and lamp geometry as the donor
+const LAMP_MARKER_MAT := {"truck_traffic_scania": "G500_Exterior_Lights_M"}   # one lamp material, split at markers
 
 const PALETTE := [Color(0.92, 0.92, 0.91), Color(0.08, 0.08, 0.09), Color(0.62, 0.63, 0.65), Color(0.14, 0.2, 0.36),
 	Color(0.55, 0.08, 0.07), Color(0.36, 0.37, 0.38), Color(0.82, 0.82, 0.8), Color(0.2, 0.28, 0.22)]
@@ -38,6 +41,8 @@ static func prepare() -> void:
 			var path := "%s/%s/%s.glb" % [dir, d, d]
 			if ResourceLoader.exists(path):
 				entries.append({"kind": kind, "scene": load(path), "name": d})
+	for e in entries:
+		_prepare_glass(e, dir)
 	var has := {}
 	for e in entries:
 		has[e.kind] = true
@@ -96,6 +101,9 @@ static func instance(idx: int) -> Node3D:
 	if e.scene != null:
 		var inst: Node3D = e.scene.instantiate()
 		root.add_child(inst)
+		var swap: Dictionary = e.get("mesh_swap", {})
+		for path in swap:
+			(inst.get_node(path) as MeshInstance3D).mesh = swap[path]
 		if e.kind == "car":
 			_tint(inst)
 		var glass := _glass(e, inst)
@@ -112,6 +120,24 @@ static func instance(idx: int) -> Node3D:
 				_proc_bus(root, e.color)
 	_add_lights(root, idx)
 	return root
+
+
+## Lamp glass the asset lacks as separate materials (LAMP_DONOR / LAMP_MARKER_MAT): replacement meshes
+## for every instance, e["mesh_swap"] = {NodePath: ArrayMesh}.
+static func _prepare_glass(e: Dictionary, dir: String) -> void:
+	var nm := String(e.get("name", ""))
+	if e.scene == null or not (LAMP_DONOR.has(nm) or LAMP_MARKER_MAT.has(nm)):
+		return
+	var inst: Node3D = (e.scene as PackedScene).instantiate()
+	if LAMP_DONOR.has(nm):
+		var dp := "%s/%s/%s.glb" % [dir, LAMP_DONOR[nm], LAMP_DONOR[nm]]
+		if ResourceLoader.exists(dp):
+			var donor: Node3D = (load(dp) as PackedScene).instantiate()
+			e["mesh_swap"] = LampSplit.donor(inst, donor)
+			donor.free()
+	else:
+		e["mesh_swap"] = LampSplit.markers(inst, LAMP_MARKER_MAT[nm])
+	inst.free()
 
 
 ## The model's own lamp glass (materials *__light_head / __light_tail / __light_brake / __indicator_l/r)
