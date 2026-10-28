@@ -21,3 +21,4 @@ pruefung: e2e:markierungen
 - Ist ein aktives Werkzeug gesetzt (`World.tool`), nimmt das Control auch den Linksklick nicht an.
 - Halb ausgeblendete Controls auf `MOUSE_FILTER_IGNORE` setzen.
 - Eingaben in Tests über `get_viewport().push_input(ev, true)` schicken, nicht `_gui_input()` direkt aufrufen. Nur so wird die echte Weitergabe geprüft. Das Szenario `markierungen` prüft Mausrad, Rechts-Ziehen, Rechtsklick und Werkzeug; mit STOP schlägt es fehl (gegengeprüft).
+- Das `true` ist Pflicht: Ohne es rechnet Godot die Position vom Fenster in den Viewport um. Headless ist der Viewport 1920×1920 und das Fenster nicht, die Klicks landen dann woanders. Im Szenario `absperrung` (#9) gingen so alle Klicks ins Leere, nur die Tasten wirkten.
