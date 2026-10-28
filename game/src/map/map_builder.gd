@@ -4,7 +4,7 @@ extends RefCounted
 ## The scene-tree part (creating MeshInstances) happens on the main thread in build_scene().
 
 const CHUNK := 500.0
-const BAKE_VERSION := 4   # 4: water on top of the base ground, no bank walls (#4)
+const BAKE_VERSION := 5   # 4: water on top of the base ground, no bank walls (#4); 5: merged junctions (#5)
 const GROUND_Y := 0.0     # opaque base ground plane; flat map layers below it are invisible (test/layer_test.gd)
 
 var progress := 0.0
@@ -83,7 +83,7 @@ func bake(meta: Dictionary, osm_dir: String, pbf := "") -> Dictionary:
 		for ni in net.nodes.size():
 			if net.nodes[ni].osm_id == -900000002:
 				net.hq_node = ni
-	note("Straßennetz: %d Kreuzungen, %d Abschnitte, %d Fahrstreifen" % [net.nodes.size(), net.edges.size(), net.lane_geo.size()])
+	note("Straßennetz: %d Kreuzungen (%d aus mehreren OSM-Knoten zusammengefasst), %d Abschnitte, %d Fahrstreifen" % [net.nodes.size(), net.group_count, net.edges.size(), net.lane_geo.size()])
 	set_step("Straßen modellieren", _p(0.55))
 	var rm := RoadMesher.new(net, CHUNK, data.bounds.position)
 	rm.progress_cb = func(f: float): set_step("Straßen modellieren (%d %%)" % int(f * 100.0), _p(0.55 + 0.15 * f))

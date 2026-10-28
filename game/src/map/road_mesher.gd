@@ -74,18 +74,36 @@ func _edge(ei: int) -> void:
 		var v1 := cum[i + 1] + s0
 		asp.quad(Geo.v3(left[i], Y_ROAD), Geo.v3(right[i], Y_ROAD), Geo.v3(right[i + 1], Y_ROAD), Geo.v3(left[i + 1], Y_ROAD),
 			Vector3.UP, Vector2(0, v0), Vector2(e.width, v0), Vector2(e.width, v1), Vector2(0, v1))
-	# sidewalks
+	# sidewalks (not on the asphalt of junction areas built by union, see RoadNet._group_polygon)
+	var clips := _area_clips(net.nodes[e.a]) + _area_clips(net.nodes[e.b])
 	if e.sw_r > 0.0:
-		_sidewalk_strip(ck, right, Geo.offset_polyline(center, hw + e.sw_r), center, true)
+		_sidewalk_strip(ck, right, Geo.offset_polyline(center, hw + e.sw_r), center, true, clips)
 	if e.sw_l > 0.0:
-		_sidewalk_strip(ck, left, Geo.offset_polyline(center, -hw - e.sw_l), center, false)
+		_sidewalk_strip(ck, left, Geo.offset_polyline(center, -hw - e.sw_l), center, false, clips)
 	if e.bridge:
 		_bridge_sides(ck, center, hw + e.sw_r, hw + e.sw_l)
 	_edge_markings(ei, e, ck, s0, s1)
 
 
+## Junction areas a sidewalk must not cover: [polygon, bounding rect] of node n if its area was built
+## by union (merged groups, junctions whose turn paths left the plain polygon).
+func _area_clips(n: Dictionary) -> Array:
+	if not n.get("area", false):
+		return []
+	var res: Array = []
+	for poly in [n.polygon] + n.get("extra_polys", []):
+		var pv: PackedVector2Array = poly
+		if pv.size() >= 3:
+			var r := Rect2(pv[0], Vector2.ZERO)
+			for q in pv:
+				r = r.expand(q)
+			res.append([pv, r])
+	return res
+
+
 ## Raised sidewalk between inner (curb line) and outer polylines, with curb face toward the road.
-func _sidewalk_strip(ck: Vector2i, inner: PackedVector2Array, outer: PackedVector2Array, center: PackedVector2Array, right_side: bool) -> void:
+## Parts lying on a junction area in `clips` (see _area_clips) are cut away.
+func _sidewalk_strip(ck: Vector2i, inner: PackedVector2Array, outer: PackedVector2Array, center: PackedVector2Array, right_side: bool, clips: Array = []) -> void:
 	var sw := layer(ck, "sidewalk")
 	var cb := layer(ck, "curb")
 	for i in range(inner.size() - 1):
@@ -93,7 +111,15 @@ func _sidewalk_strip(ck: Vector2i, inner: PackedVector2Array, outer: PackedVecto
 		var b := inner[i + 1]
 		var c := outer[i + 1]
 		var d := outer[i]
-		sw.quad(Geo.v3(a, Y_SW), Geo.v3(b, Y_SW), Geo.v3(c, Y_SW), Geo.v3(d, Y_SW), Vector3.UP, a, b, c, d)
+		var q := PackedVector2Array([a, b, c, d])
+		var pieces := _clip_away(q, clips)
+		if pieces.size() == 1 and pieces[0] == q:
+			sw.quad(Geo.v3(a, Y_SW), Geo.v3(b, Y_SW), Geo.v3(c, Y_SW), Geo.v3(d, Y_SW), Vector3.UP, a, b, c, d)
+		else:
+			for pc in pieces:
+				sw.polygon_up(pc, Y_SW, 1.0)
+			if _inside_any((a + b) * 0.5, clips):
+				continue   # curb line lies on the junction area: no curb faces here
 		var seg := (b - a)
 		if seg.length() < 0.001:
 			continue
@@ -104,6 +130,35 @@ func _sidewalk_strip(ck: Vector2i, inner: PackedVector2Array, outer: PackedVecto
 		# outer face down to the ground
 		var n2 := -n
 		cb.quad(Geo.v3(d, 0.0), Geo.v3(c, 0.0), Geo.v3(c, Y_SW), Geo.v3(d, Y_SW), n2)
+
+
+## Parts of polygon q outside all clip areas (q itself if it touches none).
+func _clip_away(q: PackedVector2Array, clips: Array) -> Array:
+	var pieces: Array = [q]
+	if clips.is_empty():
+		return pieces
+	var r := Rect2(q[0], Vector2.ZERO)
+	for v in q:
+		r = r.expand(v)
+	for cl in clips:
+		if not r.intersects(cl[1]):
+			continue
+		var nxt: Array = []
+		for pc in pieces:
+			for res in Geometry2D.clip_polygons(pc, cl[0]):
+				if not Geometry2D.is_polygon_clockwise(res) and absf(Geo.polygon_area(res)) > 0.005:
+					nxt.append(res)
+		pieces = nxt
+		if pieces.is_empty():
+			break
+	return pieces
+
+
+func _inside_any(p: Vector2, clips: Array) -> bool:
+	for cl in clips:
+		if (cl[1] as Rect2).has_point(p) and Geometry2D.is_point_in_polygon(p, cl[0]):
+			return true
+	return false
 
 
 func _bridge_sides(ck: Vector2i, center: PackedVector2Array, off_r: float, off_l: float) -> void:
@@ -220,7 +275,8 @@ func _edge_markings(ei: int, e: Dictionary, ck: Vector2i, s0: float, s1: float) 
 	# pedestrian crossings
 	for c in e.crossings:
 		var s: float = c.s
-		if s < s0 + 2.0 or s > s1 - 2.0:
+		# also inside the cut at a junction (big merged junctions cut deep, the crossing is still there)
+		if s < 1.5 or s > e.len - 1.5:
 			continue
 		var hw2: float = e.width * 0.5
 		if c.kind == "zebra":
@@ -235,6 +291,32 @@ func _edge_markings(ei: int, e: Dictionary, ck: Vector2i, s0: float, s1: float) 
 				while x2 < hw2:
 					_cross_bar(mk, pts, cum, ss, x2, minf(x2 + 0.5, hw2), 0.25)
 					x2 += 1.0
+
+
+## Pedestrian crossing at point p across a road running in direction d with half width hw (used for
+## crossings on pieces removed inside merged junctions; same look as on edges).
+func _crossing_at(l: MeshLayer, p: Vector2, d: Vector2, hw: float, kind: String) -> void:
+	var r := Geo.right_of(d)
+	if kind == "zebra":
+		var x := -hw + 0.25
+		while x < hw - 0.25:
+			var c := p + r * (x + 0.25)
+			_rect(l, c, d, 2.0, 0.25)
+			x += 1.0
+	elif kind == "signals":
+		for side in [-1.0, 1.0]:
+			var x2 := -hw
+			while x2 < hw:
+				var c2: Vector2 = p + d * (side * 2.0) + r * (x2 + minf(0.5, hw - x2) * 0.5)
+				_rect(l, c2, r, minf(0.5, hw - x2) * 0.5, 0.125)
+				x2 += 1.0
+
+
+## Flat rectangle centred at c, half length hl along d and half width hw across.
+func _rect(l: MeshLayer, c: Vector2, d: Vector2, hl: float, hw: float) -> void:
+	var r := Geo.right_of(d)
+	l.quad(Geo.v3(c - d * hl - r * hw, Y_MARK), Geo.v3(c + d * hl - r * hw, Y_MARK), Geo.v3(c + d * hl + r * hw, Y_MARK),
+		Geo.v3(c - d * hl + r * hw, Y_MARK), Vector3.UP)
 
 
 ## A bar perpendicular to the road at arc length s spanning lateral offsets [x0, x1].
@@ -261,7 +343,11 @@ func _junction(ni: int) -> void:
 		return
 	var ck := chunk_of(n.pos)
 	var asp := layer(ck, "asphalt")
-	asp.polygon_up(poly, Y_ROAD, 1.0)
+	asp.polygon_up(poly, Y_ROAD, 1.0, Color.WHITE, n.get("holes", []))
+	for extra in n.get("extra_polys", []):
+		asp.polygon_up(extra, Y_ROAD, 1.0)
+	for c in n.get("crossings", []):
+		_crossing_at(layer(ck, "mark"), c.p, c.d, c.hw, c.kind)
 	# corner sidewalks
 	for corner in n.get("corners", []):
 		var sw: float = corner.sw
@@ -278,4 +364,4 @@ func _junction(ni: int) -> void:
 		var center := PackedVector2Array()
 		for p in curve:
 			center.append(n.pos)
-		_sidewalk_strip(ck, curve, outer, center, true)
+		_sidewalk_strip(ck, curve, outer, center, true, _area_clips(n))

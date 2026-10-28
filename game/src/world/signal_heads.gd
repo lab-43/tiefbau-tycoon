@@ -25,7 +25,7 @@ func setup(w: World) -> void:
 			if net.lane_count(e, dir_in) == 0:
 				continue
 			var d: Vector2 = inf.d
-			var J: Vector2 = nd.pos
+			var J: Vector2 = inf.get("p", nd.pos)   # merged junction groups: each road ends at its own point
 			var p: Vector2 = J + d * (inf.s + 0.8) - Geo.right_of(d) * (inf.hw + 0.7)
 			heads.append({"pos": Vector3(p.x, 0.0, p.y), "yaw": atan2(d.x, d.y), "node": ni, "phase": nd.phases.get(inf.ref, 0)})
 	_build()

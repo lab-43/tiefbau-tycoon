@@ -18,6 +18,9 @@ const LANE_WIDTH := {
 	"motorway_link": 3.5, "trunk_link": 3.4, "primary_link": 3.25, "secondary_link": 3.1, "tertiary_link": 3.0,
 }
 const CORNER_RADIUS := {9: 14.0, 8: 12.0, 7: 10.0, 6: 9.0, 5: 8.0, 4: 7.0, 3: 6.0, 2: 5.0, 1: 4.0}
+const SHARP_MIN := 0.35       # below this angle (rad) between two roads their curbs meet in a point (a Y)
+const CORNER_REACH := 35.0    # curb corners further out than this along a road are not built (near-parallel roads)
+const PATH_HALF_W := 1.3      # junction asphalt reaches at least this far to each side of a turn path
 const DEFAULT_SPEED_KMH := {
 	"motorway": 100, "trunk": 70, "primary": 50, "secondary": 50, "tertiary": 50, "busway": 50,
 	"unclassified": 50, "residential": 30, "road": 30, "living_street": 10, "service": 20,
@@ -33,6 +36,9 @@ var lane_geo: Dictionary = {}  # lane key -> [pts: PackedVector2Array, cum: Pack
 var hq_node: int = -1          # node at the HQ gate (end of driveway)
 var hq_edge: int = -1
 var bounds := Rect2()
+var merge_junctions := true    # group the OSM nodes of one real junction (JunctionMerge)
+var timings := {}              # ms per build step (loading log)
+var group_count := 0           # junctions made of several OSM nodes
 
 var _osm_to_node := {}
 
@@ -91,12 +97,27 @@ func build(data: OsmData, hq: Dictionary = {}) -> void:
 		e.pts = Geo.chaikin(e.pts, 2, 3.0)
 		e.cum = Geo.cumulative(e.pts)
 		e.len = e.cum[e.cum.size() - 1]
+	var t := Time.get_ticks_msec()
+	if merge_junctions:
+		group_count = JunctionMerge.run(self)
+		if group_count > 0:
+			_compact()
+	timings["merge"] = Time.get_ticks_msec() - t
 	_mark_crossings(data)
+	t = Time.get_ticks_msec()
 	_junction_geometry()
+	timings["geometry"] = Time.get_ticks_msec() - t
 	_build_lanes()
+	t = Time.get_ticks_msec()
 	_build_connectors()
+	timings["connectors"] = Time.get_ticks_msec() - t
+	t = Time.get_ticks_msec()
+	_finish_groups()
+	timings["areas"] = Time.get_ticks_msec() - t
 	_traffic_control(data)
+	t = Time.get_ticks_msec()
 	_conflicts()
+	timings["conflicts"] = Time.get_ticks_msec() - t
 
 
 func _inject_driveway(ways: Array, hq: Dictionary) -> Array:
@@ -414,6 +435,10 @@ func _compact() -> void:
 	_osm_to_node.clear()
 	for i in nodes.size():
 		_osm_to_node[nodes[i].osm_id] = i
+		if nodes[i].has("group"):
+			for id in nodes[i].osm_ids:
+				_osm_to_node[id] = i
+			continue
 		var e0: Dictionary = edges[nodes[i].ends[0] >> 1]
 		nodes[i].pos = e0.pts[0] if (nodes[i].ends[0] & 1) == 0 else e0.pts[e0.pts.size() - 1]
 
@@ -441,6 +466,23 @@ func _mark_crossings(data: OsmData) -> void:
 					e.giveway_a = true
 				if e.len - res3[1] < 25.0:
 					e.giveway_b = true
+	# crossings on the pieces removed inside merged junction groups: drawn on the junction area
+	for n in nodes:
+		if not n.has("inner_lines"):
+			continue
+		var cr: Array = []
+		for ln in n.inner_lines:
+			var pts: PackedVector2Array = ln.pts
+			var cum := Geo.cumulative(pts)
+			for nid in ln.ids:
+				if data.crossings.has(nid):
+					var c: Dictionary = data.crossings[nid]
+					var res := Geo.closest_on_polyline(pts, cum, c.pos)
+					var smp := Geo.sample(pts, cum, res[1])
+					cr.append({"p": smp[0], "d": smp[1], "hw": ln.hw, "kind": c.kind})
+		n.erase("inner_lines")
+		if not cr.is_empty():
+			n["crossings"] = cr
 
 
 # ------------------------------------------------------------------------------------------
@@ -464,53 +506,74 @@ func end_info(end_ref: int) -> Dictionary:
 		"rank": e.rank, "len": e.len}
 
 
+## Road ends of node ni sorted around it, each with the setback it needs so that the curb corners to
+## both neighbours fit (not yet clamped to the road length), and the corner points. In a merged
+## junction group the ends start at different points (inf.p); otherwise all start at the node.
+func star(ni: int) -> Dictionary:
+	var n: Dictionary = nodes[ni]
+	var k: int = n.ends.size()
+	var J: Vector2 = n.pos
+	var infos: Array = []
+	for er in n.ends:
+		var inf := end_info(er)
+		var e: Dictionary = edges[er >> 1]
+		var p: Vector2 = e.pts[0] if inf.start else e.pts[e.pts.size() - 1]
+		var q: Vector2 = p + inf.d * 8.0 - J
+		inf["ref"] = er
+		inf["p"] = p
+		inf["ang"] = atan2(q.y, q.x)
+		inf["s"] = 0.6
+		infos.append(inf)
+	infos.sort_custom(func(x, y): return x.ang < y.ang)
+	var corners: Array = []
+	for i in k:
+		var A: Dictionary = infos[i]
+		var B: Dictionary = infos[(i + 1) % k]
+		var alpha: float = fposmod(atan2(B.d.y, B.d.x) - atan2(A.d.y, A.d.x), TAU)
+		if k == 1:
+			alpha = TAU
+		var nA := Geo.right_of(A.d)   # +90deg in angle sense, faces B
+		var nB := Geo.right_of(B.d)
+		var corner := {"conv": false, "c": Vector2.ZERO}
+		if alpha < PI - 0.15:
+			# line A: A.p + nA*hwA + dA*t1 ; line B: B.p - nB*hwB + dB*t2
+			var p1: Vector2 = A.p + nA * A.hw
+			var p2: Vector2 = B.p - nB * B.hw
+			var res = Geometry2D.line_intersects_line(p1, A.d, p2, B.d)
+			if res != null:
+				var C: Vector2 = res
+				var t1: float = (C - p1).dot(A.d)
+				var t2: float = (C - p2).dot(B.d)
+				if t1 < CORNER_REACH and t2 < CORNER_REACH:
+					if alpha < SHARP_MIN:
+						# a Y: the curbs meet in a point, cut both roads there without a rounded corner
+						A.s = maxf(A.s, t1)
+						B.s = maxf(B.s, t2)
+					else:
+						var r: float = CORNER_RADIUS.get(mini(A.rank, B.rank) % 20, 6.0)
+						var tang: float = minf(r / maxf(0.05, tan(alpha * 0.5)), 22.0)
+						A.s = maxf(A.s, t1 + tang)
+						B.s = maxf(B.s, t2 + tang)
+						corner = {"conv": true, "c": C}
+		corners.append(corner)
+	return {"infos": infos, "corners": corners}
+
+
 func _junction_geometry() -> void:
 	for ni in nodes.size():
 		var n: Dictionary = nodes[ni]
 		var k: int = n.ends.size()
 		if k < 2:
 			continue
-		var J: Vector2 = n.pos
-		var infos: Array = []
-		for er in n.ends:
-			var inf := end_info(er)
-			inf["ref"] = er
-			inf["ang"] = atan2(inf.d.y, inf.d.x)
-			inf["s"] = 0.6
-			infos.append(inf)
-		infos.sort_custom(func(x, y): return x.ang < y.ang)
-		var corners: Array = []
-		for i in k:
-			var A: Dictionary = infos[i]
-			var B: Dictionary = infos[(i + 1) % k]
-			var alpha: float = B.ang - A.ang
-			if i == k - 1:
-				alpha += TAU
-			if k == 1:
-				alpha = TAU
-			var nA := Geo.right_of(A.d)   # +90deg in angle sense
-			var nB := Geo.right_of(B.d)
-			var corner := {"conv": false, "c": Vector2.ZERO}
-			if alpha < PI - 0.15:
-				# line A: J + nA*hwA + dA*t1 ; line B: J - nB*hwB + dB*t2
-				var p1: Vector2 = J + nA * A.hw
-				var p2: Vector2 = J - nB * B.hw
-				var res = Geometry2D.line_intersects_line(p1, A.d, p2, B.d)
-				if res != null:
-					var C: Vector2 = res
-					var t1: float = (C - p1).dot(A.d)
-					var t2: float = (C - p2).dot(B.d)
-					var r: float = CORNER_RADIUS.get(mini(A.rank, B.rank) % 20, 6.0)
-					var tang: float = minf(r / maxf(0.05, tan(alpha * 0.5)), 22.0)
-					A.s = maxf(A.s, t1 + tang)
-					B.s = maxf(B.s, t2 + tang)
-					corner = {"conv": true, "c": C}
-			corners.append(corner)
+		var st := star(ni)
+		var infos: Array = st.infos
+		var corners: Array = st.corners
+		if n.has("group"):
+			_clear_inner_pieces(n, infos)
 		# clamp setbacks
 		for inf in infos:
 			var e: Dictionary = edges[inf.edge]
-			var other_is_junction := true
-			var lim: float = e.len * (0.45 if other_is_junction else 0.9)
+			var lim: float = e.len * 0.45
 			inf.s = clampf(inf.s, 0.0, maxf(0.0, lim))
 			if inf.start:
 				e.trim_a = inf.s
@@ -519,14 +582,15 @@ func _junction_geometry() -> void:
 		# polygon
 		var poly := PackedVector2Array()
 		var corner_curves: Array = []
+		var wedges: Array = []
 		for i in k:
 			var A: Dictionary = infos[i]
 			var B: Dictionary = infos[(i + 1) % k]
 			var nA := Geo.right_of(A.d)
 			var nB := Geo.right_of(B.d)
-			var a_left: Vector2 = J + A.d * A.s - nA * A.hw
-			var a_right: Vector2 = J + A.d * A.s + nA * A.hw
-			var b_left: Vector2 = J + B.d * B.s - nB * B.hw
+			var a_left: Vector2 = A.p + A.d * A.s - nA * A.hw
+			var a_right: Vector2 = A.p + A.d * A.s + nA * A.hw
+			var b_left: Vector2 = B.p + B.d * B.s - nB * B.hw
 			poly.append(a_left)
 			poly.append(a_right)
 			var curve := PackedVector2Array([a_right])
@@ -537,12 +601,182 @@ func _junction_geometry() -> void:
 					var q := a_right * (1 - t) * (1 - t) + C * 2.0 * (1 - t) * t + b_left * t * t
 					poly.append(q)
 					curve.append(q)
+			else:
+				var outer_c = _outer_corner(A, B, nA, nB)
+				if outer_c != null:
+					poly.append(outer_c)
+					curve.append(outer_c)
 			curve.append(b_left)
 			var sw := minf(A.sw_right, B.sw_left)
 			corner_curves.append({"pts": curve, "sw": sw, "conv": corners[i].conv})
-		n.polygon = poly
+			if n.has("group"):
+				var w := PackedVector2Array([A.p + nA * A.hw])
+				w.append_array(curve)
+				w.append(B.p - nB * B.hw)
+				w.append(n.pos)
+				wedges.append(w)
 		n.corners = corner_curves
 		n.infos = infos
+		n.polygon = poly
+		if n.has("group"):
+			n["_pieces"] = _group_pieces(n, poly, infos, wedges)
+
+
+## In a merged group a removed inner piece can cross an approach right at its end (a side road that
+## crossed the sidewalk of a main road). Cut such an approach until its carriageway is clear of every
+## inner piece running across it, so that its sidewalk does not lie on the side road.
+func _clear_inner_pieces(n: Dictionary, infos: Array) -> void:
+	var polys: Array = n.get("inner_polys", [])
+	var dirs: Array = n.get("inner_dirs", [])
+	if polys.is_empty():
+		return
+	for inf in infos:
+		var e: Dictionary = edges[inf.edge]
+		var across: Array = []
+		for i in polys.size():
+			if i < dirs.size() and absf((dirs[i] as Vector2).dot(inf.d)) > 0.9:
+				continue   # runs along this road (e.g. its own continuation), not across
+			across.append(polys[i])
+		if across.is_empty():
+			continue
+		var s: float = inf.s
+		var s_max: float = minf(e.len * 0.45, inf.s + 25.0)
+		while s <= s_max:
+			var smp := Geo.sample(e.pts, e.cum, s if inf.start else e.len - s)
+			var r := Geo.right_of(smp[1])
+			var hw: float = e.width * 0.5 - 0.2
+			var seg := PackedVector2Array([smp[0] - r * hw, smp[0] + r * hw])
+			var hit := false
+			for poly in across:
+				if not Geometry2D.intersect_polyline_with_polygon(seg, poly).is_empty():
+					hit = true
+					break
+			if not hit:
+				inf.s = s
+				break
+			s += 0.5
+
+
+## On the outer side of a bend (more than 180° between two neighbouring roads) the two curbs meet in
+## a point behind the cuts. A straight line between the cuts would cut into the carriageway, so the
+## polygon and the corner sidewalk go through that point. Returns null if there is no such point.
+func _outer_corner(A: Dictionary, B: Dictionary, nA: Vector2, nB: Vector2):
+	var alpha: float = fposmod(atan2(B.d.y, B.d.x) - atan2(A.d.y, A.d.x), TAU)
+	if alpha < PI + 0.05:
+		return null
+	var p1: Vector2 = A.p + nA * A.hw
+	var p2: Vector2 = B.p - nB * B.hw
+	var res = Geometry2D.line_intersects_line(p1, A.d, p2, B.d)
+	if res == null:
+		return null
+	var C: Vector2 = res
+	var t1: float = (C - p1).dot(A.d)
+	var t2: float = (C - p2).dot(B.d)
+	if t1 > A.s or t2 > B.s or t1 < -CORNER_REACH or t2 < -CORNER_REACH:
+		return null
+	return C
+
+
+## Pieces of the area of a merged junction group: the plain star polygon (if simple), the corner
+## wedges, the removed inner road pieces and each road from its end at the group up to its cut.
+func _group_pieces(n: Dictionary, star_poly: PackedVector2Array, infos: Array, wedges: Array) -> Array:
+	var pieces: Array = []
+	if not JunctionMerge.self_intersects(star_poly):
+		pieces.append(star_poly)
+	for w in wedges:
+		if not JunctionMerge.self_intersects(w):
+			pieces.append(w)
+	for ip in n.get("inner_polys", []):
+		pieces.append(ip)
+	n.erase("inner_polys")
+	n.erase("inner_dirs")
+	for inf in infos:
+		var e: Dictionary = edges[inf.edge]
+		var cut: float = minf(e.len, inf.s + 0.3)
+		var sub := Geo.sub_polyline(e.pts, e.cum, 0.0, cut) if inf.start else Geo.sub_polyline(e.pts, e.cum, e.len - cut, e.len)
+		if sub.size() < 2:
+			continue
+		var hw: float = e.width * 0.5
+		var left := Geo.offset_polyline(sub, -hw)
+		var right := Geo.offset_polyline(sub, hw)
+		right.reverse()
+		left.append_array(right)
+		pieces.append(left)
+	return pieces
+
+
+## After the turn paths exist: the area of each merged junction group is the union of its pieces and
+## of every turn path widened to a lane, closed by 1 m so that slivers between the pieces disappear.
+## Holes larger than 20 m² (islands) stay. A plain junction keeps its star polygon unless a turn path
+## leaves it (odd angles, different road widths); then it is built the same way.
+func _finish_groups() -> void:
+	for n in nodes:
+		var pieces: Array = []
+		if n.has("_pieces"):
+			pieces = n._pieces
+			n.erase("_pieces")
+		elif n.ends.size() >= 2 and n.has("conns") and _paths_leave(n):
+			pieces = _group_pieces(n, n.polygon, n.infos, [])
+		else:
+			continue
+		# a strip along each turn path that leaves the plain star polygon (paths inside it are covered)
+		var star_ok: bool = n.polygon.size() >= 3 and not JunctionMerge.self_intersects(n.polygon)
+		for ci in n.get("conns", []):
+			var c: Dictionary = connectors[ci]
+			if c.turn == "U" or (star_ok and not _path_leaves(c.pts, n.polygon)):
+				continue
+			for b in Geometry2D.offset_polyline(c.pts, PATH_HALF_W, Geometry2D.JOIN_MITER, Geometry2D.END_BUTT):
+				if not Geometry2D.is_polygon_clockwise(b):
+					pieces.append(b)
+		_group_polygon(n, pieces)
+
+
+## Does a turn path of plain junction n run outside its star polygon?
+func _paths_leave(n: Dictionary) -> bool:
+	var poly: PackedVector2Array = n.polygon
+	if poly.size() < 3:
+		return true
+	for ci in n.conns:
+		var c: Dictionary = connectors[ci]
+		if c.turn != "U" and _path_leaves(c.pts, poly):
+			return true
+	return false
+
+
+## A point of the path lies outside the polygon.
+func _path_leaves(pts: PackedVector2Array, poly: PackedVector2Array) -> bool:
+	for i in range(1, pts.size() - 1):
+		if not Geometry2D.is_point_in_polygon(pts[i], poly):
+			return true
+	return false
+
+
+func _group_polygon(n: Dictionary, pieces: Array) -> void:
+	var u := JunctionMerge.union_all(pieces)
+	var outers: Array = u[0]
+	if outers.is_empty():
+		return
+	var best: PackedVector2Array = outers[0]
+	for o in outers:
+		if absf(Geo.polygon_area(o)) > absf(Geo.polygon_area(best)):
+			best = o
+	var grown := Geometry2D.offset_polygon(best, 1.0, Geometry2D.JOIN_ROUND)
+	if grown.size() >= 1:
+		var shrunk := Geometry2D.offset_polygon(grown[0], -1.0, Geometry2D.JOIN_ROUND)
+		if shrunk.size() >= 1 and not Geometry2D.is_polygon_clockwise(shrunk[0]):
+			best = shrunk[0]
+	var holes: Array = []
+	for h in u[1]:
+		if absf(Geo.polygon_area(h)) > 20.0 and Geometry2D.is_point_in_polygon(Geo.polygon_centroid(h), best):
+			holes.append(h)
+	n.polygon = best
+	n["holes"] = holes
+	n["area"] = true   # built by union: sidewalks next to it are clipped against it (RoadMesher)
+	var extra: Array = []
+	for o in outers:
+		if o != best and absf(Geo.polygon_area(o)) > 2.0:
+			extra.append(o)
+	n["extra_polys"] = extra
 
 
 # ------------------------------------------------------------------------------------------
@@ -644,6 +878,8 @@ func _build_connectors() -> void:
 				var dir_out := 0 if (er_out & 1) == 0 else 1
 				if lane_count(eout, dir_out) == 0:
 					continue
+				if n.has("reach") and not _group_reaches(n, er_in, er_out):
+					continue
 				var geo_out: Array = lane_geo.get(lane_key(eout, dir_out, 0), [])
 				if geo_out.is_empty():
 					continue
@@ -711,6 +947,20 @@ func _build_connectors() -> void:
 					_add_connector(ni, ein, dir_in, li, m0.edge, m0.dir, 0, m0.turn)
 
 
+## In a merged junction group: can traffic entering at road end er_in leave at er_out along the
+## removed inner pieces (in their travel direction)?
+func _group_reaches(n: Dictionary, er_in: int, er_out: int) -> bool:
+	var m_in := _member_of(er_in)
+	var m_out := _member_of(er_out)
+	var r: Dictionary = n.reach.get(m_in, {})
+	return r.has(m_out)
+
+
+func _member_of(er: int) -> int:
+	var e: Dictionary = edges[er >> 1]
+	return int(e.get("mem_a" if (er & 1) == 0 else "mem_b", -1))
+
+
 func _add_connector(ni: int, e_from: int, d_from: int, l_from: int, e_to: int, d_to: int, l_to: int, turn: String) -> void:
 	var k_from := lane_key(e_from, d_from, l_from)
 	var k_to := lane_key(e_to, d_to, l_to)
@@ -768,6 +1018,9 @@ func _traffic_control(data: OsmData) -> void:
 			n.ctrl = "none"
 			continue
 		var has_signal: bool = data.signals.has(n.osm_id)
+		for id in n.get("osm_ids", []):
+			if data.signals.has(id):
+				has_signal = true
 		var ranks := []
 		for er in n.ends:
 			var e: Dictionary = edges[er >> 1]
@@ -828,6 +1081,9 @@ func _conflicts() -> void:
 			var ca: Dictionary = connectors[cs[i]]
 			if n.ctrl == "signals":
 				ca.phase = n.phases.get(ca.approach_end, 0)
+		var boxes: Array = []
+		for ci in cs:
+			boxes.append(_bbox(connectors[ci].pts))
 		for i in cs.size():
 			for j in range(i + 1, cs.size()):
 				var a: Dictionary = connectors[cs[i]]
@@ -835,8 +1091,8 @@ func _conflicts() -> void:
 				if a.from == b.from:
 					continue
 				var conflict: bool = a.to == b.to
-				if not conflict and (a.from >> 3) != (b.from >> 3):
-					conflict = _polylines_intersect(a.pts, b.pts)
+				if not conflict and (a.from >> 3) != (b.from >> 3) and (boxes[i] as Rect2).intersects(boxes[j], true):
+					conflict = _polylines_intersect(a.pts, b.pts, boxes[j])
 				if conflict:
 					a.conflicts.append(cs[j])
 					b.conflicts.append(cs[i])
@@ -850,9 +1106,19 @@ func _approach_end(c: Dictionary) -> int:
 	return e * 2 + (1 if dir == 0 else 0)
 
 
-static func _polylines_intersect(a: PackedVector2Array, b: PackedVector2Array) -> bool:
+static func _bbox(pts: PackedVector2Array) -> Rect2:
+	var r := Rect2(pts[0], Vector2.ZERO)
+	for q in pts:
+		r = r.expand(q)
+	return r
+
+
+static func _polylines_intersect(a: PackedVector2Array, b: PackedVector2Array, b_box := Rect2()) -> bool:
 	# ignore the first/last 0.5 m so that connectors sharing a start/end don't count
+	var use_box := b_box.size != Vector2.ZERO
 	for i in range(a.size() - 1):
+		if use_box and not Rect2(a[i], Vector2.ZERO).expand(a[i + 1]).intersects(b_box, true):
+			continue
 		for j in range(b.size() - 1):
 			var r = Geometry2D.segment_intersects_segment(a[i], a[i + 1], b[j], b[j + 1])
 			if r != null:
