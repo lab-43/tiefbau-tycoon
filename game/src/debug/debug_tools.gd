@@ -234,6 +234,9 @@ static func _cancel_activity(s: Site) -> void:
 static func _instant_closure(s: Site, was_running: bool) -> void:
 	if not was_running and s._placed_count() == 0 and s.crew_van and is_instance_valid(s.crew_van) and s.crew_van.cargo.barriers > 0:
 		s.crew_van.cargo.barriers -= 1
+	s.plan_confirmed = true
+	s.build_when_ready = false
+	s.clear_orphans()
 	for i in s.item_defs.size():
 		if s.item_nodes[i] == null:
 			var df: Dictionary = s.item_defs[i]
@@ -263,6 +266,7 @@ static func _instant_pipe(s: Site) -> void:
 
 
 static func _instant_teardown(s: Site) -> void:
+	s.clear_orphans()
 	for i in s.item_nodes.size():
 		var n: Node3D = s.item_nodes[i]
 		if n:

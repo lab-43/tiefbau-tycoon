@@ -37,9 +37,23 @@ var spot_of := {}              # Vehicle -> spot id (exc | load | van | stage | 
 var in_place := {}             # Vehicle -> true while parked at its spot
 var item_defs: Array = []
 var item_nodes: Array = []
-var yellow_pts := PackedVector2Array()
-var yellow_node: MeshInstance3D
-var yellow_frac := 0.0
+var plan: ClosurePlan            # the closure as planned (#9): standard template or the player's design
+var plan_confirmed := false      # the player accepted a plan (or started the standard closure)
+var build_when_ready := false    # build the accepted plan as soon as the crew is on site
+var yellow_lines: Array = []     # PackedVector2Array per yellow marking of the plan
+var yellow_fracs: Array = []     # laid fraction 0..1 per marking
+var yellow_nodes: Array = []
+## All yellow markings at once (debug tools, tests): the least laid fraction; setting it sets all.
+var yellow_frac: float:
+	get:
+		var m := 1.0
+		for f in yellow_fracs:
+			m = minf(m, float(f))
+		return m
+	set(v):
+		for i in yellow_fracs.size():
+			yellow_fracs[i] = v
+var _orphans: Array = []         # placed items a changed plan no longer contains (the crew collects them)
 var workers: Array = []
 var crew_van: Vehicle
 var terrain: SiteTerrain
@@ -77,9 +91,8 @@ func setup(w: World, manager: Node, j: Job, layout: SiteLayout, id: int) -> void
 	sid = id
 	name = "Site_%d" % id
 	_polygon = lay.closure_polygon()
-	item_defs = lay.items()
-	item_nodes.resize(item_defs.size())
-	yellow_pts = lay.yellow_line()
+	plan = ClosurePlan.from_layout(lay)
+	_apply_plan()
 	terrain = SiteTerrain.new()
 	add_child(terrain)
 	var sand_top := -job.depth + 0.05 + job.pipe_d + 0.3
@@ -252,7 +265,9 @@ func actions() -> Array:
 	var out: Array = []
 	match step_id():
 		"closure":
-			out.append(_action("closure", "Absperrung aufbauen", _can_closure()))
+			if can_edit_plan() == "":
+				out.append(_action("plan", "Plan ändern" if plan_confirmed else "Absperrung planen", ""))
+			out.append(_action("closure", "Absperrung aufbauen" if plan_confirmed else "Standard-Absperrung aufbauen", _can_closure()))
 		"dig":
 			out.append(_action("dig", "Graben ausheben", _can_dig()))
 		"pipe":
@@ -754,6 +769,8 @@ func _build_spray() -> void:
 # ------------------------------------------------------------------------------------------
 
 func _can_closure() -> String:
+	if item_defs.is_empty() and yellow_lines.is_empty():
+		return "Der Plan ist leer"
 	if not crew_present():
 		return "Kolonnenbus ist nicht vor Ort"
 	if crew_van.cargo.barriers <= 0 and _placed_count() == 0:
@@ -773,35 +790,55 @@ func _start_closure() -> void:
 	_ensure_workers()
 	if crew_van.cargo.barriers > 0:
 		crew_van.cargo.barriers -= 1
+	plan_confirmed = true
+	build_when_ready = false
 	running = true
 	_wtasks.clear()
-	var yellow_added := false
-	for i in item_defs.size():
-		var g: String = item_defs[i].group
-		if g == "pit" and not yellow_added:
-			_wtasks.append({"type": "yellow_on"})
-			yellow_added = true
-		if item_nodes[i] == null:
-			_wtasks.append({"type": "place", "i": i})
-	if not yellow_added:
-		_wtasks.append({"type": "yellow_on"})
+	for o in _orphans:
+		if is_instance_valid(o):
+			_wtasks.append({"type": "collect", "node": o})
+	for t in _build_sequence():
+		if t.type == "place" and item_nodes[t.i] != null:
+			continue
+		if t.type == "yellow_on" and float(yellow_fracs[t.l]) >= 1.0:
+			continue
+		_wtasks.append(t)
 	_set_status("Kolonne baut die Absperrung auf …")
+
+
+## Build order: the items in plan order; the yellow markings before the pit fences (standard
+## closure) or at the end (player plan). Teardown runs it backwards.
+func _build_sequence() -> Array:
+	var seq: Array = []
+	var lines_at := item_defs.size()
+	if not plan.custom:
+		for i in item_defs.size():
+			if item_defs[i].group == "pit":
+				lines_at = i
+				break
+	for i in item_defs.size() + 1:
+		if i == lines_at:
+			for l in yellow_lines.size():
+				seq.append({"type": "yellow_on", "l": l})
+		if i < item_defs.size():
+			seq.append({"type": "place", "i": i})
+	return seq
 
 
 func _start_teardown() -> void:
 	_ensure_workers()
 	running = true
 	_wtasks.clear()
-	for i in range(item_defs.size() - 1, -1, -1):
-		var g: String = item_defs[i].group
-		if g == "tail" and yellow_frac > 0.0:
-			pass
-		if item_nodes[i] != null:
-			_wtasks.append({"type": "remove", "i": i})
-		if g == "pit" and i > 0 and item_defs[i - 1].group != "pit" and yellow_frac > 0.0:
-			_wtasks.append({"type": "yellow_off"})
-	if yellow_frac > 0.0 and not _wtasks.any(func(t): return t.type == "yellow_off"):
-		_wtasks.push_front({"type": "yellow_off"})
+	var seq := _build_sequence()
+	seq.reverse()
+	for t in seq:
+		if t.type == "place" and item_nodes[t.i] != null:
+			_wtasks.append({"type": "remove", "i": t.i})
+		elif t.type == "yellow_on" and float(yellow_fracs[t.l]) > 0.0:
+			_wtasks.append({"type": "yellow_off", "l": t.l})
+	for o in _orphans:
+		if is_instance_valid(o):
+			_wtasks.append({"type": "collect", "node": o})
 	_set_status("Kolonne baut die Absperrung ab …")
 
 
@@ -812,6 +849,113 @@ func _can_teardown() -> String:
 		if is_instance_valid(v) and spot_of.get(v, "") in ["exc", "load"]:
 			return "Erst alle Maschinen abziehen"
 	return ""
+
+
+# ------------------------------------------------------------------------------------------
+# Closure plan (#9): designed by the player in the ClosureDesigner
+# ------------------------------------------------------------------------------------------
+
+## Empty if the plan can be changed now, else the reason.
+func can_edit_plan() -> String:
+	if step_id() != "closure":
+		return "Nur im Schritt „Absperrung aufbauen“"
+	if running:
+		return "Die Kolonne baut gerade auf"
+	return ""
+
+
+func _apply_plan() -> void:
+	item_defs = plan.defs(lay)
+	item_nodes.clear()
+	item_nodes.resize(item_defs.size())
+	yellow_lines = plan.lines.duplicate()
+	yellow_fracs.clear()
+	for _l in yellow_lines:
+		yellow_fracs.append(0.0)
+	lay.apply_extent(lay.extent_for(plan.items) if plan.custom else lay.default_extent())
+	_update_yellow()
+
+
+## Accepts a new plan. Items that already stand and are still planned stay; the crew collects the
+## others before it builds. build: the crew starts as soon as it is on site.
+func set_plan(p: ClosurePlan, build := true) -> void:
+	if can_edit_plan() != "":
+		return
+	var ext_new: Dictionary = lay.extent_for(p.items) if p.custom else lay.default_extent()
+	var van_moves: bool = crew_van != null and is_instance_valid(crew_van) and spot_of.get(crew_van, "") == "van" \
+		and absf(float(ext_new.van) - lay.s_van) > 0.5
+	var van_driving := false
+	if van_moves:
+		# the van leaves with the old layout (exit_plan), then parks ahead of the new taper
+		_crew_board()
+		van_driving = _drive_van_to(float(ext_new.van))
+	var old_defs := item_defs
+	var old_nodes := item_nodes.duplicate()
+	var old_lines := yellow_lines
+	var old_fracs := yellow_fracs.duplicate()
+	plan = p
+	_apply_plan()
+	var used := {}
+	for i in old_defs.size():
+		var n: Node3D = old_nodes[i]
+		if n == null:
+			continue
+		var od: Dictionary = old_defs[i]
+		var hit := -1
+		for j in item_defs.size():
+			var nd: Dictionary = item_defs[j]
+			if not used.has(j) and nd.kind == od.kind and (nd.pos as Vector2).distance_to(od.pos) < 0.05 \
+					and absf(angle_difference(float(nd.yaw), float(od.yaw))) < 0.03:
+				hit = j
+				break
+		if hit >= 0:
+			used[hit] = true
+			item_nodes[hit] = n
+		else:
+			_orphans.append(n)
+	for l in yellow_lines.size():
+		for k in old_lines.size():
+			if old_lines[k] == yellow_lines[l]:
+				yellow_fracs[l] = old_fracs[k]
+	_update_yellow()
+	if traffic_on:
+		_traffic_deactivate()
+	if _any_in_lane_placed():
+		_traffic_activate()
+	if van_moves and not van_driving and is_instance_valid(crew_van):
+		var vp := lay.van_pose()
+		crew_van.place(Vector3(vp.pos.x, 0, vp.pos.y), vp.yaw)
+		_arrived(crew_van, "van")
+	plan_confirmed = true
+	build_when_ready = build
+	if crew_present() and not van_moves:
+		_set_status("Plan übernommen – die Kolonne baut ihn auf.")
+	elif van_moves:
+		_set_status("Plan übernommen – der Kolonnenbus parkt vor der neuen Verschwenkung um.")
+	else:
+		_set_status("Plan übernommen. Kolonnenbus schicken, dann baut die Kolonne ihn auf.")
+	changed.emit(self)
+	Events.site_changed.emit(self)
+
+
+func _drive_van_to(new_s: float) -> bool:
+	var v := crew_van
+	var dest_s := new_s - 12.0
+	var ok := v.drive_plan({"key": lay.key, "s": dest_s}, job.short_title(), [v.pull_over_piece(lay.key, dest_s, SiteLayout.CURB, 12.0)], func(veh):
+		var vp := lay.van_pose()
+		veh.place(Vector3(vp.pos.x, 0, vp.pos.y), vp.yaw)
+		_arrived(veh, "van"))
+	if ok:
+		_reserve(v, "van")
+	return ok
+
+
+## Debug tools: drop items that a changed plan no longer contains at once.
+func clear_orphans() -> void:
+	for o in _orphans:
+		if is_instance_valid(o):
+			o.queue_free()
+	_orphans.clear()
 
 
 func _tick_crew_tasks() -> void:
@@ -830,17 +974,17 @@ func _tick_crew_tasks() -> void:
 		if w.busy:
 			any_busy = true
 	if step_id() == "closure":
-		total = item_defs.size() + 1
-		done = _placed_count() + (1 if yellow_frac >= 1.0 else 0)
-		progress = float(done) / total
+		total = item_defs.size() + yellow_lines.size()
+		done = _placed_count() + _lines_count(1.0)
+		progress = float(done) / maxf(1.0, total)
 		if _wtasks.is_empty() and not any_busy:
 			for i in workers.size():
 				_worker_home(workers[i], i)
 			_complete("closure")
 	elif step_id() == "teardown":
-		total = item_defs.size() + 1
-		done = total - _placed_count() - (1 if yellow_frac > 0.0 else 0)
-		progress = float(done) / total
+		total = item_defs.size() + yellow_lines.size()
+		done = total - _placed_count() - _lines_count(0.001)
+		progress = float(done) / maxf(1.0, total)
 		if _wtasks.is_empty() and not any_busy:
 			crew_van.cargo.barriers += 1
 			for i in workers.size():
@@ -870,7 +1014,7 @@ func _run_task(w: Worker, t: Dictionary) -> void:
 						add_child(n2)
 						n2.global_transform = Transform3D(Basis(Vector3.UP, d.yaw), Vector3(d.pos.x, 0.05, d.pos.y))
 						item_nodes[i] = n2
-						if d.group == "taper" and not traffic_on:
+						if d.get("in_lane", false) and not traffic_on:
 							_traffic_activate()
 						w.busy = false)))
 		"remove":
@@ -885,7 +1029,7 @@ func _run_task(w: Worker, t: Dictionary) -> void:
 					item_nodes[i2] = null
 					if n3:
 						w.hold(n3)
-					if d2.group == "taper" and traffic_on and not _any_placed("taper"):
+					if d2.get("in_lane", false) and traffic_on and not _any_in_lane_placed():
 						_traffic_deactivate()
 					w.walk_to(cp3, func(_w3):
 						var c := w.release_carry()
@@ -893,65 +1037,104 @@ func _run_task(w: Worker, t: Dictionary) -> void:
 							c.queue_free()
 						w.busy = false)))
 		"yellow_on":
-			var pts := yellow_pts
+			var li: int = t.l
+			var pts: PackedVector2Array = yellow_lines[li]
 			var path: Array = []
 			for k in pts.size():
 				path.append(Vector3(pts[k].x, 0.05, pts[k].y))
 			w.walk_to(path[0], func(_w):
 				w.act("place", 1.0, func(_w2):
-					w.set_meta("tape", true)
+					w.set_meta("tape", li)
 					w.walk_path(path, func(_w3):
 						w.remove_meta("tape")
-						yellow_frac = 1.0
+						yellow_fracs[li] = 1.0
 						_update_yellow()
 						w.busy = false)))
 		"yellow_off":
-			var pts2 := yellow_pts
+			var li2: int = t.l
+			var pts2: PackedVector2Array = yellow_lines[li2]
 			var path2: Array = []
 			for k in range(pts2.size() - 1, -1, -1):
 				path2.append(Vector3(pts2[k].x, 0.05, pts2[k].y))
 			w.walk_to(path2[0], func(_w):
-				w.set_meta("untape", true)
+				w.set_meta("untape", li2)
 				w.walk_path(path2, func(_w3):
 					w.remove_meta("untape")
-					yellow_frac = 0.0
+					yellow_fracs[li2] = 0.0
 					_update_yellow()
 					w.busy = false))
+		"collect":
+			var on: Node3D = t.node
+			if not is_instance_valid(on):
+				w.busy = false
+				return
+			var tp := on.global_position
+			var oy := on.global_rotation.y
+			w.walk_to(Vector3(tp.x, 0.05, tp.z) + Vector3(sin(oy), 0, cos(oy)) * 0.9, func(_w):
+				w.face(tp)
+				w.act("place", 1.1, func(_w2):
+					_orphans.erase(on)
+					if is_instance_valid(on):
+						w.hold(on)
+					w.walk_to(cp3, func(_w3):
+						var c2 := w.release_carry()
+						if c2:
+							c2.queue_free()
+						w.busy = false)))
 
 
-func _any_placed(group: String) -> bool:
+## True while an item that blocks the closed lane stands (traffic is shifted around the site).
+func _any_in_lane_placed() -> bool:
 	for i in item_defs.size():
-		if item_defs[i].group == group and item_nodes[i] != null:
+		if item_defs[i].get("in_lane", false) and item_nodes[i] != null:
 			return true
 	return false
 
 
+## Number of yellow markings laid at least to fraction f.
+func _lines_count(f: float) -> int:
+	var n := 0
+	for x in yellow_fracs:
+		if float(x) >= f:
+			n += 1
+	return n
+
+
 func _update_yellow() -> void:
-	if yellow_node:
-		yellow_node.queue_free()
-		yellow_node = null
-	if yellow_frac <= 0.001:
-		return
-	var total := Geo.polyline_length(yellow_pts)
-	var cum := Geo.cumulative(yellow_pts)
-	var pts := Geo.sub_polyline(yellow_pts, cum, 0.0, total * clampf(yellow_frac, 0.0, 1.0))
-	if pts.size() < 2:
-		return
-	yellow_node = SiteProps.ribbon(pts, 0.15, 0.068, Mats.get_mat("mark_yellow"))
-	add_child(yellow_node)
+	for n in yellow_nodes:
+		if is_instance_valid(n):
+			n.queue_free()
+	yellow_nodes.clear()
+	for l in yellow_lines.size():
+		var f := clampf(float(yellow_fracs[l]), 0.0, 1.0)
+		if f <= 0.001:
+			continue
+		var pl: PackedVector2Array = yellow_lines[l]
+		var cum := Geo.cumulative(pl)
+		var pts := Geo.sub_polyline(pl, cum, 0.0, cum[cum.size() - 1] * f)
+		if pts.size() < 2:
+			continue
+		var node := SiteProps.ribbon(pts, 0.15, 0.068, Mats.get_mat("mark_yellow"))
+		add_child(node)
+		yellow_nodes.append(node)
 
 
 func _track_tape() -> void:
 	# grow / shrink the yellow line behind the worker walking along it
 	for w in workers:
-		if w.has_meta("tape") or w.has_meta("untape"):
-			var cum := Geo.cumulative(yellow_pts)
-			var r: Array = Geo.closest_on_polyline(yellow_pts, cum, Vector2(w.position.x, w.position.z))
-			var total: float = cum[cum.size() - 1]
-			var f: float = r[1] / maxf(0.01, total)
-			if absf(f - yellow_frac) > 0.02:
-				yellow_frac = f
-				_update_yellow()
+		var mk := "tape" if w.has_meta("tape") else ("untape" if w.has_meta("untape") else "")
+		if mk == "":
+			continue
+		var l := int(w.get_meta(mk))
+		if l < 0 or l >= yellow_lines.size():
+			continue
+		var pl: PackedVector2Array = yellow_lines[l]
+		var cum := Geo.cumulative(pl)
+		var r: Array = Geo.closest_on_polyline(pl, cum, Vector2(w.position.x, w.position.z))
+		var f: float = float(r[1]) / maxf(0.01, cum[cum.size() - 1])
+		if absf(f - float(yellow_fracs[l])) > 0.02:
+			yellow_fracs[l] = f
+			_update_yellow()
 
 
 # ------------------------------------------------------------------------------------------
@@ -966,7 +1149,7 @@ func _traffic_activate() -> void:
 	var zone := 100 + sid
 	var prio := {lay.key: 0, lay.key2: (1 if lay.oncoming else 0)}
 	tr.set_zone(zone, prio)
-	tr.set_obstacle(lay.key, lay.s0 + 1.0, lay.s_taper1 - 1.0, 1000 + sid)
+	tr.set_obstacle(lay.key, lay.obst0, lay.obst1, 1000 + sid)
 	tr.set_detour(lay.key, lay.s_det0, lay.s_det1, lay.detour_pts(), zone, 7.0)
 	tr.set_detour(lay.key2, lay.s2_a, lay.s2_b, lay.zone2_pts(), zone, 7.0)
 	_redispatch_waiting()
@@ -1908,6 +2091,8 @@ func _process(delta: float) -> void:
 		if step_id() == "demob":
 			_check_demob()
 		_redispatch_waiting()
+		if build_when_ready and not running and step_id() == "closure" and _can_closure() == "":
+			do_action("closure")
 		if auto_continue and not running:
 			_auto_step()
 
@@ -1916,7 +2101,7 @@ func _auto_step() -> void:
 	if running:
 		return
 	for a in actions():
-		if a.enabled and a.id != "demob":
+		if a.enabled and a.id != "demob" and a.id != "plan":
 			do_action(a.id)
 			return
 	if step_id() == "demob" and not _machines_on_site().is_empty():
@@ -1948,14 +2133,22 @@ func save_state() -> Dictionary:
 	var placed := []
 	for n in item_nodes:
 		placed.append(n != null)
-	return {"phase": phase, "placed": placed, "yellow": yellow_frac, "terrain": terrain.save_state(),
+	return {"phase": phase, "placed": placed, "yellow": yellow_frac, "yellow_fracs": yellow_fracs.duplicate(),
+		"plan": plan.to_dict() if plan.custom else {}, "plan_ok": plan_confirmed, "plan_build": build_when_ready,
+		"terrain": terrain.save_state(),
 		"pile_mat": pile_mat, "pile_m3": pile_m3, "needs": needs, "layer": layer, "auto": auto_continue,
 		"pipe_old": pipe_old != null, "pipe_new": pipe_new != null}
 
 
 func load_state(d: Dictionary) -> void:
 	phase = d.get("phase", 0)
+	var pd: Dictionary = d.get("plan", {})
+	if not pd.is_empty():
+		plan = ClosurePlan.from_dict(pd)
+		_apply_plan()
 	var placed: Array = d.get("placed", [])
+	plan_confirmed = bool(d.get("plan_ok", placed.has(true) or phase > 1))
+	build_when_ready = bool(d.get("plan_build", false))
 	for i in mini(placed.size(), item_defs.size()):
 		if placed[i]:
 			var df: Dictionary = item_defs[i]
@@ -1965,9 +2158,11 @@ func load_state(d: Dictionary) -> void:
 			item_nodes[i] = node
 			if df.group == "taper":
 				traffic_on = false
-	if _any_placed("taper"):
+	if _any_in_lane_placed():
 		_traffic_activate()
-	yellow_frac = d.get("yellow", 0.0)
+	var yf: Array = d.get("yellow_fracs", [])
+	for i in yellow_fracs.size():
+		yellow_fracs[i] = float(yf[i]) if i < yf.size() else float(d.get("yellow", 0.0))
 	_update_yellow()
 	terrain.load_state(d.get("terrain", {}))
 	if phase >= 2:

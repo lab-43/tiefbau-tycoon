@@ -8,6 +8,8 @@ signal clicked_right(screen_pos: Vector2)
 
 const MIN_DIST := 7.0
 const MAX_DIST := 4200.0
+const TOPDOWN_SIZE := 0.77      # ortho size per unit of distance (2·tan(fov/2))
+const TOPDOWN_HEIGHT := 250.0
 
 var camera: Camera3D
 var target := Vector3.ZERO
@@ -17,6 +19,8 @@ var distance := 380.0
 var bounds := Rect2(-3000, -3000, 6000, 6000)
 var follow: Node3D = null
 var input_enabled := true
+var topdown := false            # plan view straight down, orthographic (closure designer, #9)
+var _saved_view: Array = []
 
 var _t_target := Vector3.ZERO
 var _t_yaw := 0.0
@@ -123,7 +127,8 @@ func _unhandled_input(ev: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		elif _mmb_down:
 			_t_yaw -= mm.relative.x * 0.0055
-			_t_pitch = clampf(_t_pitch + mm.relative.y * 0.0045, _min_pitch_for(_t_distance), deg_to_rad(88.0))
+			if not topdown:
+				_t_pitch = clampf(_t_pitch + mm.relative.y * 0.0045, _min_pitch_for(_t_distance), deg_to_rad(88.0))
 			get_viewport().set_input_as_handled()
 	elif ev is InputEventKey and ev.pressed and not ev.echo:
 		if ev.keycode == KEY_F and follow == null and Game.selected is Node3D:
@@ -182,9 +187,9 @@ func _process(delta: float) -> void:
 			_t_yaw += 1.6 * dt
 		if Input.is_key_pressed(KEY_E):
 			_t_yaw -= 1.6 * dt
-		if Input.is_key_pressed(KEY_PAGEUP):
+		if Input.is_key_pressed(KEY_PAGEUP) and not topdown:
 			_t_pitch = clampf(_t_pitch + 0.9 * dt, _min_pitch_for(_t_distance), deg_to_rad(88.0))
-		if Input.is_key_pressed(KEY_PAGEDOWN):
+		if Input.is_key_pressed(KEY_PAGEDOWN) and not topdown:
 			_t_pitch = clampf(_t_pitch - 0.9 * dt, _min_pitch_for(_t_distance), deg_to_rad(88.0))
 	if follow and is_instance_valid(follow):
 		var fp: Vector3 = follow.center3() if follow.has_method("center3") else follow.global_position
@@ -214,6 +219,33 @@ func _apply() -> void:
 
 
 func _apply_values(t: Vector3, y: float, p: float, d: float) -> void:
+	if topdown:
+		# orthographic plan view: same visible height as the perspective view at this distance
+		camera.size = d * TOPDOWN_SIZE
+		camera.global_transform = Transform3D(Basis(Vector3.UP, y) * Basis(Vector3.RIGHT, -PI * 0.5), t + Vector3(0.0, TOPDOWN_HEIGHT, 0.0))
+		return
 	var offset := Vector3(sin(y) * cos(p), sin(p), cos(y) * cos(p)) * d
 	camera.global_position = t + offset
 	camera.look_at(t, Vector3.UP)
+
+
+## Plan view straight down (closure designer). The screen's up direction is the map direction yaw_deg
+## (as for the normal camera). The previous view comes back with exit_topdown().
+func enter_topdown(center: Vector3, dist: float, yaw_deg: float) -> void:
+	if not topdown:
+		_saved_view = [_t_target, _t_distance, _t_yaw, _t_pitch]
+	follow = null
+	topdown = true
+	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	set_view(center, dist, yaw_deg, 90.0)
+
+
+func exit_topdown() -> void:
+	if not topdown:
+		return
+	topdown = false
+	camera.projection = Camera3D.PROJECTION_PERSPECTIVE
+	if _saved_view.size() == 4:
+		set_view(_saved_view[0], _saved_view[1], rad_to_deg(_saved_view[2]), rad_to_deg(_saved_view[3]))
+	else:
+		_apply()

@@ -42,6 +42,11 @@ var s_det1 := 0.0
 var s_van := 0.0
 var s2_a := 0.0
 var s2_b := 0.0
+# traffic geometry of the closure (defaults from the standard layout; a player plan moves them, #9)
+var p_full0 := 0.0             # s where the detour reaches the full shift into K2
+var p_full1 := 0.0             # s where it starts to swing back
+var obst0 := 0.0               # blocked range of K
+var obst1 := 0.0
 var error := ""
 
 # machine geometry (from the extracted assets; fallbacks if missing)
@@ -99,6 +104,10 @@ func setup(n: RoadNet, k: int, start_s: float, length: float, width: float, dep:
 	s_det0 = s0 - 8.0
 	s_det1 = s_taper1 + 5.0
 	s_van = s0 - 20.0
+	p_full0 = s_c0 - 1.0
+	p_full1 = s_c1
+	obst0 = s0 + 1.0
+	obst1 = s_taper1 - 1.0
 	if s0 < 34.0:
 		error = "zu nah an der Kreuzung (Anfang)"
 		return false
@@ -106,23 +115,13 @@ func setup(n: RoadNet, k: int, start_s: float, length: float, width: float, dep:
 		error = "zu nah an der Kreuzung (Ende)"
 		return false
 	# K2 range of the zone
-	var pa := lane_pt(s_det1)
-	var pb := lane_pt(s_det0)
-	var ca := Geo.closest_on_polyline(_g2[0], _g2[1], pa)
-	var cb := Geo.closest_on_polyline(_g2[0], _g2[1], pb)
-	if oncoming:
-		s2_a = ca[1]
-		s2_b = cb[1]
-	else:
-		s2_a = cb[1]
-		s2_b = ca[1]
-	if ca[0] > lw * 2.2 or cb[0] > lw * 2.2:
-		error = "Gegenfahrstreifen zu weit entfernt"
+	var k2 := _k2_for(s_det0, s_det1)
+	if k2.error != "":
+		error = k2.error
 		return false
-	if s2_a < 3.0 or s2_b > len_k2 - 3.0 or s2_b - s2_a < 20.0:
-		error = "Gegenfahrstreifen zu kurz"
-		return false
-	shift = (pa.distance_to(Vector2(ca[2])) + pb.distance_to(Vector2(cb[2]))) * 0.5
+	s2_a = k2.s2_a
+	s2_b = k2.s2_b
+	shift = k2.shift
 	# curvature limits
 	var d0 := lane_dir(s_det0)
 	var d1 := lane_dir(s_det1)
@@ -237,8 +236,12 @@ func closure_polygon() -> PackedVector2Array:
 # ------------------------------------------------------------------------------------------
 
 func _shift_profile(s: float) -> float:
-	var a := clampf((s - s_det0) / (s_c0 - 1.0 - s_det0), 0.0, 1.0)
-	var b := clampf((s_det1 - s) / (s_det1 - s_c1), 0.0, 1.0)
+	return _profile(s, s_det0, p_full0, p_full1, s_det1)
+
+
+static func _profile(s: float, d0: float, f0: float, f1: float, d1: float) -> float:
+	var a := clampf((s - d0) / maxf(0.5, f0 - d0), 0.0, 1.0)
+	var b := clampf((d1 - s) / maxf(0.5, d1 - f1), 0.0, 1.0)
 	var t := minf(a, b)
 	return t * t * (3.0 - 2.0 * t)
 
@@ -251,6 +254,121 @@ func detour_pts() -> PackedVector2Array:
 ## Own path of K2 traffic through the bottleneck/zipper zone.
 func zone2_pts() -> PackedVector2Array:
 	return Geo.sub_polyline(_g2[0], _g2[1], s2_a, s2_b)
+
+
+## K2 range and lateral shift for a detour from d0 to d1 on K. {error, s2_a, s2_b, shift}
+func _k2_for(d0: float, d1: float) -> Dictionary:
+	var pa := lane_pt(d1)
+	var pb := lane_pt(d0)
+	var ca := Geo.closest_on_polyline(_g2[0], _g2[1], pa)
+	var cb := Geo.closest_on_polyline(_g2[0], _g2[1], pb)
+	var out := {"error": "", "s2_a": 0.0, "s2_b": 0.0, "shift": 0.0}
+	if oncoming:
+		out.s2_a = ca[1]
+		out.s2_b = cb[1]
+	else:
+		out.s2_a = cb[1]
+		out.s2_b = ca[1]
+	if ca[0] > lw * 2.2 or cb[0] > lw * 2.2:
+		out.error = "Gegenfahrstreifen zu weit entfernt"
+	elif out.s2_a < 3.0 or out.s2_b > len_k2 - 3.0 or out.s2_b - out.s2_a < 20.0:
+		out.error = "Gegenfahrstreifen zu kurz"
+	out.shift = (pa.distance_to(Vector2(ca[2])) + pb.distance_to(Vector2(cb[2]))) * 0.5
+	return out
+
+
+# ------------------------------------------------------------------------------------------
+# Traffic geometry of a player-designed closure (#9)
+# ------------------------------------------------------------------------------------------
+
+## Lane coordinates of a map point: Vector2(s along K, lateral offset, + = right/curb side).
+func lane_coords(p: Vector2) -> Vector2:
+	var r: Array = Geo.closest_on_polyline(_g[0], _g[1], p)
+	var s: float = r[1]
+	var q: Vector2 = r[2]
+	var d := lane_dir(s)
+	var lat := (p - q).dot(Geo.right_of(d))
+	# beyond the ends of K: continue along the end direction
+	if s <= 0.001:
+		s = (p - q).dot(d)
+	elif s >= len_k - 0.001:
+		s = len_k + (p - q).dot(d)
+	return Vector2(s, lat)
+
+
+## Inside the closed lane K (blocks it).
+func in_lane(lc: Vector2) -> bool:
+	return lc.x >= 0.0 and lc.x <= len_k and absf(lc.y) < lw * 0.5
+
+
+func current_extent() -> Dictionary:
+	return {"det0": s_det0, "det1": s_det1, "full0": p_full0, "full1": p_full1, "obst0": obst0, "obst1": obst1,
+		"van": s_van, "s2_a": s2_a, "s2_b": s2_b, "shift": shift}
+
+
+func default_extent() -> Dictionary:
+	var k2 := _k2_for(s0 - 8.0, s_taper1 + 5.0)
+	return {"det0": s0 - 8.0, "det1": s_taper1 + 5.0, "full0": s_c0 - 1.0, "full1": s_c1, "obst0": s0 + 1.0,
+		"obst1": s_taper1 - 1.0, "van": s0 - 20.0, "s2_a": k2.s2_a, "s2_b": k2.s2_b, "shift": k2.shift}
+
+
+## Traffic geometry for the items of a player plan: the detour starts 8 m before the first item that
+## stands in K and reaches the full shift where the plan blocks K up to its traffic-side edge. Kept
+## within limits so the crew van, the machine slots and the waiting spots still fit.
+func extent_for(items: Array) -> Dictionary:
+	var ext := default_extent()
+	var a := INF
+	var b := -INF
+	var e0 := INF
+	var e1 := -INF
+	for it in items:
+		var lc := lane_coords(ClosurePlan.item_center(it))
+		if not in_lane(lc):
+			continue
+		a = minf(a, lc.x)
+		b = maxf(b, lc.x)
+		if lc.y < -lw * 0.5 + 0.7:
+			e0 = minf(e0, lc.x)
+			e1 = maxf(e1, lc.x)
+	if a == INF:
+		return ext
+	var a_eff := clampf(a, maxf(s0 - 15.0, 35.0), s_c0 - 4.0)
+	var d0 := a_eff - 8.0
+	var d1 := minf(clampf(b, s_c1 + 2.0, s_taper1 + 15.0) + 5.0, maxf(s_taper1 + 5.0, len_k - 32.0))
+	var b_eff := minf(clampf(b, s_c1 + 2.0, s_taper1 + 15.0), d1 - 5.0)
+	var f0 := clampf(e0 if e0 < INF else s_c0 - 1.0, a_eff + 3.0, s_c0 - 1.0)
+	var f1 := clampf(e1 if e1 > -INF else s_c1, s_c1, maxf(s_c1, minf(b_eff - 2.0, d1 - 6.0)))
+	var k2 := _k2_for(d0, d1)
+	if k2.error != "":
+		return ext
+	return {"det0": d0, "det1": d1, "full0": f0, "full1": f1, "obst0": a_eff + 1.0, "obst1": b_eff - 1.0,
+		"van": minf(s0 - 20.0, d0 - 12.0), "s2_a": k2.s2_a, "s2_b": k2.s2_b, "shift": k2.shift}
+
+
+func apply_extent(ext: Dictionary) -> void:
+	s_det0 = ext.det0
+	s_det1 = ext.det1
+	p_full0 = ext.full0
+	p_full1 = ext.full1
+	obst0 = ext.obst0
+	obst1 = ext.obst1
+	s_van = ext.van
+	s2_a = ext.s2_a
+	s2_b = ext.s2_b
+	shift = ext.shift
+
+
+func detour_pts_for(ext: Dictionary) -> PackedVector2Array:
+	var d0: float = ext.det0
+	var d1: float = ext.det1
+	var f0: float = ext.full0
+	var f1: float = ext.full1
+	var sh: float = ext.shift
+	return lane_poly(d0, d1, func(s): return -sh * _profile(s, d0, f0, f1, d1), 1.0)
+
+
+func zone2_pts_for(ext: Dictionary) -> PackedVector2Array:
+	return Geo.sub_polyline(_g2[0], _g2[1], ext.s2_a, ext.s2_b)
 
 
 # ------------------------------------------------------------------------------------------
