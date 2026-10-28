@@ -11,7 +11,7 @@ const LAMP_FN := {"__light_head": 0, "__light_tail": 1, "__light_brake": 2, "__i
 	"__light_reverse": 5}
 const BOX_SIZE := {"head": Vector2(0.32, 0.14), "tail": Vector2(0.3, 0.14), "ind_l": Vector2(0.1, 0.1), "ind_r": Vector2(0.1, 0.1)}
 const BOX_MAT := {"head": "head", "tail": "tail", "ind_l": "ind", "ind_r": "ind"}
-static var _lamp_mats := {}      # "<material id>_<fn>_<tail_brakes>" -> ShaderMaterial (shared by all cars)
+static var _lamp_mats := {}      # "<material id>_<fn>_<tail_brakes>_<rear_z>" -> ShaderMaterial (shared by all cars)
 static var _spots := {}          # entry index -> Array of [kind, Transform3D] for lamp boxes
 # Models whose lamp glass is not split in the asset: recovered once at load (LampSplit)
 const LAMP_DONOR := {"car_police_eu": "car_hatchback"}            # same body and lamp geometry as the donor
@@ -142,25 +142,45 @@ static func _prepare_glass(e: Dictionary, dir: String) -> void:
 
 ## The model's own lamp glass (materials *__light_head / __light_tail / __light_brake / __indicator_l/r)
 ## switched to the shared carlamp shader. Returns the MeshInstances carrying it, [] if the model lacks
-## head, tail-or-brake or indicator glass (then it gets lamp boxes instead).
+## head, tail-or-brake or indicator glass (then it gets lamp boxes instead). The plan (which surface
+## gets which lamp material) is worked out once per model, e["glass_plan"] = [[NodePath, surface, ShaderMaterial]].
 static func _glass(e: Dictionary, inst: Node3D) -> Array:
-	if not e.has("lamp_fns"):
-		var found := {}
-		for sf in _lamp_surfaces(inst):
-			found[sf[2]] = true
-		var complete: bool = found.has(0) and (found.has(1) or found.has(2)) and found.has(3) and found.has(4)
-		e["lamp_fns"] = found if complete else {}
-	var fns: Dictionary = e.lamp_fns
-	if fns.is_empty():
-		return []
+	if not e.has("glass_plan"):
+		e["glass_plan"] = _glass_plan(inst)
 	var meshes: Array = []
-	for sf in _lamp_surfaces(inst):
-		var mi: MeshInstance3D = sf[0]
-		var orig := mi.get_active_material(sf[1]) as BaseMaterial3D
-		mi.set_surface_override_material(sf[1], _lamp_mat(orig, sf[2], not fns.has(2)))
+	for step in e.glass_plan:
+		var mi := inst.get_node(step[0]) as MeshInstance3D
+		mi.set_surface_override_material(step[1], step[2])
 		if not meshes.has(mi):
 			meshes.append(mi)
 	return meshes
+
+
+static func _glass_plan(inst: Node3D) -> Array:
+	var found := {}
+	var surfaces := _lamp_surfaces(inst)
+	for sf in surfaces:
+		found[sf[2]] = true
+	if not (found.has(0) and (found.has(1) or found.has(2)) and found.has(3) and found.has(4)):
+		return []
+	var plan: Array = []
+	for sf in surfaces:
+		var mi: MeshInstance3D = sf[0]
+		var orig := mi.get_active_material(sf[1]) as BaseMaterial3D
+		var rear_z := 1e9
+		if sf[2] == 0:
+			# head glass that also covers the rear (city car): its rear half lights as tail lamps
+			var xf := LampSplit.xform_in(mi, inst)
+			var vs: PackedVector3Array = mi.mesh.surface_get_arrays(sf[1])[Mesh.ARRAY_VERTEX]
+			var rear := false
+			for v in vs:
+				if (xf * v).z > 0.3:
+					rear = true
+					break
+			if rear:
+				rear_z = (xf.affine_inverse() * Vector3.ZERO).z
+		plan.append([inst.get_path_to(mi), sf[1], _lamp_mat(orig, sf[2], not found.has(2), rear_z)])
+	return plan
 
 
 ## [MeshInstance3D, surface index, lamp function] for every lamp glass surface of a model.
@@ -180,12 +200,13 @@ static func _lamp_surfaces(inst: Node3D) -> Array:
 	return out
 
 
-static func _lamp_mat(orig: BaseMaterial3D, fn: int, tail_brakes: bool) -> ShaderMaterial:
-	var key := "%d_%d_%s" % [orig.get_instance_id(), fn, tail_brakes]
+static func _lamp_mat(orig: BaseMaterial3D, fn: int, tail_brakes: bool, rear_z: float) -> ShaderMaterial:
+	var two_sided := orig.cull_mode == BaseMaterial3D.CULL_DISABLED
+	var key := "%d_%d_%s_%.3f" % [orig.get_instance_id(), fn, tail_brakes, rear_z]
 	if _lamp_mats.has(key):
 		return _lamp_mats[key]
 	var m := ShaderMaterial.new()
-	m.shader = load("res://assets/shaders/carlamp.gdshader")
+	m.shader = load("res://assets/shaders/carlamp_2s.gdshader" if two_sided else "res://assets/shaders/carlamp.gdshader")
 	m.set_shader_parameter("albedo_tex", orig.albedo_texture)
 	m.set_shader_parameter("albedo", orig.albedo_color)
 	m.set_shader_parameter("use_normal", orig.normal_enabled and orig.normal_texture != null)
@@ -203,6 +224,7 @@ static func _lamp_mat(orig: BaseMaterial3D, fn: int, tail_brakes: bool) -> Shade
 	m.set_shader_parameter("specular", orig.metallic_specular)
 	m.set_shader_parameter("fn", fn)
 	m.set_shader_parameter("tail_brakes", tail_brakes)
+	m.set_shader_parameter("rear_z", rear_z)
 	_lamp_mats[key] = m
 	return m
 
