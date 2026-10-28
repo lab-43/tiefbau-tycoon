@@ -120,6 +120,8 @@ func _build() -> void:
 	for u in [16.0, 21.0, 26.0]:
 		slots.append({"pos": local_to_world(u, 22.0), "yaw": yaw_facing(-normal), "used_by": null, "kind": "truck", "len": 12.0, "w": 4.6, "u": u, "v": 22.0})
 	slots.append({"pos": local_to_world(9.0, 21.0), "yaw": yaw_facing(normal), "used_by": null, "kind": "lowbed", "len": 28.0, "w": 4.8, "u": 9.0, "v": 21.0})
+	# second low-loader (#24, Nooteboom); appended last so saved slot indices stay valid
+	slots.append({"pos": local_to_world(31.0, 21.0), "yaw": yaw_facing(normal), "used_by": null, "kind": "lowbed", "len": 28.0, "w": 4.8, "u": 31.0, "v": 21.0})
 	_slot_lines()
 	_fence()
 

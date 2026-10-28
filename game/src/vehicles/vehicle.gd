@@ -70,6 +70,9 @@ var _ramp_slide_node: Node3D
 var _ramp_node: Node3D
 var _ramp_slide_rest := Vector3.ZERO
 var _ramp_rest := Basis()
+var _ramp_hinges: Array = []   # [node, rest basis, open angle rad] of folding ramps (trailer JSON "ramp_open_deg")
+var _ramp_hyd: Array = []
+var _deck := {}                # loading deck of the trailer in trailer space: y, spot_z, end_z, ramp_end_z
 var _load_node: MeshInstance3D
 var _load_box := AABB()
 var _pipes_vis: Array = []
@@ -122,6 +125,9 @@ func setup(w: World, id: String, display_name: String, plate_no: String) -> void
 		var kp := RigUtil.find(trailer, "kingpin")
 		var hitch_z := kp.position.z if kp else -11.5
 		_trailer_len = absf(hitch_z) + 2.5
+		var dk: Dictionary = trailer_meta.get("deck", trailer.get_meta("deck", {}))
+		_deck = {"y": float(dk.get("y", DECK_Y)), "spot_z": float(dk.get("spot_z", DECK_Z)),
+			"end_z": float(dk.get("end_z", DECK_END_Z)), "ramp_end_z": float(dk.get("ramp_end_z", RAMP_END_Z))}
 	_compute_extents()
 	_collect_parts()
 	_setup_lights()
@@ -149,7 +155,13 @@ func _compute_extents() -> void:
 	if has_ability("dig"):
 		# the arm sticks out in the rest pose; use the undercarriage for spacing
 		var wf := RigUtil.find(model, "wheel_fl")
-		front_ext = (-wf.position.z + 0.9) if wf else 2.2
+		var uc: Dictionary = meta.get("undercarriage", {})
+		if wf:
+			front_ext = -wf.position.z + 0.9
+		elif uc.has("front_z"):
+			front_ext = -float(uc.front_z) + 0.2   # crawler: front end of the tracks
+		else:
+			front_ext = 2.2
 	half_w = minf(half_w, 1.35)
 
 
@@ -168,7 +180,8 @@ func _collect_parts() -> void:
 					r = float(wd.get("radius", 0.5))
 					steer = bool(wd.get("steer", steer))
 			if root == trailer:
-				r = 0.41
+				if md.get("wheels", []).is_empty():
+					r = 0.41
 				steer = false
 			_wheels.append([n, r, steer and root == model, (n as Node3D).basis])
 
@@ -190,7 +203,7 @@ func is_machine() -> bool:
 
 
 func kind_slot() -> String:
-	if def_id == "tractor_lowbed":
+	if has_ability("lowbed"):
 		return "lowbed"
 	if front_ext + rear_ext > 7.5:
 		return "truck"
@@ -450,6 +463,11 @@ func _build_pick_body() -> void:
 		bs2.size = Vector3(3.0, 2.6, 20.0)
 		cs2.shape = bs2
 		cs2.position = Vector3(0, 1.3, -3.4)
+		var tmin: Array = trailer_meta.get("bbox_min", [])
+		var tmax: Array = trailer_meta.get("bbox_max", [])
+		if tmin.size() == 3 and tmax.size() == 3:
+			bs2.size = Vector3(3.0, 2.6, float(tmax[2]) - float(tmin[2]))
+			cs2.position = Vector3(0, 1.3, (float(tmax[2]) + float(tmin[2])) * 0.5)
 		tb.add_child(cs2)
 		trailer.add_child(tb)
 
@@ -512,6 +530,16 @@ func _setup_rigs() -> void:
 			_ramp_slide_rest = _ramp_slide_node.position
 		if _ramp_node:
 			_ramp_rest = _ramp_node.basis
+		# hinged (folding) ramps without a slide: open angles from the trailer JSON (#24, Nooteboom)
+		var ro: Dictionary = trailer_meta.get("ramp_open_deg", {})
+		var lims: Dictionary = trailer_meta.get("joint_limits_deg", {})
+		for k in ro:
+			var rn := RigUtil.find(trailer, String(k))
+			if rn:
+				var lim: Array = lims.get(k, [-180.0, 180.0])
+				var ang := clampf(float(ro[k]), float(lim[0]), float(lim[1]))
+				_ramp_hinges.append([rn, rn.basis, deg_to_rad(ang)])
+		_ramp_hyd = RigUtil.setup_hydraulics(trailer, trailer_meta)
 	update_load_visual()
 
 
@@ -527,6 +555,13 @@ func set_tip(deg: float) -> void:
 func set_ramp(slide_m: float, deg: float) -> void:
 	ramp_slide = clampf(slide_m, 0.0, 4.68)
 	ramp_deg = clampf(deg, 0.0, 20.0)
+	if not _ramp_hinges.is_empty():
+		# folding ramps: the lowbed's (slide, tilt) progress drives the hinges from folded (0) to open (1)
+		var f := maxf(ramp_slide / 4.68, ramp_deg / 20.0)
+		for h in _ramp_hinges:
+			(h[0] as Node3D).basis = (h[1] as Basis) * Basis(Vector3.RIGHT, float(h[2]) * f)
+		RigUtil.update_hydraulics(_ramp_hyd)
+		return
 	if _ramp_slide_node:
 		_ramp_slide_node.position = _ramp_slide_rest + Vector3(0, 0, ramp_slide)
 	if _ramp_node:
@@ -635,11 +670,18 @@ func _update_trailer() -> void:
 	var yaw := atan2(-dir.x, -dir.y)
 	var kp := RigUtil.find(trailer, "kingpin")
 	var kp_local := kp.position if kp else Vector3(0, 1.25, -11.5)
-	# on slopes (#8): ground under the kingpin and under the rear axle give the trailer's pitch
+	# pitch about the axle centre: the slope between kingpin and rear axle (#8) plus the angle that puts the
+	# kingpin onto the fifth wheel (#24: the Nooteboom's kingpin is 10 cm lower than the heavy tractor's fifth
+	# wheel, the lowbed's 7 cm higher than the TGX's)
 	var g_front := Terrain.near(hitch, position.y)
 	var g_back := Terrain.near(_trailer_axle, g_front)
-	var basis := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, atan2(g_front - g_back, maxf(1.0, _trailer_len)))
-	var origin := Vector3(hitch.x, g_front, hitch.y) - basis * Vector3(kp_local.x, 0.0, kp_local.z)   # lint-ok: local offset
+	var pitch := atan2(g_front - g_back, maxf(1.0, _trailer_len))
+	var fw := part("fifth_wheel")
+	if fw and kp_local.z < -1.0:
+		pitch += atan2(fw.position.y - kp_local.y, -kp_local.z)
+	var basis := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, pitch)
+	var origin := Vector3(hitch.x, 0.0, hitch.y) - basis * Vector3(kp_local.x, 0.0, kp_local.z)   # lint-ok: local offset, y set below
+	origin.y = g_back   # rear axle on the ground
 	trailer.global_transform = Transform3D(basis, origin)
 
 
@@ -1124,7 +1166,7 @@ func command_at(gp: Vector3, target: Object) -> void:
 		return
 	if target is Vehicle and target != self:
 		var tv := target as Vehicle
-		if tv.def_id == "tractor_lowbed" and is_machine():
+		if tv.has_ability("lowbed") and is_machine():
 			tv.load_machine(self)
 			return
 	var p2 := Vector2(gp.x, gp.z)
@@ -1153,33 +1195,55 @@ const RAMP_END_Z := 8.7
 func deck_transform() -> Transform3D:
 	if trailer == null:
 		return global_transform
-	return trailer.global_transform * Transform3D(Basis(), Vector3(0, DECK_Y, DECK_Z))
+	return trailer.global_transform * Transform3D(Basis(), Vector3(0, _deck.y, _deck.spot_z))
 
 
 ## Machine pose along the loading path: dist = distance from the deck spot towards the rear (trailer frame).
 func _ramp_pose(dist: float) -> Transform3D:
-	var z := DECK_Z + dist
-	var y := DECK_Y
+	var z: float = _deck.spot_z + dist
+	var y: float = _deck.y
 	var pitch := 0.0
-	var ramp_len := RAMP_END_Z - DECK_END_Z
-	if z > DECK_END_Z:
-		var t := clampf((z - DECK_END_Z) / ramp_len, 0.0, 1.0)
-		y = lerpf(DECK_Y, 0.0, t)
+	var ramp_len: float = _deck.ramp_end_z - _deck.end_z
+	if z > _deck.end_z:
+		var t := clampf((z - _deck.end_z) / ramp_len, 0.0, 1.0)
+		y = lerpf(_deck.y, 0.0, t)
 		if t < 1.0:
-			pitch = -atan2(DECK_Y, ramp_len) * sin(t * PI) * 1.2
+			pitch = -atan2(_deck.y, ramp_len) * sin(t * PI) * 1.2
 	return trailer.global_transform * Transform3D(Basis(Vector3.RIGHT, pitch), Vector3(0, y, z))
 
 
+## Whether this low-loader may carry machine m (its payload "load_t" against the machine's "weight_t").
+func can_carry(m: Vehicle) -> bool:
+	if not has_ability("lowbed") or trailer == null or m == null:
+		return false
+	var cap := float(def.get("load_t", 0.0))
+	return cap <= 0.0 or float(m.def.get("weight_t", 0.0)) <= cap
+
+
+## Distance from this vehicle's origin back to where its opened ramp touches the ground (site parking).
+func lowbed_back() -> float:
+	if trailer == null:
+		return 21.5
+	var fw := part("fifth_wheel")
+	var kp := RigUtil.find(trailer, "kingpin")
+	var fz := fw.position.z if fw else 1.4
+	var kz := kp.position.z if kp else -11.58
+	return fz + float(_deck.ramp_end_z) - kz
+
+
 func load_machine(m: Vehicle, cb: Callable = Callable()) -> bool:
-	if def_id != "tractor_lowbed" or trailer == null:
+	if not has_ability("lowbed") or trailer == null:
 		return false
 	if cargo.machine != null:
 		Events.warn("Der Tieflader ist schon beladen")
 		return false
+	if not can_carry(m):
+		Events.warn("%s ist zu schwer für %s (%.1f t, zulässig %.1f t)" % [m.vname, vname, float(m.def.get("weight_t", 0.0)), float(def.get("load_t", 0.0))])
+		return false
 	if state == "driving" or m.state == "driving":
 		Events.warn("Beide Fahrzeuge müssen stehen")
 		return false
-	var behind := trailer.global_transform * Vector3(0, 0, RAMP_END_Z + m.front_ext + 2.0)
+	var behind := trailer.global_transform * Vector3(0, 0, float(_deck.ramp_end_z) + m.front_ext + 2.0)
 	var behind2 := Vector2(behind.x, behind.z)
 	if m.pos2().distance_to(behind2) > 3.5 or m.forward2().dot(forward2()) < 0.8:
 		# machine drives up behind the trailer first (in line with it)
@@ -1196,7 +1260,7 @@ func load_machine(m: Vehicle, cb: Callable = Callable()) -> bool:
 	m.state = "loading"
 	m.status_text = "Fährt auf den Tieflader"
 	state = "loading"
-	var start_dist := RAMP_END_Z + m.front_ext + 2.0 - DECK_Z
+	var start_dist: float = _deck.ramp_end_z + m.front_ext + 2.0 - _deck.spot_z
 	var tw := create_tween()
 	tw.tween_callback(func(): light_mode.hazard = true)
 	tw.tween_subtween(tween_ramp(4.68, 20.0, 4.0))
@@ -1231,7 +1295,7 @@ func unload_machine(cb: Callable = Callable()) -> Vehicle:
 	state = "loading"
 	m.state = "loading"
 	m.status_text = "Wird abgeladen"
-	var end_dist := RAMP_END_Z + m.front_ext + 2.0 - DECK_Z
+	var end_dist: float = _deck.ramp_end_z + m.front_ext + 2.0 - _deck.spot_z
 	var tw := create_tween()
 	tw.tween_callback(func(): light_mode.hazard = true)
 	tw.tween_subtween(tween_ramp(4.68, 20.0, 4.0))

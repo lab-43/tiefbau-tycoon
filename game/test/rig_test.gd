@@ -2,9 +2,10 @@ extends SceneTree
 ## Excavator rig check (issue #3): drives the real excavator model through bucket poses and verifies that the
 ## bucket linkage stays closed (link_b meets the bucket pin, the bucket cylinder rod sits on the link joint) and
 ## that the linkage stays on the correct side. Headless: numbers only. Rendered (--shots=<dir>): side views.
-## usage: godot --headless --path game -s res://test/rig_test.gd [-- --shots=/tmp/rig]
+## usage: godot --headless --path game -s res://test/rig_test.gd [-- --shots=/tmp/rig] [--model=excavator_r938]
 
 var shots := ""
+var model_id := "excavator_a918"
 var cam: Camera3D
 var fails := 0
 
@@ -13,20 +14,22 @@ func _init() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--shots="):
 			shots = a.substr(8)
+		if a.begins_with("--model="):
+			model_id = a.substr(8)
 	_run.call_deferred()
 
 
 func _run() -> void:
-	var p := "res://assets/consim/excavator_a918/excavator_a918.glb"
+	var p := "res://assets/consim/%s/%s.glb" % [model_id, model_id]
 	if not ResourceLoader.exists(p):
-		print("RIG SKIP: private excavator model missing")
+		print("RIG SKIP: private excavator model missing (%s)" % model_id)
 		quit(0)
 		return
 	var veh := Node3D.new()
 	root.add_child(veh)
 	var model: Node3D = (load(p) as PackedScene).instantiate()
 	veh.add_child(model)
-	var meta := VehicleModels.load_meta("excavator_a918")
+	var meta := VehicleModels.load_meta(model_id)
 	if shots != "":
 		_scene()
 	await process_frame
@@ -49,7 +52,8 @@ func _run() -> void:
 	_report("rest", stick, bucket, la, lb, n, B_st, D_bk, D_lb, C_la, true)
 	if shots != "":
 		await _shot("rest", bucket.global_position)
-		await _shot("rest_schild", RigUtil.find(model, "blade").global_position)
+		if RigUtil.find(model, "blade"):
+			await _shot("rest_schild", RigUtil.find(model, "blade").global_position)
 	_hyd = RigUtil.setup_hydraulics(model, meta)
 	for e in _hyd:
 		e.len_a = _reach(e.a, e.ax_a)
@@ -80,14 +84,14 @@ func _run() -> void:
 		_check_hyd(ps[0], false)
 		if shots != "":
 			await _shot(ps[0], bucket.global_position)
-			if ps[0] == "blade_down":
+			if ps[0] == "blade_down" and RigUtil.find(model, "blade"):
 				await _shot("blade_down_schild", RigUtil.find(model, "blade").global_position)
 	# one big jump without intermediate steps (setup does this from the rest pose)
 	rig.reach_polar(0.0, 5.0, 1.5, deg_to_rad(70.0))
 	rig.reach_polar(0.0, 4.6, 2.0, deg_to_rad(-80.0))
 	await process_frame
 	_report("jump", stick, bucket, la, lb, n, B_st, D_bk, D_lb, C_la, false)
-	print("RIG %s: %d Fehler" % ["OK" if fails == 0 else "FAIL", fails])
+	print("RIG %s: %d Fehler (%s)" % ["OK" if fails == 0 else "FAIL", fails, model_id])
 	quit(0 if fails == 0 else 1)
 
 
@@ -213,4 +217,4 @@ func _shot(tag: String, focus: Vector3) -> void:
 		await process_frame
 	var img := root.get_texture().get_image()
 	DirAccess.make_dir_recursive_absolute(shots)
-	img.save_png(shots.path_join("rig_%s.png" % tag))
+	img.save_png(shots.path_join("rig_%s%s.png" % ["" if model_id == "excavator_a918" else model_id + "_", tag]))

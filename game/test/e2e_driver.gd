@@ -139,6 +139,8 @@ func _process(delta: float) -> void:
 			_vollsperrung_test(delta)
 		"umbau":
 			_umbau_test(delta)
+		"fahrzeuge":
+			_fahrzeuge_test(delta)
 
 
 func _smoke() -> void:
@@ -796,3 +798,10 @@ func _altstand_test(delta: float) -> void:
 		_alt = load("res://test/e2e_altstand.gd").new()
 		_alt.drv = self
 	_alt.tick(delta)
+## New machines (#24): R 938, Nooteboom, tipper with crane, S550 (test/e2e_fahrzeuge.gd).
+var _fz: RefCounted
+func _fahrzeuge_test(delta: float) -> void:
+	if _fz == null:
+		_fz = load("res://test/e2e_fahrzeuge.gd").new()
+		_fz.drv = self
+	_fz.tick(delta)

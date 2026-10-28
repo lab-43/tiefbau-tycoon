@@ -3,7 +3,8 @@ extends Node3D
 ## Owns all company vehicles: spawning, naming, number plates, purchase, save/load.
 
 const NAMES := {"van_crew": "Kolonnenbus", "truck_flatbed": "Pritsche", "truck_tipper": "Kipper",
-	"tractor_lowbed": "Tieflader", "excavator_a918": "Mobilbagger", "cold_planer": "Kaltfräse", "roller_bw141": "Walze"}
+	"tractor_lowbed": "Tieflader", "excavator_a918": "Mobilbagger", "cold_planer": "Kaltfräse", "roller_bw141": "Walze",
+	"excavator_r938": "Raupenbagger", "truck_tipper_crane": "Kranlaster", "loader_s550": "Kompaktlader", "tractor_nooteboom": "Nooteboom"}
 
 var world: World
 var vehicles: Array = []
@@ -63,7 +64,7 @@ func buy(id: String) -> Vehicle:
 	var d := Balance.vehicle(id)
 	if d.is_empty():
 		return null
-	var si := world.hq.free_slot("lowbed" if id == "tractor_lowbed" else ("truck" if d.get("length", 5.0) > 7.5 else "small"))
+	var si := world.hq.free_slot("lowbed" if "lowbed" in d.get("abilities", []) else ("truck" if d.get("length", 5.0) > 7.5 else "small"))
 	if si < 0:
 		Events.warn("Kein freier Stellplatz in der Zentrale")
 		return null

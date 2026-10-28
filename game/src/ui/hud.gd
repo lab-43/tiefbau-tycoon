@@ -353,7 +353,8 @@ func _left_fleet() -> void:
 		left_body.add_child(b)
 	left_body.add_child(UI.sep())
 	left_body.add_child(UI.caps("Fahrzeug kaufen"))
-	for id in ["truck_tipper", "truck_flatbed", "van_crew", "excavator_a918", "tractor_lowbed"]:
+	for id in ["truck_tipper", "truck_flatbed", "van_crew", "excavator_a918", "tractor_lowbed",
+			"truck_tipper_crane", "excavator_r938", "loader_s550", "tractor_nooteboom"]:
 		var d := Balance.vehicle(id)
 		var v2 := _card()
 		var row := UI.hbox(8)
@@ -373,7 +374,15 @@ func _left_fleet() -> void:
 			"excavator_a918":
 				info = "Mobilbagger 18 t · fährt selbst %d km/h" % int(d.max_kmh)
 			"tractor_lowbed":
-				info = "Transportiert Maschinen schnell zur Baustelle"
+				info = "Transportiert Maschinen bis %d t schnell zur Baustelle" % int(d.load_t)
+			"truck_tipper_crane":
+				info = "%d m³ Dreiseitenkipper + Ladekran · %d km/h · mit Kran weniger Nutzlast" % [int(d.bulk_capacity_m3), int(d.max_kmh)]
+			"excavator_r938":
+				info = "Raupenbagger %d t · nur %.0f km/h, nicht für Autobahnen · Tieflader ab %d t" % [int(d.weight_t), d.max_kmh, int(ceilf(d.weight_t))]
+			"loader_s550":
+				info = "Kompaktlader %.1f t · %.0f km/h · passt auf jeden Tieflader" % [d.weight_t, d.max_kmh]
+			"tractor_nooteboom":
+				info = "4-Achs-Tieflader bis %d t, trägt auch den Raupenbagger" % int(d.load_t)
 		var il := UI.label(info, 12, UI.MUTED)
 		il.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		v2.add_child(il)
@@ -662,7 +671,7 @@ func _right_vehicle(v: Vehicle) -> void:
 		b.clip_text = true
 		b.pressed.connect(func(): site.send_vehicle(v))
 		right_body.add_child(b)
-	if v.def_id == "tractor_lowbed":
+	if v.has_ability("lowbed"):
 		if v.cargo.machine != null:
 			var ub := UI.button("Maschine hier abladen", "package")
 			ub.pressed.connect(func(): v.unload_machine())

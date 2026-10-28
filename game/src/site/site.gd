@@ -666,7 +666,7 @@ func _redispatch_waiting() -> void:
 		if sp == "load" and in_place.has(v) and role(v) == "bulk" and step_id() == "dig" and _excavator() == null and not _tip_busy.has(v):
 			_go_stage(v)
 			continue
-		if sp == "lowbed" and in_place.has(v) and v.state == "parked" and v.cargo.machine == null and phase >= 6 and _excavator() != null:
+		if sp == "lowbed" and in_place.has(v) and v.state == "parked" and v.cargo.machine == null and phase >= 6 and _excavator() != null and v.can_carry(_excavator()):
 			_lowbed_arrived(v)
 			continue
 		if spot_of.get(v, "") == "stage" and in_place.has(v) and v.state == "parked":
@@ -2211,12 +2211,12 @@ func _load_pipes_at_hq(v: Vehicle) -> void:
 # Lowbed
 # ------------------------------------------------------------------------------------------
 
-func _lowbed_back() -> float:
-	return 21.5
+func _lowbed_back(v: Vehicle = null) -> float:
+	return v.lowbed_back() if v else 21.5
 
 
 func _dispatch_lowbed(v: Vehicle) -> void:
-	var s := lay.lowbed_s(_lowbed_back())
+	var s := lay.lowbed_s(_lowbed_back(v))
 	s = minf(s, lay.len_k - 12.0)
 	var label := job.short_title()
 	v.drive_plan({"key": lay.key, "s": s - 12.0}, label, [v.pull_over_piece(lay.key, s - 12.0, SiteLayout.CURB, 12.0)], func(veh): _arrived(veh, "lowbed"))
@@ -2233,12 +2233,16 @@ func _lowbed_arrived(v: Vehicle) -> void:
 			v.drive_to_hq())
 	else:
 		var ex := _excavator()
-		if ex and phase >= 6:
+		if ex and phase >= 6 and v.can_carry(ex):
 			release_vehicle(ex)
 			ex.state = "parked"
 			v.load_machine(ex, func(_m):
 				release_vehicle(v)
 				v.drive_to_hq())
+		elif ex and phase >= 6:
+			Events.warn("%s ist zu schwer für %s – der Bagger fährt selbst zurück" % [ex.vname, v.vname])
+			release_vehicle(v)
+			v.drive_to_hq()
 
 
 # ------------------------------------------------------------------------------------------
@@ -2306,7 +2310,8 @@ func _auto_step() -> void:
 
 ## Sends the machines home. An empty low-loader on site picks up the excavator instead.
 func _demob_send_home(all: bool) -> void:
-	var lowbed_waiting := vehicles.any(func(o): return is_instance_valid(o) and role(o) == "lowbed" and o.cargo.machine == null)
+	var ex0 := _excavator()
+	var lowbed_waiting := vehicles.any(func(o): return is_instance_valid(o) and role(o) == "lowbed" and o.cargo.machine == null and (ex0 == null or o.can_carry(ex0)))
 	for v in _machines_on_site():
 		if role(v) == "lowbed" or v.state == "loading" or v.carried_by != null:
 			continue

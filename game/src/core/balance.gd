@@ -65,6 +65,34 @@ const VEHICLES := {
 		"seats": 1, "drum_width": 1.4, "fuel_l_100km": 0.0, "op_l_h": 5.5,
 		"color": Color(0.95, 0.8, 0.1), "abilities": ["roll"], "road_legal": false,
 	},
+	# --- #24: Liebherr R 938 (37–40 t, 220 kW, 1–3 m³ buckets, dig depth ~7.6 m, reach ~11 m), Bobcat S550
+	# (2.8 t, 794 kg rated load, 11.9 km/h), MAN TGS 6x4 three-way tipper with Palfinger PK 27002, Nooteboom
+	# MCOS-58-04 (4 axles, tare 15.6 t, 58 t GVW = 42.4 t payload; the MCOS-48-03 carries only ~36.5 t, too
+	# little for the R 938). Prices are estimates for new machines (no public list prices).
+	"excavator_r938": {
+		"name": "Raupenbagger 39 t", "category": "machine", "model": "excavator_r938", "price": 430000.0,
+		"max_kmh": 5.3, "accel": 0.3, "length": 6.0, "width": 3.2, "height": 3.4, "weight_t": 39.0,
+		"seats": 1, "bucket_m3": 1.75, "reach_m": 11.2, "dig_depth_m": 7.6, "fuel_l_100km": 300.0, "op_l_h": 24.0,
+		"color": Color(0.95, 0.78, 0.15), "abilities": ["dig", "lift"], "road_legal": false,
+	},
+	"truck_tipper_crane": {
+		"name": "Kipper mit Ladekran", "category": "transport", "model": "truck_tipper_crane", "price": 235000.0,
+		"max_kmh": 80.0, "accel": 1.1, "length": 8.3, "width": 2.55, "height": 3.7, "weight_t": 17.5,
+		"seats": 2, "bulk_capacity_m3": 6.0, "fuel_l_100km": 34.0, "op_l_h": 5.0,
+		"color": Color(0.95, 0.42, 0.08), "abilities": ["bulk"],
+	},
+	"loader_s550": {
+		"name": "Kompaktlader", "category": "machine", "model": "loader_s550", "price": 62000.0,
+		"max_kmh": 11.9, "accel": 1.2, "length": 3.4, "width": 1.75, "height": 2.0, "weight_t": 2.8,
+		"seats": 1, "bucket_m3": 0.35, "lift_t": 0.79, "fuel_l_100km": 45.0, "op_l_h": 5.5,
+		"color": Color(0.92, 0.92, 0.9), "abilities": ["load"], "road_legal": false,
+	},
+	"tractor_nooteboom": {
+		"name": "Sattelzug mit Nooteboom-Tieflader", "category": "transport", "model": "tractor_tgx_heavy", "trailer": "trailer_nooteboom", "price": 335000.0,
+		"max_kmh": 70.0, "accel": 0.8, "length": 7.8, "width": 2.55, "height": 3.9, "weight_t": 28.0,
+		"seats": 1, "load_t": 42.0, "fuel_l_100km": 42.0, "op_l_h": 3.0,
+		"color": Color(0.95, 0.42, 0.08), "abilities": ["lowbed"],
+	},
 }
 
 const START_FLEET := ["van_crew", "truck_flatbed", "truck_tipper", "tractor_lowbed", "excavator_a918"]

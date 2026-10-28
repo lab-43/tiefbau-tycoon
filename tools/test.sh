@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs end-to-end scenarios headless on the offline Utrecht map and reports pass/fail.
 # usage: tools/test.sh [scenario ...]            default: smoke issue
-#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren debug leuchten verkehrslichter rig schaufel altstand markierungen absperrung gelaende vollsperrung umbau  (save+load = save mid-dig,
+#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren debug leuchten verkehrslichter rig schaufel altstand markierungen absperrung gelaende vollsperrung umbau fahrzeuge  (save+load = save mid-dig,
 #              then load and finish; rig = excavator linkage/cylinders, see game/test/rig_test.gd;
 #              schaufel = soil in the bucket (game/test/bucket_test.gd, stand-in model always, real model if present);
 #              ebenen = height order of flat map layers, see game/test/layer_test.gd – also part of pbf;
@@ -69,10 +69,12 @@ for s in "${SCEN[@]}"; do
     ebenen) ebenen ;;
     sichtweite) sichtweite ;;
     fahren) fahren ;;
-    rig)  # excavator linkage + cylinders over all poses (needs the private model, skips without it)
-      log=/tmp/tt_e2e_rig.log
-      if timeout 300 "$G" --headless --path "$ROOT/game" -s res://test/rig_test.gd > "$log" 2>&1 \
-         && grep -qE "RIG (OK|SKIP)" "$log"; then echo "OK    rig $(grep -oE 'RIG (OK|SKIP).*' "$log")"; else FAIL=1; echo "FAIL  rig – $log"; grep -E "FEHLER|FAIL|SCRIPT ERROR" "$log" | tail -8 | sed 's/^/      /'; fi ;;
+    rig)  # excavator linkage + cylinders over all poses, A 918 and R 938 (needs the private models, skips without)
+      for mdl in excavator_a918 excavator_r938; do
+        log=/tmp/tt_e2e_rig_$mdl.log
+        if timeout 300 "$G" --headless --path "$ROOT/game" -s res://test/rig_test.gd -- --model=$mdl > "$log" 2>&1 \
+           && grep -qE "RIG (OK|SKIP)" "$log"; then echo "OK    rig $(grep -oE 'RIG (OK|SKIP).*' "$log")"; else FAIL=1; echo "FAIL  rig $mdl – $log"; grep -E "FEHLER|FAIL|SCRIPT ERROR" "$log" | tail -8 | sed 's/^/      /'; fi
+      done ;;
     schaufel)  # soil in the excavator bucket sits in the cavity, faces up when carried, pours out (#11)
       log=/tmp/tt_e2e_schaufel.log
       if timeout 300 "$G" --headless --path "$ROOT/game" -s res://test/bucket_test.gd > "$log" 2>&1 \
@@ -107,6 +109,8 @@ for s in "${SCEN[@]}"; do
     umbau)  # closure changed while the excavator digs (#21): work pauses, crew rebuilds, work goes on
       run umbau "E2E OK umbau" --e2e=umbau
       if grep -q "SCRIPT ERROR" /tmp/tt_e2e_umbau.log; then FAIL=1; echo "FAIL  umbau: Skriptfehler im Log"; grep -A3 "SCRIPT ERROR" /tmp/tt_e2e_umbau.log | head -8 | sed 's/^/      /'; fi ;;
+    fahrzeuge)  # new machines (#24): HQ, ground/lights/joints, low-loader round trips, R 938 digging
+      run fahrzeuge "E2E OK fahrzeuge" --e2e=fahrzeuge ;;
     *) echo "unbekanntes Szenario: $s"; FAIL=1 ;;
   esac
 done

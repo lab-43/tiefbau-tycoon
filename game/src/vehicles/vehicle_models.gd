@@ -33,7 +33,7 @@ static func instance(model_id: String, def: Dictionary) -> Node3D:
 			_tipper(root, def)
 		"truck_flatbed":
 			_flatbed(root, def)
-		"tractor_tgx":
+		"tractor_tgx", "tractor_tgx_heavy":
 			_tractor(root, def)
 		"trailer_lowbed":
 			_lowbed(root)
@@ -41,6 +41,15 @@ static func instance(model_id: String, def: Dictionary) -> Node3D:
 			_planer(root, def)
 		"roller_bw141":
 			_roller(root, def)
+		"excavator_r938":
+			_crawler_excavator(root, def)
+		"truck_tipper_crane":
+			_tipper(root, def)
+			box(root, "crane", Vector3(0.7, 1.3, 0.9), Vector3(0.35, 1.65, -def.get("length", 8.3) * 0.5 + 2.75), mat(UI.ACCENT, 0.5))
+		"loader_s550":
+			_skid_loader(root, def)
+		"trailer_nooteboom":
+			_semi_lowloader(root)
 		_:
 			_van(root, def)
 	return root
@@ -268,6 +277,77 @@ static func _roller(root: Node3D, def: Dictionary) -> void:
 	box(root, "roof", Vector3(1.4, 0.06, 1.2), Vector3(0, 2.9, 0.0), mat(Color(0.15, 0.15, 0.15), 0.5))
 	marker(root, "beacon_1", Vector3(0, 3.0, 0.0))
 	_std_lights(root, 3.4, 1.5, 1.2, -1.0)
+
+
+## Crawler excavator stand-in (#24, R 938): two tracks instead of wheels, turret, mono boom, stick, bucket.
+static func _crawler_excavator(root: Node3D, def: Dictionary) -> void:
+	var yel: Color = def.get("color", Color(0.95, 0.78, 0.15))
+	var dark := mat(Color(0.1, 0.1, 0.1), 0.85)
+	for side in [["track_l", -1.3], ["track_r", 1.3]]:
+		var tr := pivot(root, side[0], Vector3(side[1], 0.0, 0.0))
+		box(tr, "chain", Vector3(0.6, 0.9, 4.8), Vector3(0, 0.45, 0), dark)
+	box(root, "carbody", Vector3(2.0, 0.6, 3.0), Vector3(0, 0.8, 0), mat(Color(0.18, 0.18, 0.18), 0.7))
+	var turret := pivot(root, "turret", Vector3(0, 1.1, 0.0))
+	box(turret, "house", Vector3(3.0, 1.3, 4.2), Vector3(0, 0.65, 0.9), mat(yel, 0.5))
+	box(turret, "counterweight", Vector3(3.0, 1.1, 0.8), Vector3(0, 0.75, 3.2), mat(Color(0.2, 0.2, 0.2), 0.6))
+	box(turret, "cabin", Vector3(1.0, 1.6, 1.8), Vector3(-0.95, 2.1, -0.4), mat(yel, 0.5))
+	marker(turret, "beacon_1", Vector3(-0.95, 2.9, 0.0))
+	marker(turret, "worklight_1", Vector3(-0.95, 2.6, -1.31))
+	marker(turret, "light_head_l", Vector3(-1.2, 0.9, -1.21))
+	marker(turret, "light_head_r", Vector3(1.2, 0.9, -1.21))
+	marker(turret, "light_tail_l", Vector3(-1.2, 0.9, 3.61))
+	marker(turret, "light_tail_r", Vector3(1.2, 0.9, 3.61))
+	var boom := pivot(turret, "boom", Vector3(0.1, 1.0, -1.0))
+	box(boom, "boom_mesh", Vector3(0.6, 0.7, 5.8), Vector3(0, 0, -2.9), mat(yel, 0.5))
+	boom.rotation.x = deg_to_rad(25.0)
+	var stick := pivot(boom, "stick", Vector3(0, 0, -5.8))
+	box(stick, "stick_mesh", Vector3(0.45, 0.5, 3.0), Vector3(0, 0, -1.5), mat(yel, 0.5))
+	stick.rotation.x = deg_to_rad(-100.0)
+	var bucket := pivot(stick, "bucket", Vector3(0, 0, -3.0))
+	box(bucket, "bucket_back", Vector3(1.3, 1.0, 0.15), Vector3(0, -0.4, -0.05), mat(Color(0.25, 0.25, 0.25), 0.6))
+	box(bucket, "bucket_floor", Vector3(1.3, 0.15, 1.2), Vector3(0, -0.85, -0.6), mat(Color(0.25, 0.25, 0.25), 0.6))
+	marker(bucket, "bucket_tip", Vector3(0, -0.9, -1.25))
+	bucket.rotation.x = deg_to_rad(-30.0)
+
+
+## Skid-steer loader stand-in (#24, Bobcat S550): frame, cab, lift arm (loader_arm) with bucket (loader_bucket).
+static func _skid_loader(root: Node3D, def: Dictionary) -> void:
+	var c: Color = def.get("color", Color(0.92, 0.92, 0.9))
+	box(root, "frame", Vector3(1.3, 0.8, 2.4), Vector3(0, 0.75, 0.2), mat(c, 0.5))
+	box(root, "cab", Vector3(1.0, 1.0, 1.2), Vector3(0, 1.65, 0.0), mat(Color(0.12, 0.12, 0.12), 0.4))
+	for p in [["wheel_fl", -1.0, -0.55], ["wheel_fr", 1.0, -0.55], ["wheel_rl", -1.0, 0.55], ["wheel_rr", 1.0, 0.55]]:
+		wheel(root, p[0], Vector3(p[1] * 0.68, 0.39, p[2]), 0.39, 0.3)
+	var arm := pivot(root, "loader_arm", Vector3(0, 1.45, 1.05))
+	for sx in [-0.72, 0.72]:
+		box(arm, "arm_side", Vector3(0.12, 0.25, 2.3), Vector3(sx, -0.45, -1.1), mat(c, 0.5))
+	var bk := pivot(arm, "loader_bucket", Vector3(0, -1.25, -2.15))
+	box(bk, "bucket_floor", Vector3(1.7, 0.08, 0.6), Vector3(0, -0.06, -0.3), mat(Color(0.15, 0.15, 0.15), 0.6))
+	box(bk, "bucket_back", Vector3(1.7, 0.55, 0.08), Vector3(0, 0.2, 0.0), mat(Color(0.15, 0.15, 0.15), 0.6))
+	marker(bk, "bucket_tip", Vector3(0, -0.1, -0.6))
+	marker(root, "beacon_1", Vector3(0, 2.15, 0.0))
+	marker(root, "light_head_l", Vector3(-0.45, 1.95, -0.61))
+	marker(root, "light_head_r", Vector3(0.45, 1.95, -0.61))
+	marker(root, "light_tail_l", Vector3(-0.5, 1.0, 1.41))
+	marker(root, "light_tail_r", Vector3(0.5, 1.0, 1.41))
+
+
+## Semi-low-loader stand-in (#24, Nooteboom): gooseneck, deck over 4 axles, ramp. The deck geometry is passed
+## to the vehicle as metadata (the GLB build writes it to the JSON instead).
+static func _semi_lowloader(root: Node3D) -> void:
+	box(root, "gooseneck", Vector3(2.5, 0.5, 3.4), Vector3(0, 1.3, -8.3), mat(Color(0.7, 0.05, 0.05), 0.6))
+	box(root, "deck", Vector3(2.55, 0.3, 13.0), Vector3(0, 0.77, -1.0), mat(Color(0.7, 0.05, 0.05), 0.7))
+	marker(root, "kingpin", Vector3(0, 1.08, -8.1))
+	for i in 4:
+		var z := -2.04 + i * 1.36
+		wheel(root, "wheel_rl%s" % ("" if i == 0 else str(i + 1)), Vector3(-0.62, 0.4, z), 0.4, 0.5)
+		wheel(root, "wheel_rr%s" % ("" if i == 0 else str(i + 1)), Vector3(0.62, 0.4, z), 0.4, 0.5)
+	var rp := pivot(root, "ramp", Vector3(0, 0.92, 5.5))
+	box(rp, "ramp_mesh", Vector3(2.4, 2.6, 0.1), Vector3(0, 1.3, 0.05), mat(Color(0.3, 0.3, 0.3)))   # folded up
+	marker(root, "light_tail_l", Vector3(-1.0, 0.77, 5.51))
+	marker(root, "light_tail_r", Vector3(1.0, 0.77, 5.51))
+	marker(root, "indicator_rl", Vector3(-1.2, 0.77, 5.51))
+	marker(root, "indicator_rr", Vector3(1.2, 0.77, 5.51))
+	root.set_meta("deck", {"y": 0.92, "spot_z": -3.1, "end_z": 5.5, "ramp_end_z": 8.3})
 
 
 static func _std_lights(root: Node3D, L: float, W: float, y: float, roof_y: float) -> void:

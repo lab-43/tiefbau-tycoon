@@ -27,7 +27,7 @@ static func setup_hydraulics(model: Node3D, meta: Dictionary) -> Array:
 			"rest_len": float(h.get("rest_length_m", 0.0)), "stages": []}
 		# telescopic stages (e.g. tipper cylinder): children named <a-prefix>_stageN
 		var base_name := String(h.get("a", "")).trim_suffix("_a")
-		for k in range(1, 6):
+		for k in range(1, 9):
 			var st := find(model, "%s_stage%d" % [base_name, k])
 			if st == null:
 				break
