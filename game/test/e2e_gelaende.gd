@@ -132,7 +132,7 @@ func _check_bridges(w: World) -> void:
 			if end[0] or not tr.node_decks.has(end[1]) or total < 1.0:
 				continue
 			var at_trim: Vector2 = (end[2] as Vector2).move_toward(end[3], minf(end[4], total * 0.45))
-			worst = maxf(worst, absf(tr.deck_at(dk, at_trim) - float(tr.node_decks[end[1]])))
+			worst = maxf(worst, absf(tr.deck_at(dk, at_trim) - tr.node_height(end[1], at_trim)))
 			n += 1
 	print("GELAENDE Kreuzungen auf Brücken: %d Anschlüsse geprüft" % n)
 	ok(worst < 0.01, "Brückenfahrbahn trifft Kreuzung ohne Stufe (max. %.3f m)" % worst)

@@ -108,8 +108,16 @@ func surface(x: float, z: float) -> float:
 	if not mode_deck.is_empty():
 		return deck_at(mode_deck, Vector2(x, z))
 	if mode_node >= 0:
-		return float(node_decks.get(mode_node, sample(x, z)))
+		return node_height(mode_node, Vector2(x, z))
 	return sample(x, z)
+
+
+## Height of a junction on a bridge at p (never below the ground). Not on a bridge: the ground.
+func node_height(ni: int, p: Vector2) -> float:
+	var g := sample(p.x, p.y)
+	if not node_decks.has(ni):
+		return g
+	return maxf(float(node_decks[ni]), g)
 
 
 func surface_normal(x: float, z: float) -> Vector3:
@@ -126,16 +134,16 @@ func deck_height(ei: int, p: Vector2) -> float:
 	return deck_at(dk, p)
 
 
-## A deck [h_a, h_b, a, b, land_a, land_b, trim_a, trim_b, blend]: straight between a and b, blended into
-## the ground near land ends (so the bridge meets the junction or the path exactly). At a junction on the bridge
-## the deck stays at the junction's height up to the end of the junction area, so road and junction meet without a step.
+## A deck [h_a, h_b, a, b, land_a, land_b, trim_a, trim_b, blend]: straight between a and b. Near a land end it
+## starts at the ground height where the junction area ends and runs smoothly into the straight line (not along the
+## ground, which drops away at a bank). At a junction on the bridge the deck stays at the junction's height up to
+## the end of the junction area, so road and junction meet without a step. Never below the ground (embankments).
 func deck_at(dk: Array, p: Vector2) -> float:
 	var a: Vector2 = dk[2]
 	var b: Vector2 = dk[3]
 	var ab := b - a
 	var len2 := maxf(ab.length_squared(), 0.01)
 	var t := clampf((p - a).dot(ab) / len2, 0.0, 1.0)
-	var w := 1.0
 	var s := t * sqrt(len2)
 	var total := sqrt(len2)
 	var bl: float = dk[8]
@@ -144,13 +152,15 @@ func deck_at(dk: Array, p: Vector2) -> float:
 	var s0 := 0.0 if dk[4] else minf(ta, total * 0.45)
 	var s1 := total if dk[5] else total - minf(tb, total * 0.45)
 	var deck := lerpf(float(dk[0]), float(dk[1]), clampf((s - s0) / maxf(s1 - s0, 0.01), 0.0, 1.0))
-	if dk[4]:
-		w = minf(w, smoothstep(ta, ta + bl, s))
-	if dk[5]:
-		w = minf(w, smoothstep(tb, tb + bl, total - s))
-	if w >= 1.0:
-		return deck
-	return lerpf(sample(p.x, p.y), deck, w)
+	# the ground where the junction area ends, at the same distance from the centre line as p
+	var dir := ab / total
+	if dk[4] and s < ta + bl:
+		var qa := p - dir * maxf(0.0, s - ta)
+		deck = lerpf(sample(qa.x, qa.y), deck, smoothstep(ta, ta + bl, s))
+	if dk[5] and total - s < tb + bl:
+		var qb := p + dir * maxf(0.0, total - s - tb)
+		deck = lerpf(sample(qb.x, qb.y), deck, smoothstep(tb, tb + bl, total - s))
+	return maxf(deck, sample(p.x, p.y))
 
 
 func is_bridge(ei: int) -> bool:
@@ -204,7 +214,7 @@ func surface_near(p: Vector2, hint: float) -> float:
 		if ei < 0:
 			var ni := -1 - int(ei)
 			if (node_pos[ni] as Vector2).distance_to(p) <= NODE_R:
-				var hn: float = node_decks[ni]
+				var hn: float = node_height(ni, p)
 				if absf(hn - hint) < bd:
 					bd = absf(hn - hint)
 					best = hn
@@ -231,7 +241,7 @@ func road_height(p: Vector2, key: int = -1, node: int = -1) -> float:
 	if key >= 0 and decks.has(key >> 4):
 		return deck_height(key >> 4, p)
 	if node >= 0 and node_decks.has(node):
-		return node_decks[node]
+		return node_height(node, p)
 	return sample(p.x, p.y)
 
 

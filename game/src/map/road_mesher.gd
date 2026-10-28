@@ -28,6 +28,9 @@ func chunk_of(p: Vector2) -> Vector2i:
 
 
 func layer(ck: Vector2i, name: String) -> MeshLayer:
+	# bridge decks get their own layers: their shader must not pull them down onto the ground (#8)
+	if terrain and (not terrain.mode_deck.is_empty() or terrain.mode_node >= 0) and name in DECK_LAYERS:
+		name += "_deck"
 	if not chunks.has(ck):
 		chunks[ck] = {}
 	var c: Dictionary = chunks[ck]
@@ -40,6 +43,7 @@ func layer(ck: Vector2i, name: String) -> MeshLayer:
 
 
 var progress_cb: Callable   # (fraction 0..1), called from the bake thread
+const DECK_LAYERS := ["asphalt", "sidewalk", "mark"]
 
 func build_all() -> void:
 	var total := maxi(1, net.edges.size() + net.nodes.size())

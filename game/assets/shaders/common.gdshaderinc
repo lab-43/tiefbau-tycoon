@@ -75,23 +75,49 @@ float terrain_depth(vec3 cam, vec3 wp, float off, mat4 view, mat4 proj, float fz
 	vec4 c = proj * view * vec4(cam + d * t, 1.0);
 	return c.z / c.w;
 }
-// Water areas lie flat; their bank lies inside them (TerrainBake keeps the land height up to the shore).
-// Where the ground rises above the water plane, the water is drawn on the ground (0.031 up, like the flat
-// layer order), so the shore is exactly the outline of the water area instead of a 5 m grid contour.
-float water_depth(vec3 cam, vec3 wp, mat4 view, mat4 proj, float fz) {
+// Bridge decks (#8, layers *_deck): a deck does not follow the ground. Where its triangles lie above the ground
+// they keep their own depth; where a triangle dips below the ground (near the abutments, between two vertices)
+// the surface is lifted to off above the ground - never pushed down into a bank that drops away under it.
+float terrain_depth_deck(vec3 cam, vec3 wp, float off, mat4 view, mat4 proj, float fz) {
 	if (terrain_rect.w < 0.5 || proj[3][3] > 0.5) return fz;
-	if (terrain_h(wp.xz) + 0.031 <= wp.y) return fz;
+	if (terrain_h(wp.xz) + off <= wp.y) return fz;
 	vec3 d = wp - cam;
 	float t = 1.0;
 	for (int k = 0; k < 4; k++) {
 		vec3 p = cam + d * t;
 		vec3 hg = terrain_hg(p.xz);
-		bool bank = hg.x + 0.031 > wp.y;
-		float f = p.y - (bank ? hg.x + 0.031 : wp.y);
-		float df = d.y - (bank ? hg.y * d.x + hg.z * d.z : 0.0);
+		float df = d.y - hg.y * d.x - hg.z * d.z;
 		if (abs(df) < 1e-6) break;
-		t = clamp(t - f / df, 0.5, 1.0);
+		t = clamp(t - (p.y - hg.x - off) / df, 0.5, 1.0);
 	}
 	vec4 c = proj * view * vec4(cam + d * t, 1.0);
+	return c.z / c.w;
+}
+// Water areas lie flat; their bank lies inside them (TerrainBake keeps the land height up to the shore).
+// Where the ground rises above the water plane, the water is drawn on the ground (0.031 up, like the flat
+// layer order), so the shore is exactly the outline of the water area instead of a 5 m grid contour.
+float water_depth(vec3 cam, vec3 wp, mat4 view, mat4 proj, float fz) {
+	if (terrain_rect.w < 0.5 || proj[3][3] > 0.5) return fz;
+	float gap = terrain_h(wp.xz) + 0.031 - wp.y;
+	if (gap <= 0.0) return fz;
+	// The ray meets the bank before the water plane: walk back towards the camera until it is above the bank
+	// surface, then bisect. (Newton steps did not converge on steep banks seen at an angle: jagged shores.)
+	vec3 d = wp - cam;
+	float up = max(-d.y, 1e-4);   // height gained per unit of t when going back towards the camera
+	float t_in = 1.0;             // below the bank surface
+	float t_out = 1.0;
+	for (int k = 0; k < 8; k++) {
+		t_out = max(0.5, t_in - (gap + 0.02) / up);
+		vec3 p = cam + d * t_out;
+		gap = terrain_h(p.xz) + 0.031 - p.y;
+		if (gap <= 0.0 || t_out <= 0.5) break;
+		t_in = t_out;
+	}
+	for (int k = 0; k < 16; k++) {   // to well below the 2 cm between water and road surfaces
+		float tm = 0.5 * (t_in + t_out);
+		vec3 p = cam + d * tm;
+		if (terrain_h(p.xz) + 0.031 > p.y) t_in = tm; else t_out = tm;
+	}
+	vec4 c = proj * view * vec4(cam + d * t_out, 1.0);
 	return c.z / c.w;
 }

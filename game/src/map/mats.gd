@@ -21,9 +21,19 @@ static func _std(col: Color, rough: float = 0.9, metal: float = 0.0) -> Standard
 	return m
 
 
+const DECK_OFF := {"asphalt": RoadMesher.Y_ROAD, "sidewalk": RoadMesher.Y_SW, "mark": RoadMesher.Y_MARK}
+
+
 static func get_mat(name: String) -> Material:
 	if _cache.has(name):
 		return _cache[name]
+	if name.ends_with("_deck"):
+		# same look on a bridge deck, but the depth is only ever lifted onto the ground (#8)
+		var dm := get_mat(name.trim_suffix("_deck")).duplicate() as ShaderMaterial
+		dm.set_shader_parameter("on_deck", true)
+		dm.set_shader_parameter("deck_off", DECK_OFF.get(name.trim_suffix("_deck"), 0.05))
+		_cache[name] = dm
+		return dm
 	var m: Material
 	match name:
 		"asphalt":

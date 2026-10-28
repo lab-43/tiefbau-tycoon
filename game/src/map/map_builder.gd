@@ -222,10 +222,11 @@ static func add_chunk_layers(root: Node3D, ck: Vector2i, layers: Dictionary) -> 
 		mi.mesh = mesh
 		mi.position = c
 		mi.material_override = Mats.get_mat(lname)
-		if NO_SHADOW.has(lname):
+		var base := String(lname).trim_suffix("_deck")
+		if NO_SHADOW.has(base):
 			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		if RANGE.has(lname):
-			mi.visibility_range_end = RANGE[lname]
+		if RANGE.has(base):
+			mi.visibility_range_end = RANGE[base]
 			mi.visibility_range_end_margin = 60.0
 			mi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 		holder.add_child(mi)
