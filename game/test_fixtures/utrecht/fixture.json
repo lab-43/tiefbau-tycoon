@@ -1,0 +1,9 @@
+{
+ "name": "Utrecht",
+ "center_lat": 52.0907,
+ "center_lon": 5.1214,
+ "size_m": 6000.0,
+ "tile_m": 2000.0,
+ "tiles": 3,
+ "source": "fixture:utrecht_netherlands.osm.pbf"
+}

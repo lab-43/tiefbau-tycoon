@@ -1,0 +1,326 @@
+class_name CityMesher
+extends RefCounted
+## Buildings (white massing), landuse areas, water with banks, footpaths, railways, trees, lamps.
+
+const Y := {"farmland": 0.010, "residential": 0.012, "industrial": 0.014, "commercial": 0.014, "grass": 0.018,
+	"park": 0.020, "cemetery": 0.020, "forest": 0.022, "pitch": 0.026, "sand": 0.024, "paved": 0.030}
+const WATER_Y := -0.55
+const PATH_Y := 0.04
+
+var data: OsmData
+var net: RoadNet
+var chunk_size := 500.0
+var origin := Vector2.ZERO
+var chunks := {}         # Vector2i -> {layer_name: MeshLayer}
+var trees := {}          # Vector2i -> Array[Transform3D]
+var lamps := {}          # Vector2i -> Array[Transform3D]
+var hq_rect := PackedVector2Array()
+var rng := RandomNumberGenerator.new()
+
+
+func _init(d: OsmData, n: RoadNet, chunk: float) -> void:
+	data = d
+	net = n
+	chunk_size = chunk
+	origin = d.bounds.position
+	rng.seed = 4242
+
+
+func chunk_of(p: Vector2) -> Vector2i:
+	return Vector2i(int(floor((p.x - origin.x) / chunk_size)), int(floor((p.y - origin.y) / chunk_size)))
+
+
+func layer(ck: Vector2i, name: String, colors := false) -> MeshLayer:
+	if not chunks.has(ck):
+		chunks[ck] = {}
+	var c: Dictionary = chunks[ck]
+	if not c.has(name):
+		var l := MeshLayer.new()
+		l.use_colors = colors
+		c[name] = l
+	return c[name]
+
+
+var progress_cb: Callable   # (fraction 0..1, part name), called from the bake thread
+
+func build_all() -> void:
+	_buildings()
+	_report(0.6, "Flächen")
+	_areas()
+	_report(0.75, "Wege")
+	_paths()
+	_report(0.85, "Gleise")
+	_rails()
+	_report(0.9, "Bäume")
+	_trees()
+	_report(0.95, "Laternen")
+	_lamps()
+
+
+func _report(f: float, part: String) -> void:
+	if progress_cb.is_valid():
+		progress_cb.call(f, part)
+
+
+# ------------------------------------------------------------------------------------------
+
+static func building_height(tags: Dictionary, id: int) -> float:
+	var h := RoadNet.parse_width(str(tags.get("height", "")))
+	if h > 2.0 and h < 400.0:
+		return h
+	var lv := str(tags.get("building:levels", ""))
+	if lv.is_valid_float():
+		var roof_lv := str(tags.get("roof:levels", "0"))
+		return maxf(3.0, lv.to_float() * 3.2 + (roof_lv.to_float() * 2.2 if roof_lv.is_valid_float() else 0.0) + 0.8)
+	var b: String = tags.get("building", "yes")
+	match b:
+		"house", "detached", "semidetached_house", "terrace", "bungalow", "farm":
+			return 7.5
+		"residential", "apartments", "dormitory":
+			return 15.0
+		"commercial", "office", "retail", "hotel", "civic", "public", "government":
+			return 16.0
+		"industrial", "warehouse", "manufacture", "hangar", "factory":
+			return 9.0
+		"garage", "garages", "carport", "shed", "hut", "kiosk", "service", "toilets", "container", "cabin":
+			return 3.0
+		"roof":
+			return 4.0
+		"church", "cathedral", "chapel", "mosque", "synagogue", "temple":
+			return 22.0
+		"school", "university", "college", "hospital", "kindergarten":
+			return 13.0
+		"train_station", "transportation":
+			return 12.0
+	var hsh := absi(id * 2654435761) % 1000
+	return 9.0 + float(hsh) / 1000.0 * 8.0
+
+
+func _buildings() -> void:
+	var bi := 0
+	var bn := maxi(1, data.buildings.size())
+	for b in data.buildings:
+		bi += 1
+		if bi % 400 == 0:
+			_report(0.6 * bi / bn, "Gebäude %d/%d" % [bi, bn])
+		var outer: PackedVector2Array = b.outer
+		if outer.size() < 3:
+			continue
+		var c := Geo.polygon_centroid(outer)
+		if not hq_rect.is_empty() and Geometry2D.is_point_in_polygon(c, hq_rect):
+			continue
+		if not hq_rect.is_empty() and not Geometry2D.intersect_polygons(outer, hq_rect).is_empty():
+			continue
+		var area := absf(Geo.polygon_area(outer))
+		if area < 6.0:
+			continue
+		var h := building_height(b.tags, b.id)
+		var ck := chunk_of(c)
+		var l := layer(ck, "building", true)
+		var v := float(absi(b.id * 40503) % 100) / 100.0
+		var wall_col := Color(0.90 + v * 0.07, 0.90 + v * 0.065, 0.895 + v * 0.06)
+		var roof_col := Color(0.80 + v * 0.06, 0.80 + v * 0.06, 0.80 + v * 0.055)
+		var is_roof_only: bool = b.tags.get("building", "") == "roof"
+		var base := h - 0.4 if is_roof_only else 0.0
+		_walls(l, outer, base, h, wall_col)
+		for hole in b.holes:
+			_walls(l, hole, base, h, wall_col, true)
+		l.polygon_up(outer, h, 0.0, roof_col, b.holes)
+
+
+## Extruded walls; normals point away from the polygon interior (or into it for holes).
+func _walls(l: MeshLayer, ring: PackedVector2Array, y0: float, y1: float, col: Color, hole := false) -> void:
+	var n := ring.size()
+	# signed area > 0 means counter-clockwise in (x,z) math orientation -> interior on the left of edges
+	var ccw := Geo.polygon_area(ring) > 0.0
+	for i in n:
+		var a := ring[i]
+		var b := ring[(i + 1) % n]
+		var d := b - a
+		var dl := d.length()
+		if dl < 0.01:
+			continue
+		d /= dl
+		# for a CCW ring (math orientation), outward normal = (d.y, -d.x)
+		var out := Vector2(d.y, -d.x) if ccw else Vector2(-d.y, d.x)
+		if hole:
+			out = -out
+		var nn := Vector3(out.x, 0, out.y)
+		l.quad(Vector3(a.x, y0, a.y), Vector3(b.x, y0, b.y), Vector3(b.x, y1, b.y), Vector3(a.x, y1, a.y), nn,
+			Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, col)
+
+
+func _areas() -> void:
+	for a in data.areas:
+		var kind: String = a.kind
+		var outer: PackedVector2Array = a.outer
+		if outer.size() < 3:
+			continue
+		var ck := chunk_of(Geo.polygon_centroid(outer))
+		if kind == "water":
+			var l := layer(ck, "water")
+			l.polygon_up(outer, WATER_Y, 0.05, Color.WHITE, a.holes)
+			var bank := layer(ck, "bank")
+			_bank(bank, outer, false)
+			for h in a.holes:
+				_bank(bank, h, true)
+		else:
+			var y: float = Y.get(kind, 0.015)
+			var l2 := layer(ck, "area_" + kind)
+			l2.polygon_up(outer, y, 0.1, Color.WHITE, a.holes)
+
+
+## Vertical bank walls from ground level down to the water surface, facing the water.
+func _bank(l: MeshLayer, ring: PackedVector2Array, hole: bool) -> void:
+	var n := ring.size()
+	var ccw := Geo.polygon_area(ring) > 0.0
+	for i in n:
+		var a := ring[i]
+		var b := ring[(i + 1) % n]
+		var d := b - a
+		var dl := d.length()
+		if dl < 0.01:
+			continue
+		d /= dl
+		var inward := Vector2(-d.y, d.x) if ccw else Vector2(d.y, -d.x)
+		if hole:
+			inward = -inward
+		l.quad(Vector3(a.x, 0.0, a.y), Vector3(b.x, 0.0, b.y), Vector3(b.x, WATER_Y - 0.6, b.y), Vector3(a.x, WATER_Y - 0.6, a.y),
+			Vector3(inward.x, 0, inward.y))
+
+
+func _paths() -> void:
+	for p in data.paths:
+		var hw: String = p.tags.get("highway", "")
+		var w := 2.0
+		var layer_name := "path"
+		match hw:
+			"cycleway":
+				w = 2.0
+				layer_name = "cycleway"
+			"pedestrian":
+				w = 6.0
+			"steps":
+				w = 2.0
+			"track":
+				w = 3.0
+				layer_name = "track"
+		var tw := RoadNet.parse_width(str(p.tags.get("width", "")))
+		if tw > 0.5 and tw < 12.0:
+			w = tw
+		var pts := Geo.chaikin(p.pts, 1, 2.0)
+		var ck := chunk_of(pts[pts.size() >> 1])
+		var l := layer(ck, layer_name)
+		_flat_strip(l, pts, w, PATH_Y)
+
+
+func _flat_strip(l: MeshLayer, pts: PackedVector2Array, w: float, y: float) -> void:
+	if pts.size() < 2:
+		return
+	var a := Geo.offset_polyline(pts, -w * 0.5)
+	var b := Geo.offset_polyline(pts, w * 0.5)
+	for i in range(pts.size() - 1):
+		l.quad(Geo.v3(a[i], y), Geo.v3(b[i], y), Geo.v3(b[i + 1], y), Geo.v3(a[i + 1], y), Vector3.UP, a[i], b[i], b[i + 1], a[i + 1])
+
+
+func _rails() -> void:
+	for r in data.rails:
+		var pts := Geo.chaikin(r.pts, 2, 3.0)
+		var ck := chunk_of(pts[pts.size() >> 1])
+		var is_tram: bool = r.tags.get("railway", "") == "tram"
+		if not is_tram:
+			_flat_strip(layer(ck, "ballast"), pts, 3.4, 0.032)
+		var rl := layer(ck, "rail")
+		for off in [-0.72, 0.72]:
+			var line := Geo.offset_polyline(pts, off)
+			_flat_strip(rl, line, 0.08, 0.075 if is_tram else 0.12)
+
+
+# ------------------------------------------------------------------------------------------
+# Vegetation and lamps
+# ------------------------------------------------------------------------------------------
+
+func _add_tree(p: Vector2, scale: float) -> void:
+	if not data.bounds.has_point(p):
+		return
+	if not hq_rect.is_empty() and Geometry2D.is_point_in_polygon(p, hq_rect):
+		return
+	var ck := chunk_of(p)
+	if not trees.has(ck):
+		trees[ck] = []
+	var b := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3.ONE * scale)
+	trees[ck].append(Transform3D(b, Vector3(p.x, 0.0, p.y)))
+
+
+func _trees() -> void:
+	for t in data.trees:
+		_add_tree(t, rng.randf_range(0.8, 1.25))
+	for a in data.areas:
+		var density := 0.0
+		match a.kind:
+			"forest":
+				density = 1.0 / 70.0
+			"park", "cemetery":
+				density = 1.0 / 260.0
+			"grass":
+				density = 1.0 / 900.0
+		if density <= 0.0:
+			continue
+		var outer: PackedVector2Array = a.outer
+		var area := absf(Geo.polygon_area(outer))
+		var count := mini(int(area * density), 600)
+		var r := Rect2(outer[0], Vector2.ZERO)
+		for p in outer:
+			r = r.expand(p)
+		var tries := 0
+		var placed := 0
+		while placed < count and tries < count * 4:
+			tries += 1
+			var p := Vector2(rng.randf_range(r.position.x, r.end.x), rng.randf_range(r.position.y, r.end.y))
+			if Geometry2D.is_point_in_polygon(p, outer):
+				_add_tree(p, rng.randf_range(0.75, 1.3))
+				placed += 1
+	# street trees along residential streets with sidewalks
+	for e in net.edges:
+		if not (e.cls in ["residential", "living_street", "tertiary", "secondary"]):
+			continue
+		if e.sw_r <= 0.0 and e.sw_l <= 0.0:
+			continue
+		var s: float = e.trim_a + 6.0
+		var side := 1.0
+		while s < e.len - e.trim_b - 6.0:
+			if rng.randf() < 0.55:
+				var smp := Geo.sample(e.pts, e.cum, s)
+				var r := Geo.right_of(smp[1])
+				var off: float = e.width * 0.5 + (e.sw_r if side > 0 else e.sw_l) * 0.5
+				if (side > 0 and e.sw_r > 0) or (side < 0 and e.sw_l > 0):
+					_add_tree(smp[0] + r * off * side, rng.randf_range(0.7, 1.05))
+			s += rng.randf_range(10.0, 16.0)
+			side = -side
+
+
+func _lamps() -> void:
+	for e in net.edges:
+		if e.cls in ["motorway", "service", "track"] or e.tunnel:
+			continue
+		var spacing := 32.0 if e.cls in ["primary", "secondary", "trunk"] else 38.0
+		var both: bool = e.width > 11.0
+		var s: float = e.trim_a + 8.0
+		var side := 1.0
+		while s < e.len - e.trim_b - 4.0:
+			var smp := Geo.sample(e.pts, e.cum, s)
+			var d: Vector2 = smp[1]
+			var r := Geo.right_of(d)
+			for sd in ([1.0, -1.0] if both else [side]):
+				var sw: float = e.sw_r if sd > 0 else e.sw_l
+				var off: float = e.width * 0.5 + (sw - 0.45 if sw > 0.0 else 0.6)
+				var p: Vector2 = smp[0] + r * off * sd
+				var ck := chunk_of(p)
+				if not lamps.has(ck):
+					lamps[ck] = []
+				# lamp arm points toward the road (-r*sd)
+				var toward: Vector2 = -r * sd
+				var basis := Basis.looking_at(Vector3(toward.x, 0, toward.y), Vector3.UP)
+				lamps[ck].append(Transform3D(basis, Vector3(p.x, 0.0, p.y)))
+			s += spacing
+			side = -side

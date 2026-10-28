@@ -1,0 +1,85 @@
+---
+name: tycoon-dev
+description: Use this skill to set up, check, test, build or deliver the Tiefbau Tycoon / Baustellen Manager Godot game. It covers a new session's environment and private assets, lint/compile/e2e tests, screenshots, Windows builds and copying builds to Jonathan's PC.
+---
+
+# Tiefbau Tycoon – Entwickeln, Testen, Bauen, Liefern
+
+## 1. Umgebung (einmal pro Session)
+
+1. Lagebericht: `bash tools/agent/session_start.sh`. Er zeigt Branch, main, parallele Branches, fehlende Teile und Lektionen.
+2. Assets vom PC holen. Sie sind privat und nicht im Git.
+   - `get_device_info` liefert den Ordner „Tiefbau Tycoon“ (Jonathans PC: `C:\Users\Jonathan\Documents\Tiefbau Tycoon`).
+   - `device_stage_files` mit `<Ordner>\private\assets.tar` (~130 MB). Das Archiv landet unter `/mnt/user-data/uploads/Tiefbau Tycoon/private/assets.tar`.
+   - Fehlt die Datei, legt die Geräte-Shell sie an:
+     `cd "$HOME/mnt/Tiefbau Tycoon" && mkdir -p private && tar -cf private/assets.tar game/assets/consim game/assets/barriers`
+   - PC nicht erreichbar: Das Spiel läuft mit prozeduralen Ersatzmodellen, und alle Tests gehen. Builds für Jonathan gehen erst mit Assets. Sag ihm das.
+3. Danach `tools/setup_env.sh` ausführen. Es erledigt:
+   - Godot 4.5.1
+   - Windows-Vorlagen (Teil-Download, 5 s)
+   - xvfb/Mesa
+   - Entpacken der Assets
+   - Git-Identität und Pre-Commit-Lint
+   - Import
+
+## 2. Prüfen und Testen
+
+| Befehl | Dauer | Wofür |
+|---|---|---|
+| `python3 tools/lint.py` | 1 s | Projektregeln aus den Lektionen (privat, Threads, user://, Mail …) |
+| `tools/check.sh` | 2 s | Kompiliert alle Skripte mit Autoloads, Fehler mit Datei:Zeile |
+| `tools/test.sh` | ~40 s | smoke + issue (Standard, auch in merge.sh) |
+| `tools/test.sh job` | ~7 min | ein kompletter Auftrag mit Startfuhrpark |
+| `tools/test.sh lowbed save+load pbf` | 4 min · ~8 min · 20 s | Tieflader, Speichern/Laden mitten im Graben, PBF-Leser |
+
+- **Wann welcher Test:**
+  - Änderungen an Baustelle, Fahrzeugen oder Verkehr: `job` ist Pflicht.
+  - Änderungen an Speichern/Laden: `save+load`.
+  - Änderungen an der Karte: `pbf`, plus Ladeweg mit Mock-Servern (Abschnitt 4).
+- **Logs:** `/tmp/tt_e2e_<szenario>.log`. Der Treiber ist `game/test/e2e_driver.gd`; neue Szenarien gehören dort hinein und in `tools/test.sh`.
+- **Spielschalter:**
+  - `--autostart --fixture=utrecht`: Offline-Karte, Firma ohne Menüs.
+  - `--e2e=<szenario> --speed=N --timeout=S --shots=<dir>`
+  - `--overpass=url1,url2` und `--no-geofabrik`: Overpass erzwingen.
+  - `--geofabrik-index=<url>`: lokaler Geofabrik-Ersatz.
+  - `--data-pack=<pck>`
+  - Repro: `--e2e=repro --issue=<ordner> --watch=<s> --out=<dir>` (Skill issue-ablauf).
+
+## 3. Screenshots (bei jeder sichtbaren Änderung)
+
+- `E2E_SHOTS=/tmp/shots tools/gd.sh run -- --autostart --fixture=utrecht --e2e=smoke --shots=/tmp/shots`
+  - Gerendert wird mit Vulkan/Mesa unter xvfb, langsam aber echt.
+  - Die PNGs mit dem Read-Tool ansehen.
+- Eigene Kamerapositionen: `shot("name", fokus, distanz, yaw, pitch)` im e2e-Treiber.
+- Einzelszene: `tools/gd.sh shot res://pfad.tscn /tmp/x.png`.
+
+## 4. Kartenladen testen
+
+- **Overpass:** `python3 game/test/mock_overpass.py <port> <modus>` spielt einen Server. Modi: ok, slow, rate, flaky, big.
+  - Spiel starten mit `--overpass=http://127.0.0.1:<port>/api/interpreter --no-geofabrik`.
+- **Geofabrik:**
+  - lokal mit `python3 -m http.server` aus einem Ordner mit `index-v1.json` und einer `.osm.pbf` (z. B. `testdata/utrecht.osm.pbf`),
+  - dann `--geofabrik-index=http://127.0.0.1:<port>/index-v1.json`.
+- Prozesse beenden mit `pkill -f "http[.]server"` (Lektion pkill-muster).
+
+## 5. Bauen
+
+- `tools/build.sh build/main`: vollständiges Spiel.
+- `tools/build.sh build/issue-<n> --test-build`: Testversion. Sie enthält nur Code-pck und `Starten.cmd` und nutzt die exe und das Daten-pck aus `build/main`.
+- Bestandteile:
+  - `BaustellenManager.exe` ändert sich nur mit der Godot-Version.
+  - `BaustellenManager.pck` (Code, ~1 MB) ändert sich bei jedem Fix.
+  - `BaustellenManager-Daten.pck` (~230 MB) wird nur neu gebaut, wenn sich Assets oder Demokarte ändern (`daten.hash`).
+- Die Version kommt aus `git describe` und erscheint im Menü und in jeder Meldung.
+
+## 6. Auf Jonathans PC liefern
+
+Details und Stolperfallen stehen in [pc-bruecke.md](pc-bruecke.md). Kurz:
+- **Testversion:** nach `build/issue-<n>/` auf dem PC (`BaustellenManager.pck`, `Starten.cmd`, `LIESMICH.txt`, `portable.txt`).
+- **Stand von main:** nach `build/main/`, nur aus main und nur nach erfolgreichem Zusammenführen.
+  - Das Daten-pck nur übertragen, wenn sich `daten.hash` unterscheidet.
+- Spielstände, Karten, Meldungen und Logs liegen in `Tiefbau Tycoon/userdata/` und werden nie überschrieben.
+
+## 7. Abschluss
+
+Definition of Done steht in `CLAUDE.md`. Danach den Skill `lernen` ausführen.

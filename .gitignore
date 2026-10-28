@@ -1,0 +1,18 @@
+# --- private: Construction Simulator / FS25 material, never into Git (private use only) ---
+game/assets/consim/
+game/assets/barriers/
+tools/consim_extract/
+tools/fs-i3d/
+docs/consim_assets*.png
+private/
+
+# --- generated / local ---
+game/.godot/
+game/build_info.json
+build/
+userdata/
+*.part
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db

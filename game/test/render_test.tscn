@@ -1,0 +1,25 @@
+[gd_scene load_steps=4 format=3]
+
+[sub_resource type="ProceduralSkyMaterial" id="1"]
+[sub_resource type="Sky" id="2"]
+sky_material = SubResource("1")
+[sub_resource type="Environment" id="3"]
+background_mode = 2
+sky = SubResource("2")
+ssao_enabled = true
+tonemap_mode = 2
+
+[node name="Root" type="Node3D"]
+[node name="Env" type="WorldEnvironment" parent="."]
+environment = SubResource("3")
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866, -0.25, 0.433, 0, 0.866, 0.5, -0.5, -0.433, 0.75, 0, 10, 0)
+shadow_enabled = true
+[node name="Box" type="CSGBox3D" parent="."]
+size = Vector3(2, 2, 2)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+[node name="Floor" type="CSGBox3D" parent="."]
+size = Vector3(20, 0.1, 20)
+[node name="Cam" type="Camera3D" parent="."]
+transform = Transform3D(0.707, -0.408, 0.577, 0, 0.816, 0.577, -0.707, -0.408, 0.577, 6, 6, 6)
+current = true

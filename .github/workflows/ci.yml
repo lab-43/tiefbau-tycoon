@@ -1,0 +1,68 @@
+# Checks every push. The private models are not in the repo, so the game runs with its procedural
+# fallback models here – enough for logic, UI flow, save/load and map parsing.
+# Automerge: a branch whose newest commit contains "Automerge: ja" (written by tools/agent/merge.sh
+# when a session may not push to main itself) is fast-forwarded into main after green tests.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+    inputs:
+      scenarios:
+        description: "e2e-Szenarien (z. B. smoke issue job lowbed save+load pbf)"
+        default: "smoke issue pbf job"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Regeln (lint)
+        run: python3 tools/lint.py
+      - name: Godot-Cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/godot
+          key: godot-4.5.1-linux
+      - name: Godot + Import
+        run: bash tools/setup_env.sh --ci
+      - name: Kompilieren
+        run: bash tools/check.sh
+      - name: e2e
+        env:
+          E2E_TIMEOUT: "1500"
+        run: bash tools/test.sh ${{ github.event.inputs.scenarios || 'smoke issue pbf' }}
+      - name: Logs bei Fehler
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: /tmp/tt_*.log
+          if-no-files-found: ignore
+
+  automerge:
+    needs: test
+    if: github.ref != 'refs/heads/main' && contains(github.event.head_commit.message, 'Automerge: ja')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Nach main (nur fast-forward)
+        run: |
+          git fetch origin main
+          if git merge-base --is-ancestor origin/main HEAD; then
+            git push origin HEAD:main
+            echo "main = $(git rev-parse --short HEAD)"
+          else
+            echo "::error::main ist inzwischen weitergelaufen – in der Session tools/agent/merge.sh erneut ausführen (rebase + Tests)."
+            exit 1
+          fi

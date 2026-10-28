@@ -1,0 +1,94 @@
+; Engine configuration file.
+config_version=5
+
+[application]
+
+config/name="Baustellen Manager"
+config/description="Tiefbau-Tycoon auf echten Stadtkarten"
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.5", "Forward Plus")
+config/icon="res://icon.svg"
+boot_splash/bg_color=Color(0.043, 0.043, 0.043, 1)
+boot_splash/show_image=false
+
+[autoload]
+
+Events="*res://src/core/events.gd"
+Balance="*res://src/core/balance.gd"
+Clock="*res://src/core/clock.gd"
+Game="*res://src/core/game.gd"
+
+[display]
+
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/size/mode=2
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/vsync/vsync_mode=1
+
+[input_devices]
+
+pointing/emulate_touch_from_mouse=false
+
+[physics]
+
+common/physics_ticks_per_second=60
+
+[rendering]
+
+anti_aliasing/quality/msaa_3d=2
+lights_and_shadows/directional_shadow/size=8192
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
+lights_and_shadows/positional_shadow/soft_shadow_filter_quality=2
+environment/defaults/default_clear_color=Color(0.85, 0.86, 0.86, 1)
+textures/default_filters/anisotropic_filtering_level=3
+limits/cluster_builder/max_clustered_elements=1024
+occlusion_culling/use_occlusion_culling=false
+
+[shader_globals]
+
+pit_a0={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+pit_b0={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+pit_a1={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+pit_b1={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+pit_a2={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+pit_b2={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+pit_a3={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+pit_b3={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+
+night={
+"type": "float",
+"value": 0.0
+}
