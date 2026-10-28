@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs end-to-end scenarios headless on the offline Utrecht map and reports pass/fail.
 # usage: tools/test.sh [scenario ...]            default: smoke issue
-#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren debug leuchten verkehrslichter rig schaufel markierungen absperrung  (save+load = save mid-dig,
+#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren debug leuchten verkehrslichter rig schaufel markierungen absperrung gelaende  (save+load = save mid-dig,
 #              then load and finish; rig = excavator linkage/cylinders, see game/test/rig_test.gd;
 #              schaufel = soil in the bucket (game/test/bucket_test.gd, stand-in model always, real model if present);
 #              ebenen = height order of flat map layers, see game/test/layer_test.gd – also part of pbf;
@@ -80,6 +80,16 @@ for s in "${SCEN[@]}"; do
     absperrung)  # closure designer (#9); like markierungen it also fails on a script error (in _draw)
       run absperrung "E2E OK absperrung" --e2e=absperrung
       if grep -q "SCRIPT ERROR" /tmp/tt_e2e_absperrung.log; then FAIL=1; echo "FAIL  absperrung: Skriptfehler im Log"; grep -A3 "SCRIPT ERROR" /tmp/tt_e2e_absperrung.log | head -8 | sed 's/^/      /'; fi ;;
+    gelaende) run gelaende "E2E OK gelaende" --e2e=gelaende --terrain=synthetic
+      # download path: tiles from a local Terrarium server (PNG and lossless WebP)
+      python3 "$ROOT/game/test/mock_terrain.py" 8766 & MT=$!
+      sleep 1
+      DEVMAP="$HOME/.local/share/godot/app_userdata/Baustellen Manager/maps/dev_utrecht"
+      rm -rf "$DEVMAP/terrain_test" "$DEVMAP"/baked_v*_test.bin
+      run gelaende-png "E2E OK gelaende" --e2e=gelaende --terrain-url=http://127.0.0.1:8766/ok/{z}/{x}/{y}.png
+      rm -rf "$DEVMAP/terrain_test" "$DEVMAP"/baked_v*_test.bin
+      run gelaende-webp "E2E OK gelaende" --e2e=gelaende --terrain-url=http://127.0.0.1:8766/webp/{z}/{x}/{y}.webp
+      kill $MT 2>/dev/null ;;
     *) echo "unbekanntes Szenario: $s"; FAIL=1 ;;
   esac
 done

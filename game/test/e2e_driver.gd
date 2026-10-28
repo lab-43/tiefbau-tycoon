@@ -131,6 +131,8 @@ func _process(delta: float) -> void:
 			_markierungen(delta)
 		"absperrung":
 			_absperrung_test(delta)
+		"gelaende":
+			_gelaende_test(delta)
 
 
 func _smoke() -> void:
@@ -724,3 +726,12 @@ func _absperrung_test(delta: float) -> void:
 		_absp = load("res://test/e2e_absperrung.gd").new()
 		_absp.drv = self
 	_absp.tick(delta)
+
+
+## Ground heights (test/e2e_gelaende.gd, #8).
+var _gel: RefCounted
+func _gelaende_test(delta: float) -> void:
+	if _gel == null:
+		_gel = load("res://test/e2e_gelaende.gd").new()
+		_gel.drv = self
+	_gel.tick(delta)
