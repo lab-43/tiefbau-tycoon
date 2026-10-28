@@ -1197,6 +1197,19 @@ func _traffic_activate() -> void:
 		return
 	traffic_on = true
 	var tr := world.traffic
+	if plan.full:
+		# full road closure (#20): both lanes blocked at the site, no through traffic on the road;
+		# background vehicles already on it in front of the barrier stop there (TrafficSim lets them vanish)
+		tr.set_obstacle(lay.key, lay.obst0, lay.obst1, 1000 + sid)
+		var a2: float = lay.lane2_coords(lay.lane_pt(lay.obst0)).x
+		var b2: float = lay.lane2_coords(lay.lane_pt(lay.obst1)).x
+		tr.set_obstacle(lay.key2, minf(a2, b2), maxf(a2, b2), 1000 + sid)
+		tr.close_edges(closed_edges(), 1000 + sid)
+		# the site's own vehicles still pass the work area (to the stage behind it): the detour of K
+		# without a bottleneck zone, background traffic never reaches it
+		tr.set_detour(lay.key, lay.s_det0, lay.s_det1, lay.detour_pts(), 100 + sid, 5.0)
+		_redispatch_waiting()
+		return
 	var zone := 100 + sid
 	var prio := {lay.key: 0, lay.key2: (1 if lay.oncoming else 0)}
 	if not lay.two_way:
@@ -1207,6 +1220,23 @@ func _traffic_activate() -> void:
 	_redispatch_waiting()
 
 
+## Kind of traffic control of the plan in force, for the site panel.
+func closure_kind() -> String:
+	if plan and plan.full:
+		return "Vollsperrung"
+	if lay.two_way:
+		return "Verschwenkung, beide Richtungen frei" if lay.oncoming else "Fahrstreifensperrung ohne Einfädeln"
+	return "Engstelle mit Z 208/308" if lay.oncoming else "Fahrstreifensperrung"
+
+
+## Roads (edges) a full closure shuts: the site's road, and the other carriageway if it is a separate way.
+func closed_edges() -> Array:
+	var out: Array = [lay.key >> 4]
+	if (lay.key2 >> 4) != (lay.key >> 4):
+		out.append(lay.key2 >> 4)
+	return out
+
+
 func _traffic_deactivate() -> void:
 	if not traffic_on:
 		return
@@ -1214,6 +1244,7 @@ func _traffic_deactivate() -> void:
 	var tr := world.traffic
 	tr.clear_obstacles(1000 + sid)
 	tr.clear_detours(100 + sid)
+	tr.open_edges(1000 + sid)
 	stats.jam_s = tr.jam_counter.get(1000 + sid, 0.0) + tr.jam_counter.get(100 + sid, 0.0)
 
 

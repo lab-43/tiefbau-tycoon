@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs end-to-end scenarios headless on the offline Utrecht map and reports pass/fail.
 # usage: tools/test.sh [scenario ...]            default: smoke issue
-#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren debug leuchten verkehrslichter rig schaufel markierungen absperrung gelaende  (save+load = save mid-dig,
+#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren debug leuchten verkehrslichter rig schaufel markierungen absperrung gelaende vollsperrung  (save+load = save mid-dig,
 #              then load and finish; rig = excavator linkage/cylinders, see game/test/rig_test.gd;
 #              schaufel = soil in the bucket (game/test/bucket_test.gd, stand-in model always, real model if present);
 #              ebenen = height order of flat map layers, see game/test/layer_test.gd – also part of pbf;
@@ -98,6 +98,9 @@ for s in "${SCEN[@]}"; do
       rm -rf "$DEVMAP/terrain_test" "$DEVMAP"/baked_v*_test*.bin
       run gelaende-webp "E2E OK gelaende" --e2e=gelaende --terrain-url=http://127.0.0.1:8766/webp/{z}/{x}/{y}.webp
       kill $MT 2>/dev/null ;;
+    vollsperrung)  # full road closure (#20): designer, traffic stays off the road, site vehicles get in
+      run vollsperrung "E2E OK vollsperrung" --e2e=vollsperrung
+      if grep -q "SCRIPT ERROR" /tmp/tt_e2e_vollsperrung.log; then FAIL=1; echo "FAIL  vollsperrung: Skriptfehler im Log"; grep -A3 "SCRIPT ERROR" /tmp/tt_e2e_vollsperrung.log | head -8 | sed 's/^/      /'; fi ;;
     *) echo "unbekanntes Szenario: $s"; FAIL=1 ;;
   esac
 done

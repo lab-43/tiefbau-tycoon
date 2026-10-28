@@ -31,6 +31,8 @@ var _right_of := {}       # node -> {approach_end: approach_end_to_the_right}
 var obstacles := {}       # lane key -> Array[{s0, s1, id}]
 var detours := {}         # lane key -> Array[{s0, s1, pts: PackedVector2Array, zone: int, occ: String, vmax}]
 var zones := {}           # bottleneck id -> {lanes: {lane_key: priority(int)}, inside: {lane_key: int}, last_lane, hold_t}
+var closed_edges := {}    # edge index -> closure id: full road closure (#20), no through traffic
+var closed_lanes := {}    # lane key -> closure id: lanes of closed edges and lanes that can only lead into them
 var stops_by_lane := {}   # lane key -> PackedFloat32Array of bus stop s
 var jam_counter := {}     # tag -> accumulated vehicle-seconds of waiting near a site
 var _models: Array = []   # Array[PackedScene or Mesh builders]
@@ -654,6 +656,75 @@ func set_obstacle(lane_key: int, s0: float, s1: float, id: int) -> void:
 	obstacles[lane_key].append({"s0": s0, "s1": s1, "id": id})
 
 
+# ------------------------------------------------------------------------------------------
+# Full road closure (#20): background traffic takes other roads, company vehicles route around it
+# ------------------------------------------------------------------------------------------
+
+func close_edges(edges: Array, id: int) -> void:
+	for e in edges:
+		closed_edges[int(e)] = id
+	_rebuild_closed_lanes()
+	_reroute_closed()
+
+
+func open_edges(id: int) -> void:
+	for e in closed_edges.keys():
+		if closed_edges[e] == id:
+			closed_edges.erase(e)
+	_rebuild_closed_lanes()
+
+
+func is_closed(lane_key: int) -> bool:
+	return closed_lanes.has(lane_key)
+
+
+## Lanes of the closed edges, plus every lane whose only ways on lead into closed lanes (the same
+## street beyond a node without a junction, a dead end feeding it): traffic must turn off before them.
+func _rebuild_closed_lanes() -> void:
+	closed_lanes.clear()
+	for e in closed_edges:
+		for d in 2:
+			for li in 8:
+				var key: int = ((int(e) * 2 + d) << 3) | li
+				if net.lane_geo.has(key):
+					closed_lanes[key] = closed_edges[e]
+	if closed_lanes.is_empty():
+		return
+	var grew := true
+	var guard := 0
+	while grew and guard < 60:
+		grew = false
+		guard += 1
+		for key in net.lane_out:
+			if closed_lanes.has(key):
+				continue
+			var outs: Array = net.lane_out[key]
+			var id := -1
+			for ci in outs:
+				var to: int = net.connectors[ci].to
+				if not closed_lanes.has(to):
+					id = -1
+					break
+				id = closed_lanes[to]
+			if id >= 0:
+				closed_lanes[key] = id
+				grew = true
+
+
+## Background traffic whose route still turns into a closed lane: cut the route before that turn,
+## _extend_route then picks another way at the junction.
+func _reroute_closed() -> void:
+	for ag in agents:
+		if ag.finished or ag.player != null:
+			continue
+		for k in range(ag.pi + 1, ag.route.size()):
+			var pc: Dictionary = ag.route[k]
+			if pc.t == Agent.CONN and closed_lanes.has(int(net.connectors[pc.conn].to)):
+				ag.route = ag.route.slice(0, k)
+				_extend_route(ag)
+				break
+
+
 ## True if no agent occupies lane `key` between s0 and s1 (exclude = an agent to ignore).
 func lane_clear(key: int, s0: float, s1: float, exclude: Agent = null) -> bool:
 	for ag in agents:
@@ -945,11 +1016,22 @@ func _spawn_manage() -> void:
 			ag.despawn = true
 		elif ag.wait_t > 150.0:
 			ag.despawn = true
+		elif ag.wait_t > 4.0 and not closed_edges.is_empty() and _on_closed(ag) and (ag.wait_t > 40.0 or not (ag.visual and _visible(ag.p_cur))):
+			ag.despawn = true   # caught on a road that was closed in front of it (#20)
 	var tries := 0
 	while count < target and tries < 6:
 		tries += 1
 		if _try_spawn():
 			count += 1
+
+
+## Waiting in front of the barrier of a full road closure (on the closed road itself).
+func _on_closed(ag: Agent) -> bool:
+	var pc: Dictionary = ag.route[ag.pi]
+	if not ((pc.t == Agent.LANE or pc.t == Router.BLEND) and closed_edges.has(int(pc.key) >> 4)):
+		return false
+	var ob: Array = _obstacle_ahead(ag)
+	return float(ob[0]) < 40.0 and closed_edges.values().has(int(ob[1]))
 
 
 func _visible(p: Vector3) -> bool:
@@ -970,7 +1052,7 @@ func _try_spawn() -> bool:
 		return false
 	var key: int = keys[rng.randi() % keys.size()]
 	var e: Dictionary = net.edges[key >> 4]
-	if (key >> 4) == _hq_edge:
+	if (key >> 4) == _hq_edge or closed_lanes.has(key):
 		return false
 	if e.cls in ["service", "living_street"] and rng.randf() < 0.8:
 		return false
@@ -1035,6 +1117,10 @@ func _extend_route(ag: Agent) -> void:
 
 
 func _choose_conn(ag: Agent, outs: Array) -> int:
+	if not closed_lanes.is_empty() and ag.player == null:
+		var open := outs.filter(func(ci): return not closed_lanes.has(int(net.connectors[ci].to)))
+		if not open.is_empty():
+			outs = open   # only closed roads ahead (dead end): drive in, wait at the barrier, vanish
 	var total := 0.0
 	var weights: Array = []
 	for ci in outs:

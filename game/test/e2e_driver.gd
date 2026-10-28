@@ -133,6 +133,8 @@ func _process(delta: float) -> void:
 			_absperrung_test(delta)
 		"gelaende":
 			_gelaende_test(delta)
+		"vollsperrung":
+			_vollsperrung_test(delta)
 
 
 func _smoke() -> void:
@@ -745,6 +747,15 @@ func _verkehrslichter_test(delta: float) -> void:
 		_vl = load("res://test/e2e_verkehrslichter.gd").new()
 		_vl.drv = self
 	_vl.tick(delta)
+
+
+## Full road closure (test/e2e_vollsperrung.gd, #20).
+var _voll: RefCounted
+func _vollsperrung_test(delta: float) -> void:
+	if _voll == null:
+		_voll = load("res://test/e2e_vollsperrung.gd").new()
+		_voll.drv = self
+	_voll.tick(delta)
 
 
 ## Closure designer and player plans (test/e2e_absperrung.gd, #9).
