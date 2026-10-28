@@ -100,7 +100,7 @@ func _check_layers(w: World) -> void:
 			var q := maxf(bb.size.x, bb.size.z) / 65535.0
 			var nm := String(mi.name)
 			for k in range(0, verts.size(), maxi(1, verts.size() / 40)):
-				var v := verts[k]
+				var v := verts[k] + (mi as MeshInstance3D).position   # meshes sit at their chunk (#5)
 				var p := Vector2(v.x, v.z)
 				var g := tr.sample(v.x, v.z)
 				if _on_bridge(tr, p):

@@ -176,7 +176,7 @@ func _process(delta: float) -> void:
 				if cb.is_valid():
 					cb.call(self)
 		else:
-			var dir := Vector3(to.x, 0, to.z).normalized()
+			var dir := Vector3(to.x, 0, to.z).normalized()   # lint-ok: direction
 			position += dir * step
 			position.y = lerpf(position.y, p.y, clampf(step / maxf(dist, 0.01), 0.0, 1.0))
 			rotation.y = lerp_angle(rotation.y, atan2(-dir.x, -dir.z), 0.25)

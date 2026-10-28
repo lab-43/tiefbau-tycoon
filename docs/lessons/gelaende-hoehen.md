@@ -23,3 +23,5 @@ pruefung: lint:gelaende-hoehen und e2e:gelaende
 - Bei Änderungen an Brücken oder Ufern echte Karten rendern, nicht nur das Testgelände (`--e2e=repro --views=…`, Prüfstelle Lombardsbrücke: `-405,-1722,45,-35,28|-357,-1700,45,-35,28|-426,-1584,220,-35,28` auf hamburg_1793191710).
 - Vorher/nachher am selben Bild vergleichen: alter Stand in einem `git worktree`, gespeicherte Karte vorher beiseitelegen (gleiche BAKE_VERSION, gleicher Dateiname).
 - Gespeicherte Testkarten (`baked_v7_syn.bin`) überleben Code-Änderungen mit gleicher BAKE_VERSION; `tools/test.sh gelaende` löscht sie jetzt vorher.
+
+**Nachtrag (Rebase auf #9):** Die Absperrungs-Planung (#9) kam parallel auf main und setzte Höhen wieder fest (`Vector3(tp.x, 0.05, tp.z)`, Kolonnenbus mit y = 0, Draufsicht-Abbildung auf y = 0,06). Die Lint-Regel erkannte nur `Vector3(p.x, Zahl, p.y)`; sie erkennt jetzt auch `Vector3(p.x, Zahl, p.z)` (3D-Punkt flachgedrückt). Richtungen und Verschiebungen bekommen `# lint-ok`. Die Draufsicht ist orthografisch: Die Kartenebenen-Shader rechnen die Tiefe jetzt auch dort pro Pixel (Strahl entlang der Blickrichtung), vorher nur in der Perspektive.

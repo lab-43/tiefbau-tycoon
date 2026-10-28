@@ -309,7 +309,7 @@ func _place(entries: Array, w: World) -> void:
 		var mk := _next_marker()
 		mk.kind = e.kind
 		mk.obj = e.obj
-		mk.focus = Vector3(p3.x, 0.0, p3.z)
+		mk.focus = Vector3(p3.x, 0.0, p3.z)   # lint-ok: the camera puts its target on the ground
 		mk.icon_tex = UI.icon(e.icon)
 		mk.selected = e.selected
 		mk.members = e.members.duplicate()

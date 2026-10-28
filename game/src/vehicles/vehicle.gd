@@ -639,7 +639,7 @@ func _update_trailer() -> void:
 	var g_front := Terrain.near(hitch, position.y)
 	var g_back := Terrain.near(_trailer_axle, g_front)
 	var basis := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, atan2(g_front - g_back, maxf(1.0, _trailer_len)))
-	var origin := Vector3(hitch.x, g_front, hitch.y) - basis * Vector3(kp_local.x, 0.0, kp_local.z)
+	var origin := Vector3(hitch.x, g_front, hitch.y) - basis * Vector3(kp_local.x, 0.0, kp_local.z)   # lint-ok: local offset
 	trailer.global_transform = Transform3D(basis, origin)
 
 

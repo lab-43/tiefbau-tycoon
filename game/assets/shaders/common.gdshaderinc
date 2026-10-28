@@ -58,66 +58,85 @@ vec3 terrain_hg(vec2 p) {
 	return vec3(mix(mix(a, b, f.x), mix(c, d, f.x), f.y), mix(b - a, d - c, f.y) * terrain_rect.z, mix(c - a, d - b, f.x) * terrain_rect.z);
 }
 float terrain_h(vec2 p) { return terrain_hg(p).x; }
+// View ray through this fragment as o + d * t, t = 1 at the rasterised point wp. Perspective: from the camera,
+// t is relative to the distance. Orthographic (the closure designer's top view, #9): along the view direction,
+// t in metres. `span` is how far t may go towards the camera.
+void terrain_ray(vec3 cam, vec3 wp, mat4 view, mat4 proj, out vec3 o, out vec3 d, out float span) {
+	if (proj[3][3] > 0.5) {
+		d = -vec3(view[0][2], view[1][2], view[2][2]);
+		o = wp - d;
+		span = 20.0;
+	} else {
+		o = cam;
+		d = wp - cam;
+		span = 0.5;
+	}
+}
 // Depth of the surface `off` metres above the ground where the view ray through this fragment meets it
-// (Newton steps from the rasterised point). Layers more than 0.6 m above the ground (bridge decks) and
-// orthographic passes keep their own depth.
+// (Newton steps from the rasterised point). Layers more than 0.6 m above the ground (bridge decks) keep
+// their own depth.
 float terrain_depth(vec3 cam, vec3 wp, float off, mat4 view, mat4 proj, float fz) {
-	if (terrain_rect.w < 0.5 || abs(off) > 0.6 || proj[3][3] > 0.5) return fz;
-	vec3 d = wp - cam;
+	if (terrain_rect.w < 0.5 || abs(off) > 0.6) return fz;
+	vec3 o; vec3 d; float span;
+	terrain_ray(cam, wp, view, proj, o, d, span);
+	float lim = span * 0.2;   // 10 % of the distance, or 4 m along an orthographic ray
 	float t = 1.0;
 	for (int k = 0; k < 3; k++) {
-		vec3 p = cam + d * t;
+		vec3 p = o + d * t;
 		vec3 hg = terrain_hg(p.xz);
 		float df = d.y - hg.y * d.x - hg.z * d.z;
 		if (abs(df) < 1e-6) break;
-		t = clamp(t - (p.y - hg.x - off) / df, 0.9, 1.1);
+		t = clamp(t - (p.y - hg.x - off) / df, 1.0 - lim, 1.0 + lim);
 	}
-	vec4 c = proj * view * vec4(cam + d * t, 1.0);
+	vec4 c = proj * view * vec4(o + d * t, 1.0);
 	return c.z / c.w;
 }
 // Bridge decks (#8, layers *_deck): a deck does not follow the ground. Where its triangles lie above the ground
 // they keep their own depth; where a triangle dips below the ground (near the abutments, between two vertices)
 // the surface is lifted to off above the ground - never pushed down into a bank that drops away under it.
 float terrain_depth_deck(vec3 cam, vec3 wp, float off, mat4 view, mat4 proj, float fz) {
-	if (terrain_rect.w < 0.5 || proj[3][3] > 0.5) return fz;
+	if (terrain_rect.w < 0.5) return fz;
 	if (terrain_h(wp.xz) + off <= wp.y) return fz;
-	vec3 d = wp - cam;
+	vec3 o; vec3 d; float span;
+	terrain_ray(cam, wp, view, proj, o, d, span);
 	float t = 1.0;
 	for (int k = 0; k < 4; k++) {
-		vec3 p = cam + d * t;
+		vec3 p = o + d * t;
 		vec3 hg = terrain_hg(p.xz);
 		float df = d.y - hg.y * d.x - hg.z * d.z;
 		if (abs(df) < 1e-6) break;
-		t = clamp(t - (p.y - hg.x - off) / df, 0.5, 1.0);
+		t = clamp(t - (p.y - hg.x - off) / df, 1.0 - span, 1.0);
 	}
-	vec4 c = proj * view * vec4(cam + d * t, 1.0);
+	vec4 c = proj * view * vec4(o + d * t, 1.0);
 	return c.z / c.w;
 }
 // Water areas lie flat; their bank lies inside them (TerrainBake keeps the land height up to the shore).
 // Where the ground rises above the water plane, the water is drawn on the ground (0.031 up, like the flat
 // layer order), so the shore is exactly the outline of the water area instead of a 5 m grid contour.
 float water_depth(vec3 cam, vec3 wp, mat4 view, mat4 proj, float fz) {
-	if (terrain_rect.w < 0.5 || proj[3][3] > 0.5) return fz;
+	if (terrain_rect.w < 0.5) return fz;
 	float gap = terrain_h(wp.xz) + 0.031 - wp.y;
 	if (gap <= 0.0) return fz;
 	// The ray meets the bank before the water plane: walk back towards the camera until it is above the bank
 	// surface, then bisect. (Newton steps did not converge on steep banks seen at an angle: jagged shores.)
-	vec3 d = wp - cam;
+	vec3 o; vec3 d; float span;
+	terrain_ray(cam, wp, view, proj, o, d, span);
+	float t_min = 1.0 - span;
 	float up = max(-d.y, 1e-4);   // height gained per unit of t when going back towards the camera
 	float t_in = 1.0;             // below the bank surface
 	float t_out = 1.0;
 	for (int k = 0; k < 8; k++) {
-		t_out = max(0.5, t_in - (gap + 0.02) / up);
-		vec3 p = cam + d * t_out;
+		t_out = max(t_min, t_in - (gap + 0.02) / up);
+		vec3 p = o + d * t_out;
 		gap = terrain_h(p.xz) + 0.031 - p.y;
-		if (gap <= 0.0 || t_out <= 0.5) break;
+		if (gap <= 0.0 || t_out <= t_min) break;
 		t_in = t_out;
 	}
 	for (int k = 0; k < 16; k++) {   // to well below the 2 cm between water and road surfaces
 		float tm = 0.5 * (t_in + t_out);
-		vec3 p = cam + d * tm;
+		vec3 p = o + d * tm;
 		if (terrain_h(p.xz) + 0.031 > p.y) t_in = tm; else t_out = tm;
 	}
-	vec4 c = proj * view * vec4(cam + d * t_out, 1.0);
+	vec4 c = proj * view * vec4(o + d * t_out, 1.0);
 	return c.z / c.w;
 }

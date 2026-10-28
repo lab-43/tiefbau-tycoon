@@ -179,9 +179,9 @@ func _zoom_at(screen: Vector2, factor: float) -> void:
 	if before != null and follow == null:
 		# move target toward cursor proportionally so the point under the cursor stays put
 		var k := 1.0 - new_dist / _t_distance
-		var tgt_flat := Vector3(_t_target.x, 0.0, _t_target.z)
+		var tgt_flat := Vector3(_t_target.x, 0.0, _t_target.z)   # lint-ok: horizontal shift, y follows the ground
 		var bp: Vector3 = before
-		_t_target = tgt_flat + (Vector3(bp.x, 0.0, bp.z) - tgt_flat) * k
+		_t_target = tgt_flat + (Vector3(bp.x, 0.0, bp.z) - tgt_flat) * k   # lint-ok
 	_t_distance = new_dist
 	_t_pitch = maxf(_t_pitch, _min_pitch_for(_t_distance))
 

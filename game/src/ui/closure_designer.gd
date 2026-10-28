@@ -142,7 +142,7 @@ func frame_view() -> void:
 	# the free map area is shifted by the panel widths: move the target accordingly
 	c -= d * ((LEFT_W - RIGHT_W) * 0.5 / ppm)
 	c -= Geo.right_of(d) * ((TOP_H * 0.5) / ppm)
-	world.camera_rig.enter_topdown(Vector3(c.x, 0.0, c.y), size_m / CameraRig.TOPDOWN_SIZE, rad_to_deg(ClosurePlan.yaw_along(d)))
+	world.camera_rig.enter_topdown(Vector3(c.x, Terrain.at(c), c.y), size_m / CameraRig.TOPDOWN_SIZE, rad_to_deg(ClosurePlan.yaw_along(d)))
 
 
 func close(accepted: bool) -> void:
@@ -980,9 +980,10 @@ func _update_mapping() -> void:
 	var cam := world.camera_rig.camera
 	var t := world.camera_rig.target
 	_o_map = Vector2(t.x, t.z)
-	_o_scr = cam.unproject_position(Vector3(t.x, 0.06, t.z))
-	_ex = cam.unproject_position(Vector3(t.x + 1.0, 0.06, t.z)) - _o_scr
-	_ez = cam.unproject_position(Vector3(t.x, 0.06, t.z + 1.0)) - _o_scr
+	var y := Terrain.at3(t.x, t.z) + 0.06   # the plan lies on the ground (#8)
+	_o_scr = cam.unproject_position(Vector3(t.x, y, t.z))
+	_ex = cam.unproject_position(Vector3(t.x + 1.0, y, t.z)) - _o_scr
+	_ez = cam.unproject_position(Vector3(t.x, y, t.z + 1.0)) - _o_scr
 	_ppm = maxf(0.01, _ex.length())
 
 

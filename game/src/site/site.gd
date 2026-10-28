@@ -937,7 +937,7 @@ func set_plan(p: ClosurePlan, build := true) -> void:
 		_traffic_activate()
 	if van_moves and not van_driving and is_instance_valid(crew_van):
 		var vp := lay.van_pose()
-		crew_van.place(Vector3(vp.pos.x, 0, vp.pos.y), vp.yaw)
+		crew_van.place(gw(vp.pos, 0.0), vp.yaw)
 		_arrived(crew_van, "van")
 	plan_confirmed = true
 	build_when_ready = build
@@ -964,7 +964,7 @@ func _reverse_van_to(new_s: float) -> bool:
 	var pc := Router.poly_piece(path, 1.8, true, "rev")
 	var ok := v.drive_plan({}, job.short_title(), [], func(veh):
 		var vp := lay.van_pose()
-		veh.place(Vector3(vp.pos.x, 0, vp.pos.y), vp.yaw)
+		veh.place(gw(vp.pos, 0.0), vp.yaw)
 		_arrived(veh, "van"), [pc], {"key": lay.key, "s0": new_s - 8.0, "s1": s_here + 6.0})
 	if ok:
 		_reserve(v, "van")
@@ -1121,7 +1121,7 @@ func _run_task(w: Worker, t: Dictionary) -> void:
 				return
 			var tp := on.global_position
 			var oy := on.global_rotation.y
-			w.walk_to(Vector3(tp.x, 0.05, tp.z) + Vector3(sin(oy), 0, cos(oy)) * 0.9, func(_w):
+			w.walk_to(gw(Vector2(tp.x, tp.z), 0.05) + Vector3(sin(oy), 0, cos(oy)) * 0.9, func(_w):
 				w.face(tp)
 				w.act("place", 1.1, func(_w2):
 					_orphans.erase(on)
@@ -2219,7 +2219,7 @@ func load_state(d: Dictionary) -> void:
 		if oa.size() >= 4 and ClosurePlan.KINDS.has(str(oa[0])):
 			var on := SiteProps.item(str(oa[0]))
 			add_child(on)
-			on.global_transform = Transform3D(Basis(Vector3.UP, float(oa[3])), Vector3(float(oa[1]), 0.05, float(oa[2])))
+			on.global_transform = Transform3D(Basis(Vector3.UP, float(oa[3])), gw(Vector2(float(oa[1]), float(oa[2])), 0.05))
 			_orphans.append(on)
 	for i in mini(placed.size(), item_defs.size()):
 		if placed[i]:
