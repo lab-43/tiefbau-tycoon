@@ -1,8 +1,9 @@
 shader_type spatial;
 render_mode specular_schlick_ggx;
 #include "res://assets/shaders/common.gdshaderinc"
-uniform vec3 deep : source_color = vec3(0.16, 0.27, 0.30);
-uniform vec3 shallow : source_color = vec3(0.30, 0.42, 0.43);
+// Light blue water (#4): bright enough to read as water through AgX tonemapping and sky reflection.
+uniform vec3 deep : source_color = vec3(0.26, 0.56, 0.82);
+uniform vec3 shallow : source_color = vec3(0.45, 0.74, 0.94);
 varying vec3 wpos;
 void vertex() { wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
 void fragment() {

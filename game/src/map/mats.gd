@@ -52,8 +52,6 @@ static func get_mat(name: String) -> Material:
 			m = _shader("res://assets/shaders/ground.gdshader")
 		"water":
 			m = _shader("res://assets/shaders/water.gdshader")
-		"bank":
-			m = _std(Color(0.52, 0.50, 0.47), 0.9)
 		"area_grass":
 			m = _shader("res://assets/shaders/grass.gdshader")
 		"area_park":
