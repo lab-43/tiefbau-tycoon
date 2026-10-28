@@ -723,8 +723,10 @@ func _verkehrslichter() -> void:
 				var yaw := rad_to_deg(atan2(fwd.x, fwd.z)) + (35.0 if k % 2 == 0 else 180.0 - 35.0)
 				var e: Dictionary = TrafficModels.entries[ci]
 				var nm := String(e.get("name", e.kind))
+				var len_m: float = {"car": 4.6, "truck": 9.0, "bus": 12.0}.get(e.kind, 5.0)
+				var end_pt := car.global_position + fwd * len_m * (0.35 if k % 2 == 0 else -0.35) + Vector3(0, 0.8, 0)
 				shot("vlicht_%s_%02d_%s_%s" % ["nacht" if night else "tag", ci, nm, "vorne" if k % 2 == 0 else "hinten"],
-					car.global_position + Vector3(0, 0.8, 0), 7.5, yaw, 18.0)
+					end_pt, 5.5 + len_m * 0.3, yaw, 18.0)
 				_vl_i += 1
 				return
 			step = 2
