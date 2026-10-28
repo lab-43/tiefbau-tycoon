@@ -25,9 +25,14 @@ func spawn_start_fleet() -> void:
 		else:
 			v.place(world.hq.gate_world() + Vector3(0, 0, 0), 0.0)
 		v.status_text = "In der Zentrale"
-		if id == "van_crew":
-			v.crew_aboard = 3
-			v.cargo.barriers = 1
+		_equip(v)
+
+
+## A new crew van comes with its crew (3) and a closure kit, bought or from the start fleet (#15).
+func _equip(v: Vehicle) -> void:
+	if v.def_id == "van_crew":
+		v.crew_aboard = 3
+		v.cargo.barriers = 1
 
 
 func _next_name(id: String) -> String:
@@ -69,6 +74,7 @@ func buy(id: String) -> Vehicle:
 	v.slot = si
 	v.place(world.hq.slots[si].pos, world.hq.slots[si].yaw)
 	v.status_text = "In der Zentrale"
+	_equip(v)
 	Events.ok("%s gekauft" % v.vname)
 	return v
 
@@ -97,6 +103,9 @@ func load_state(d: Dictionary) -> void:
 		var v := add_vehicle(vd.def, vd.name, vd.plate)
 		v.load_state(vd)
 		v.status_text = "Abgestellt"
+		# crew vans bought before #15 had no crew (saved crew counts the workers on site too) and no kit
+		if vd.def == "van_crew" and int(vd.get("crew", 0)) == 0:
+			_equip(v)
 	# machines that were on a lowbed
 	for vd in d.get("vehicles", []):
 		if vd.get("carried_by", "") != "":
