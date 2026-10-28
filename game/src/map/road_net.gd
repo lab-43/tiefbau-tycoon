@@ -22,6 +22,7 @@ const SHARP_MIN := 0.35       # below this angle (rad) between two roads their c
 const CORNER_REACH := 35.0    # curb corners further out than this along a road are not built (near-parallel roads)
 const PATH_HALF_W := 1.3      # junction asphalt reaches at least this far to each side of a turn path
 const CLOSE_R := 2.0          # junction areas built by union are closed by this radius (no notches, slivers)
+const ISLAND_OPEN := 0.75     # islands in a group area narrower than 1.5 m are filled, slivers removed
 const DEFAULT_SPEED_KMH := {
 	"motorway": 100, "trunk": 70, "primary": 50, "secondary": 50, "tertiary": 50, "busway": 50,
 	"unclassified": 50, "residential": 30, "road": 30, "living_street": 10, "service": 20,
@@ -95,7 +96,7 @@ func build(data: OsmData, hq: Dictionary = {}) -> void:
 	_merge_degree2()
 	_compact()
 	for e in edges:
-		e.pts = Geo.chaikin(e.pts, 2, 3.0)
+		e.pts = Geo.chaikin(e.pts, 3, 0.75)
 		e.cum = Geo.cumulative(e.pts)
 		e.len = e.cum[e.cum.size() - 1]
 	var t := Time.get_ticks_msec()
@@ -575,6 +576,7 @@ func _junction_geometry() -> void:
 		var corners: Array = st.corners
 		if n.has("group"):
 			_clear_inner_pieces(n, infos)
+			_pass_through_cuts(infos)
 		# clamp setbacks
 		for inf in infos:
 			var e: Dictionary = edges[inf.edge]
@@ -630,6 +632,32 @@ func _junction_geometry() -> void:
 		n.polygon = poly
 		if n.has("group"):
 			n["_pieces"] = _group_pieces(n, poly, infos, wedges)
+
+
+## A member of a merged group where one road simply continues as another (e.g. 2 lanes become 3):
+## the lanes shift sideways there. With the minimal cut the straight path had a metre of offset over
+## a metre of length and the cars jerked (#5, Billhorner Brückenstraße). Cut back like a transition
+## (`_continuation_geometry`) so that the shift spreads over several metres.
+func _pass_through_cuts(infos: Array) -> void:
+	var by_member := {}
+	for inf in infos:
+		var m := _member_of(inf.ref)
+		if m >= 0:
+			if not by_member.has(m):
+				by_member[m] = []
+			by_member[m].append(inf)
+	for m in by_member:
+		var pair: Array = by_member[m]
+		if pair.size() != 2 or (pair[0].d as Vector2).dot(pair[1].d) > -0.9:
+			continue
+		var shift := _lane_shift(pair[0].ref, pair[1].ref)
+		if shift < 0.3:
+			continue
+		var cut := minf(4.0 * shift + 1.0, 12.0)
+		for inf in pair:
+			inf.s = maxf(inf.s, cut)
+		pair[0]["pass"] = pair[1].ref
+		pair[1]["pass"] = pair[0].ref
 
 
 ## In a merged group a removed inner piece can cross an approach right at its end (a side road that
@@ -732,7 +760,8 @@ func _set_pts_from_node(er: int, pts: PackedVector2Array) -> void:
 
 
 ## Transition at a node with two roads: both are cut back a little (more if the width changes, so
-## that it changes gradually: 2.5 m per metre of width, at most 12 m each), and the piece between
+## that it changes gradually: 2.5 m per metre of width; 4 m per metre that lanes shift sideways; at
+## most 20 m each), and the piece between
 ## them follows the joint centre line with width and sidewalks running from one road's to the other's.
 func _continuation_geometry(n: Dictionary) -> void:
 	var ra: int = n.ends[0]
@@ -741,7 +770,8 @@ func _continuation_geometry(n: Dictionary) -> void:
 	var B: Dictionary = edges[rb >> 1]
 	var a_start := (ra & 1) == 0
 	var b_start := (rb & 1) == 0
-	var cut := clampf(2.5 * absf(A.width - B.width) + 1.5, 1.5, 12.0)
+	# long enough for the width change and for lanes that continue a bit to the side (S curve at most 1:8)
+	var cut := clampf(maxf(2.5 * absf(A.width - B.width) + 1.5, 4.0 * _lane_shift(ra, rb) + 1.0), 1.5, 20.0)
 	var sa: float = minf(cut, A.len * 0.45)
 	var sb: float = minf(cut, B.len * 0.45)
 	if a_start:
@@ -797,6 +827,32 @@ func _continuation_geometry(n: Dictionary) -> void:
 	n["cont_sw"] = sws
 
 
+## Largest sideways step a car makes going straight through a node with two roads (ends ra, rb), in
+## both directions, each lane to the nearest lane on the other side (as _nearest_out_lane will map it).
+func _lane_shift(ra: int, rb: int) -> float:
+	var worst := 0.0
+	for pair in [[ra, rb], [rb, ra]]:
+		var ei: int = pair[0] >> 1
+		var eo: int = pair[1] >> 1
+		var dir_in := 0 if (pair[0] & 1) == 1 else 1     # travelling towards the node
+		var dir_out := 0 if (pair[1] & 1) == 0 else 1    # travelling away from it
+		var xs_out: Array = []
+		for lo in lane_count(eo, dir_out):
+			var x: float = lane_offset_fwd_frame(edges[eo], dir_out, lo)
+			xs_out.append(x if dir_out == 0 else -x)
+		if xs_out.is_empty():
+			continue
+		for li in lane_count(ei, dir_in):
+			var xi: float = lane_offset_fwd_frame(edges[ei], dir_in, li)
+			if dir_in == 1:
+				xi = -xi
+			var best := INF
+			for xo in xs_out:
+				best = minf(best, absf(xo - xi))
+			worst = maxf(worst, best)
+	return worst
+
+
 ## On the outer side of a bend (more than 180° between two neighbouring roads) the two curbs meet in
 ## a point behind the cuts. A straight line between the cuts would cut into the carriageway, so the
 ## polygon and the corner sidewalk go through that point. Returns null if there is no such point.
@@ -830,7 +886,14 @@ func _group_pieces(n: Dictionary, star_poly: PackedVector2Array, infos: Array, w
 		pieces.append(ip)
 	n.erase("inner_polys")
 	n.erase("inner_dirs")
+	var by_ref := {}
 	for inf in infos:
+		by_ref[inf.ref] = inf
+	for inf in infos:
+		if inf.has("pass"):
+			if inf.ref < inf.pass and by_ref.has(inf.pass):
+				pieces.append(_taper_piece(inf, by_ref[inf.pass]))
+			continue
 		var e: Dictionary = edges[inf.edge]
 		var cut: float = minf(e.len, inf.s + 0.3)
 		var sub := Geo.sub_polyline(e.pts, e.cum, 0.0, cut) if inf.start else Geo.sub_polyline(e.pts, e.cum, e.len - cut, e.len)
@@ -843,6 +906,42 @@ func _group_pieces(n: Dictionary, star_poly: PackedVector2Array, infos: Array, w
 		left.append_array(right)
 		pieces.append(left)
 	return pieces
+
+
+## Carriageway between the cuts of a pass-through member (`_pass_through_cuts`): one strip along both
+## centre lines whose width runs smoothly from the one road to the other, instead of two rectangles
+## that meet with a step.
+func _taper_piece(A: Dictionary, B: Dictionary) -> PackedVector2Array:
+	var line := PackedVector2Array()
+	for k in 2:
+		var inf: Dictionary = A if k == 0 else B
+		var e: Dictionary = edges[inf.edge]
+		var cut: float = minf(e.len, inf.s + 0.3)
+		var sub := Geo.sub_polyline(e.pts, e.cum, 0.0, cut) if inf.start else Geo.sub_polyline(e.pts, e.cum, e.len - cut, e.len)
+		# A runs towards the member, B away from it
+		if (k == 0) == inf.start:
+			sub.reverse()
+		if k == 1 and not line.is_empty() and sub.size() > 0 and sub[0].distance_to(line[line.size() - 1]) < 0.01:
+			sub.remove_at(0)
+		line.append_array(sub)
+	if line.size() < 2:
+		return PackedVector2Array()
+	var cum := Geo.cumulative(line)
+	var total: float = maxf(0.01, cum[cum.size() - 1])
+	var wa: float = edges[A.edge].width * 0.5
+	var wb: float = edges[B.edge].width * 0.5
+	var offs := PackedFloat32Array()
+	for c in cum:
+		var t: float = c / total
+		offs.append(lerpf(wa, wb, t * t * (3.0 - 2.0 * t)))
+	var neg := PackedFloat32Array()
+	for o in offs:
+		neg.append(-o)
+	var left := Geo.offset_polyline_var(line, neg)
+	var right := Geo.offset_polyline_var(line, offs)
+	right.reverse()
+	left.append_array(right)
+	return left
 
 
 ## After the turn paths exist: the area of each merged junction group is the union of its pieces and
@@ -883,11 +982,16 @@ func _paths_leave(n: Dictionary) -> bool:
 	return false
 
 
-## A point of the path lies outside the polygon.
+## Part of the path lies outside the polygon. Sampled every 2 m: long straight paths have few
+## points, and their segments can cut a concave group area between two points inside it.
 func _path_leaves(pts: PackedVector2Array, poly: PackedVector2Array) -> bool:
-	for i in range(1, pts.size() - 1):
-		if not Geometry2D.is_point_in_polygon(pts[i], poly):
-			return true
+	for i in range(pts.size() - 1):
+		var a: Vector2 = pts[i]
+		var b: Vector2 = pts[i + 1]
+		var steps: int = maxi(1, ceili(a.distance_to(b) / 2.0))
+		for k in range(1 if i == 0 else 0, steps):
+			if not Geometry2D.is_point_in_polygon(a.lerp(b, float(k) / steps), poly):
+				return true
 	return false
 
 
@@ -896,26 +1000,49 @@ func _group_polygon(n: Dictionary, pieces: Array) -> void:
 	var outers: Array = u[0]
 	if outers.is_empty():
 		return
-	var best: PackedVector2Array = outers[0]
-	for o in outers:
-		if absf(Geo.polygon_area(o)) > absf(Geo.polygon_area(best)):
-			best = o
+	var bi := 0
+	for i in outers.size():
+		if absf(Geo.polygon_area(outers[i])) > absf(Geo.polygon_area(outers[bi])):
+			bi = i
+	var best: PackedVector2Array = outers[bi]
 	var grown := Geometry2D.offset_polygon(best, CLOSE_R, Geometry2D.JOIN_ROUND)
 	if grown.size() >= 1:
 		var shrunk := Geometry2D.offset_polygon(grown[0], -CLOSE_R, Geometry2D.JOIN_ROUND)
 		if shrunk.size() >= 1 and not Geometry2D.is_polygon_clockwise(shrunk[0]):
-			best = shrunk[0]
+			# the arcs are chords, so the closing cuts off convex corners by up to a metre: add the
+			# original back (a closing must never lose area, else notches appear at every road mouth)
+			var closed: PackedVector2Array = shrunk[0]
+			for r in Geometry2D.merge_polygons(closed, best):
+				if not Geometry2D.is_polygon_clockwise(r) and absf(Geo.polygon_area(r)) > absf(Geo.polygon_area(closed)):
+					closed = r
+			best = closed
+	# islands stay open, except where a piece (e.g. a turn path through a gap in the median) covers them
 	var holes: Array = []
 	for h in u[1]:
-		if absf(Geo.polygon_area(h)) > 20.0 and Geometry2D.is_point_in_polygon(Geo.polygon_centroid(h), best):
-			holes.append(h)
+		var parts: Array = [h]
+		for pc in pieces:
+			var nxt: Array = []
+			for part in parts:
+				for r in Geometry2D.clip_polygons(part, pc):
+					if not Geometry2D.is_polygon_clockwise(r):
+						nxt.append(r)
+			parts = nxt
+		for part in parts:
+			# opening: thin bridges and slivers left by the clipping go, they would show as specks
+			for sp in Geometry2D.offset_polygon(part, -ISLAND_OPEN, Geometry2D.JOIN_MITER):
+				if Geometry2D.is_polygon_clockwise(sp):
+					continue
+				for g in Geometry2D.offset_polygon(sp, ISLAND_OPEN, Geometry2D.JOIN_MITER):
+					if not Geometry2D.is_polygon_clockwise(g) and absf(Geo.polygon_area(g)) > 20.0 \
+							and Geometry2D.is_point_in_polygon(Geo.polygon_centroid(g), best):
+						holes.append(g)
 	n.polygon = best
 	n["holes"] = holes
 	n["area"] = true   # built by union: sidewalks next to it are clipped against it (RoadMesher)
 	var extra: Array = []
-	for o in outers:
-		if o != best and absf(Geo.polygon_area(o)) > 2.0:
-			extra.append(o)
+	for i in outers.size():
+		if i != bi and absf(Geo.polygon_area(outers[i])) > 2.0:
+			extra.append(outers[i])
 	n["extra_polys"] = extra
 
 
@@ -963,7 +1090,7 @@ func _build_lanes() -> void:
 			var nl := lane_count(ei, dir)
 			for li in nl:
 				var off := lane_offset_fwd_frame(e, dir, li)
-				var lp := Geo.offset_polyline(center, off)
+				var lp := Geo.drop_backtracks(Geo.offset_polyline(center, off))
 				if dir == 1:
 					lp.reverse()
 				lane_geo[lane_key(ei, dir, li)] = [lp, Geo.cumulative(lp)]
@@ -1070,6 +1197,8 @@ func _build_connectors() -> void:
 						lo = n_out - 1
 					elif m.turn in ["L", "U"]:
 						lo = 0
+					elif absf(m.ang) < deg_to_rad(35.0):
+						lo = _nearest_out_lane(ein, dir_in, li, m.edge, m.dir)
 					else:
 						if n_in == n_out:
 							lo = li
@@ -1085,6 +1214,76 @@ func _build_connectors() -> void:
 				if not lane_out.has(k) and not moves.is_empty():
 					var m0 = moves[0]
 					_add_connector(ni, ein, dir_in, li, m0.edge, m0.dir, 0, m0.turn)
+
+
+## Path from p0 (heading t0) to p3 (heading t3), points about 0.75 m apart. A turn becomes straight
+## - circular arc - straight with the largest radius that fits: constant curvature, no tight spot in
+## the middle (a cubic curve had one, cars jerked there). Nearly straight moves, and lanes that do not
+## meet in front of both ends, get a smooth cubic S curve.
+static func turn_path(p0: Vector2, t0: Vector2, p3: Vector2, t3: Vector2) -> PackedVector2Array:
+	var phi := absf(t0.angle_to(t3))
+	if phi > deg_to_rad(8.0) and phi < deg_to_rad(175.0):
+		var res = Geometry2D.line_intersects_line(p0, t0, p3, t3)
+		if res != null:
+			var X: Vector2 = res
+			var a := (X - p0).dot(t0)
+			var b := (p3 - X).dot(t3)
+			if a > 0.3 and b > 0.3:
+				var T := minf(a, b)
+				var r := T / tan(phi * 0.5)
+				var A := X - t0 * T
+				var B := X + t3 * T
+				var side := 1.0 if (t0.x * t3.y - t0.y * t3.x) > 0.0 else -1.0
+				var C: Vector2 = A + Geo.right_of(t0) * r * side
+				var a0 := (A - C).angle()
+				var sweep := wrapf((B - C).angle() - a0, -PI, PI)
+				var out := PackedVector2Array([p0])
+				if a - T > 0.05:
+					out.append(A)
+				var n := clampi(int(ceil(absf(sweep) * r / 0.75)), 2, 96)
+				for i in range(1, n):
+					out.append(C + Vector2.from_angle(a0 + sweep * float(i) / n) * r)
+				if b - T > 0.05:
+					out.append(B)
+				out.append(p3)
+				return out
+	var dist := p0.distance_to(p3)
+	if dist < 4.0 and ((p3 - p0).dot(t0) <= 0.0 or (p3 - p0).dot(t3) <= 0.0):
+		# the exit starts beside or behind the entry end: a curve would loop on the spot (the car spun)
+		return PackedVector2Array([p0, p3])
+	var kk := clampf(dist * 0.42, 0.5, 30.0)
+	var c1 := p0 + t0 * kk
+	var c2 := p3 - t3 * kk
+	var steps := clampi(int(dist / 0.75), 4, 64)
+	var pts := PackedVector2Array()
+	for i in steps + 1:
+		var t := float(i) / steps
+		var u := 1.0 - t
+		pts.append(p0 * u * u * u + c1 * 3.0 * u * u * t + c2 * 3.0 * u * t * t + p3 * t * t * t)
+	return pts
+
+
+## For a straight-on move: the lane of the exit road that lies closest to the straight continuation of
+## entry lane li (fewest sideways metres). Index matching shifted cars by several metres where the two
+## roads have different widths or lane counts.
+func _nearest_out_lane(e_in: int, d_in: int, li: int, e_out: int, d_out: int) -> int:
+	var g: Array = lane_geo[lane_key(e_in, d_in, li)]
+	var pin: PackedVector2Array = g[0]
+	var cin: PackedFloat32Array = g[1]
+	var p0 := pin[pin.size() - 1]
+	var t0 := (p0 - (Geo.sample(pin, cin, cin[cin.size() - 1] - 3.0)[0] as Vector2)).normalized()
+	var r := Geo.right_of(t0)
+	var best := 0
+	var best_x := INF
+	for lo in lane_count(e_out, d_out):
+		var go: Array = lane_geo.get(lane_key(e_out, d_out, lo), [])
+		if go.is_empty():
+			continue
+		var x := absf(((go[0] as PackedVector2Array)[0] - p0).dot(r))
+		if x < best_x - 0.01:
+			best_x = x
+			best = lo
+	return best
 
 
 ## In a merged junction group: can traffic entering at road end er_in leave at er_out along the
@@ -1112,9 +1311,16 @@ func _add_connector(ni: int, e_from: int, d_from: int, l_from: int, e_to: int, d
 	var pin: PackedVector2Array = gi[0]
 	var pout: PackedVector2Array = go[0]
 	var p0 := pin[pin.size() - 1]
-	var t0 := (p0 - pin[maxi(0, pin.size() - 2)]).normalized()
 	var p3 := pout[0]
-	var t3 := (pout[mini(1, pout.size() - 1)] - p3).normalized()
+	# directions over the last / first 3 m of the lanes (one short end segment can point anywhere)
+	var cin: PackedFloat32Array = gi[1]
+	var cout: PackedFloat32Array = go[1]
+	var t0 := (p0 - (Geo.sample(pin, cin, cin[cin.size() - 1] - 3.0)[0] as Vector2)).normalized()
+	var t3 := ((Geo.sample(pout, cout, 3.0)[0] as Vector2) - p3).normalized()
+	if t0 == Vector2.ZERO:
+		t0 = (p0 - pin[maxi(0, pin.size() - 2)]).normalized()
+	if t3 == Vector2.ZERO:
+		t3 = (pout[mini(1, pout.size() - 1)] - p3).normalized()
 	var dist := p0.distance_to(p3)
 	var pts := PackedVector2Array()
 	if turn == "U" and dist < 4.0:
@@ -1122,14 +1328,7 @@ func _add_connector(ni: int, e_from: int, d_from: int, l_from: int, e_to: int, d
 		var mid := (p0 + p3) * 0.5 + t0 * 3.5
 		pts = PackedVector2Array([p0, p0 + t0 * 2.5, mid, p3 + (-t3) * -0.0 + t0 * 2.5, p3])
 	else:
-		var kk := clampf(dist * 0.42, 0.5, 30.0)
-		var c1 := p0 + t0 * kk
-		var c2 := p3 - t3 * kk
-		var steps := clampi(int(dist / 1.5), 3, 24)
-		for i in steps + 1:
-			var t := float(i) / steps
-			var u := 1.0 - t
-			pts.append(p0 * u * u * u + c1 * 3.0 * u * u * t + c2 * 3.0 * u * t * t + p3 * t * t * t)
+		pts = turn_path(p0, t0, p3, t3)
 	var cum := Geo.cumulative(pts)
 	var ci := connectors.size()
 	connectors.append({"node": ni, "from": k_from, "to": k_to, "pts": pts, "cum": cum, "len": cum[cum.size() - 1],

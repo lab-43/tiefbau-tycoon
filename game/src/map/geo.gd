@@ -181,6 +181,21 @@ static func offset_polyline(pts: PackedVector2Array, off: float, miter_limit: fl
 	return out
 
 
+## Drop points where the line runs backwards: an offset line on the inner side of a short or sharp
+## bend overtakes itself (swallowtail). The end points stay.
+static func drop_backtracks(pts: PackedVector2Array) -> PackedVector2Array:
+	if pts.size() < 3:
+		return pts
+	var out := PackedVector2Array([pts[0]])
+	for i in range(1, pts.size()):
+		var q := pts[i]
+		while out.size() >= 2 and (out[out.size() - 1] - out[out.size() - 2]).dot(q - out[out.size() - 1]) < 0.0:
+			out.remove_at(out.size() - 1)
+		if q.distance_squared_to(out[out.size() - 1]) > 1e-8 or i == pts.size() - 1:
+			out.append(q)
+	return out
+
+
 static func point_in_polygon(p: Vector2, poly: PackedVector2Array) -> bool:
 	return Geometry2D.is_point_in_polygon(p, poly)
 

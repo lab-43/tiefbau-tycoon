@@ -79,11 +79,13 @@ func _bake_one(pbf: String, lat: float, lon: float, half: float) -> Dictionary:
 	for ln in LAYERS:
 		lay_out[ln] = Array(layers[ln])
 	var nodes: Array = []
-	for n in net.nodes:
+	for ni in net.nodes.size():
+		var n: Dictionary = net.nodes[ni]
 		var p: Vector2 = n.pos
 		if absf(p.x) > win or absf(p.y) > win:
 			continue
-		nodes.append({"pos": [p.x, p.y], "deg": n.ends.size(), "ctrl": n.ctrl, "poly": _flat(n.get("polygon", PackedVector2Array()))})
+		nodes.append({"idx": ni, "pos": [p.x, p.y], "deg": n.ends.size(), "ctrl": n.ctrl, "group": int(n.get("group", 0)),
+			"cont": n.get("cont", false), "area": n.get("area", false), "poly": _flat(n.get("polygon", PackedVector2Array()))})
 	var edges: Array = []
 	for e in net.edges:
 		if not _near(e.pts, win):
@@ -101,7 +103,7 @@ func _bake_one(pbf: String, lat: float, lon: float, half: float) -> Dictionary:
 		var c: Dictionary = net.connectors[ci]
 		if not _near(c.pts, win):
 			continue
-		conns.append({"from": c.from, "to": c.to, "turn": c.turn, "pts": _flat(c.pts)})
+		conns.append({"from": c.from, "to": c.to, "turn": c.turn, "node": c.node, "pts": _flat(c.pts)})
 	return {"half": half, "window": win, "layers": lay_out, "nodes": nodes, "edges": edges, "lanes": lanes,
 		"connectors": conns, "osm_roads": _osm_roads(data, win)}
 
