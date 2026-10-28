@@ -41,6 +41,7 @@ func layer(ck: Vector2i, name: String, colors := false) -> MeshLayer:
 	if not c.has(name):
 		var l := MeshLayer.new()
 		l.use_colors = colors
+		l.use_uvs = false   # no map shader reads UVs (they use world positions): saves memory and map file size
 		# buildings get their own base height, water lies flat at its level
 		if name != "building" and name != "water":
 			l.terrain = terrain

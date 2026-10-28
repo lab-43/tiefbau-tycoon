@@ -33,6 +33,7 @@ func layer(ck: Vector2i, name: String) -> MeshLayer:
 	var c: Dictionary = chunks[ck]
 	if not c.has(name):
 		var l := MeshLayer.new()
+		l.use_uvs = false   # no map shader reads UVs (they use world positions): saves memory and map file size
 		l.terrain = terrain
 		c[name] = l
 	return c[name]

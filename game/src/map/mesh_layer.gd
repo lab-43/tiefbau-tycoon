@@ -13,7 +13,7 @@ var use_uvs := true
 ## Set by the meshers on maps with ground heights (#8): every vertex is lifted onto the ground (or the bridge
 ## deck the mesher is building), flat polygons are cut into DRAPE cells so they follow the slopes.
 var terrain: Terrain = null
-const DRAPE := 15.0
+const DRAPE := 20.0
 
 
 func is_empty() -> bool:

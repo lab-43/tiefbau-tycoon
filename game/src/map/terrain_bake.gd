@@ -536,6 +536,7 @@ static func ground_layers(t: Terrain, chunks: Dictionary, chunk: float, chunk_or
 			var z := zs[j]
 			pos[j * nxv + i] = Vector3(x, t.sample(x, z), z)
 			nrm[j * nxv + i] = t.normal(x, z)
+	var local := {}   # chunk -> {grid vertex -> index in the chunk's layer} (shared vertices, 4x smaller)
 	for j in nzv - 1:
 		for i in nxv - 1:
 			var c := Vector2((xs[i] + xs[i + 1]) * 0.5, (zs[j] + zs[j + 1]) * 0.5)
@@ -547,11 +548,16 @@ static func ground_layers(t: Terrain, chunks: Dictionary, chunk: float, chunk_or
 				var nl := MeshLayer.new()
 				nl.use_uvs = false
 				lay["ground"] = nl
+				local[ck] = {}
 			var l: MeshLayer = lay["ground"]
+			var lm: Dictionary = local[ck]
 			var k0 := j * nxv + i
-			var base := l.verts.size()
+			var q := PackedInt32Array()
 			for k in [k0, k0 + 1, k0 + nxv + 1, k0 + nxv]:
-				l.verts.append(pos[k])
-				l.normals.append(nrm[k])
+				if not lm.has(k):
+					lm[k] = l.verts.size()
+					l.verts.append(pos[k])
+					l.normals.append(nrm[k])
+				q.append(lm[k])
 			# up-facing: (x,z) counter-clockwise as seen from above = clockwise in Godot's front-face rule
-			l.indices.append_array(PackedInt32Array([base, base + 1, base + 2, base, base + 2, base + 3]))
+			l.indices.append_array(PackedInt32Array([q[0], q[1], q[2], q[0], q[2], q[3]]))

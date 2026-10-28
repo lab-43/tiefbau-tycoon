@@ -8,6 +8,7 @@ varying vec3 wpos;
 void vertex() { wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
 void fragment() {
 	// water now lies above the ground, so it must open for construction pits like every other flat surface
+	DEPTH = water_depth(INV_VIEW_MATRIX[3].xyz, wpos, VIEW_MATRIX, PROJECTION_MATRIX, FRAGCOORD.z);
 	if (in_pit(wpos.xz)) { discard; }
 	float t = TIME * 0.05;
 	vec2 uv = wpos.xz * 0.15;

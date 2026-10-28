@@ -75,3 +75,23 @@ float terrain_depth(vec3 cam, vec3 wp, float off, mat4 view, mat4 proj, float fz
 	vec4 c = proj * view * vec4(cam + d * t, 1.0);
 	return c.z / c.w;
 }
+// Water areas lie flat; their bank lies inside them (TerrainBake keeps the land height up to the shore).
+// Where the ground rises above the water plane, the water is drawn on the ground (0.031 up, like the flat
+// layer order), so the shore is exactly the outline of the water area instead of a 5 m grid contour.
+float water_depth(vec3 cam, vec3 wp, mat4 view, mat4 proj, float fz) {
+	if (terrain_rect.w < 0.5 || proj[3][3] > 0.5) return fz;
+	if (terrain_h(wp.xz) + 0.031 <= wp.y) return fz;
+	vec3 d = wp - cam;
+	float t = 1.0;
+	for (int k = 0; k < 4; k++) {
+		vec3 p = cam + d * t;
+		vec3 hg = terrain_hg(p.xz);
+		bool bank = hg.x + 0.031 > wp.y;
+		float f = p.y - (bank ? hg.x + 0.031 : wp.y);
+		float df = d.y - (bank ? hg.y * d.x + hg.z * d.z : 0.0);
+		if (abs(df) < 1e-6) break;
+		t = clamp(t - f / df, 0.5, 1.0);
+	}
+	vec4 c = proj * view * vec4(cam + d * t, 1.0);
+	return c.z / c.w;
+}

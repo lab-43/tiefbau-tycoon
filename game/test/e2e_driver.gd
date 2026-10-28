@@ -584,6 +584,8 @@ func _repro(_delta: float) -> void:
 					world.camera_rig.set_view(Vector3(p.x, 0.0, p.z), 70.0, -35.0, 45.0)
 					shot("repro_stelle_%d" % (_pin_i + 1))
 					_pin_i += 1
+				elif _repro_view():
+					pass
 				else:
 					Clock.set_speed(speed)
 					step = 2
@@ -602,6 +604,32 @@ func _repro(_delta: float) -> void:
 				print("E2E OK repro – Ergebnisse in ", ProjectSettings.globalize_path(_out))
 				get_tree().quit(0)
 var _pin_i := 0
+var _view_i := 0
+
+
+## Extra pictures for a repro: --views=x,z,dist,yaw,pitch[,ohne]|... ("ohne" hides the buildings).
+func _repro_view() -> bool:
+	var spec := ""
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--views="):
+			spec = a.substr(8)
+	var views := spec.split("|", false)
+	for holder in world.city.get_children():
+		var b := holder.get_node_or_null("building")
+		if b:
+			b.visible = true
+	if _view_i >= views.size():
+		return false
+	var v := views[_view_i].split(",")
+	_view_i += 1
+	if v.size() > 5 and v[5] == "ohne":
+		for holder in world.city.get_children():
+			var b2 := holder.get_node_or_null("building")
+			if b2:
+				b2.visible = false
+	world.camera_rig.set_view(Vector3(float(v[0]), 0.0, float(v[1])), float(v[2]), float(v[3]), float(v[4]))
+	shot("repro_ansicht_%d" % _view_i)
+	return true
 
 
 ## Beacons (#1): every start-fleet vehicle has beacons that sit on its body (not floating), the flash
