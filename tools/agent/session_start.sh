@@ -26,6 +26,7 @@ MISS=""
 [ -z "$G" ] && MISS="$MISS Godot"
 [ -d game/assets/consim ] || MISS="$MISS Assets"
 [ -d game/.godot ] || MISS="$MISS Import"
+ls /usr/share/vulkan/icd.d/lvp_icd*.json >/dev/null 2>&1 || MISS="$MISS Vulkan-Treiber(Screenshots)"
 [ -n "$MISS" ] && echo "Umgebung unvollständig (fehlt:$MISS) → tools/setup_env.sh (Skill tycoon-dev)."
 echo "Meldungen, Übernahmen und Sperren liegen auf Jonathans PC: issues.py next in der Geräte-Shell (Skill issue-ablauf), nicht im Container."
 if [ -d docs/lessons ]; then
