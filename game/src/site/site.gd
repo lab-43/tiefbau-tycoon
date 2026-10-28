@@ -588,7 +588,9 @@ func _go_slot(v: Vehicle, spot: String, slot_s: float) -> void:
 
 func _behind_site(v: Vehicle) -> bool:
 	var r: Array = Geo.closest_on_polyline(lay._g[0], lay._g[1], v.pos2())
-	return r[1] > lay.tail_s() and r[0] < 6.0
+	# a machine backed off the low-loader stands with its rear in the tail taper (#24): past the work
+	# zone is enough, otherwise it drives around the block (1.2 km at walking pace for the R 938)
+	return r[1] > lay.tail_s() - SiteLayout.TAPER_OUT and r[0] < 6.0
 
 
 func _slot_arrived(v: Vehicle, spot: String, slot_s: float) -> void:

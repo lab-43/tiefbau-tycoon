@@ -25,6 +25,10 @@ var dig_shots := 0
 var load_round := 0           # 0: R 938, 1: S550
 var deck_checked := false
 var seen_dig := false
+var ex_away := -1.0           # farthest the R 938 got from the site between unloading and its slot (m)
+var ex_carried := false       # R 938 rode the low-loader to the site
+var ex_unloaded := false
+var ex_in_slot := false
 
 
 func ok(cond: bool, what: String) -> void:
@@ -185,6 +189,16 @@ func _watch_site(delta: float) -> void:
 	if site.phase != phase_seen:
 		phase_seen = site.phase
 		print("[%7.1f] PHASE %d %s | %s" % [drv.t, site.phase, site.step_id(), site.status])
+	# after the low-loader dropped it at the tail, the R 938 should back straight into its slot
+	if ex.carried_by != null:
+		ex_carried = true
+	elif ex_carried and ex.state != "loading":
+		ex_unloaded = true
+	if ex_unloaded and not ex_in_slot:
+		if site.in_place.has(ex):
+			ex_in_slot = true
+		var c := site.center3()
+		ex_away = maxf(ex_away, ex.pos2().distance_to(Vector2(c.x, c.z)))
 	if ex.rig and site.running and site.step_id() == "dig":
 		for n in ex.rig.chain + [ex.rig.bucket]:
 			var nm := String((n as Node3D).name)
@@ -193,20 +207,23 @@ func _watch_site(delta: float) -> void:
 			rig_max[nm] = maxf(rig_max.get(nm, a), a)
 	if site.step_id() == "dig" and site.running and dig_shots == 0 and site.progress > 0.25 and drv.shot_queue.is_empty():
 		Clock.set_speed(1)
-		drv.shot("fahrzeuge_graben_tag", site.center3() + Vector3(0, 1.0, 0), 30.0, -55.0, 35.0)
-		dig_shots = 1
+		Clock.minutes = 11.0 * 60.0     # daylight for the day picture, however long the drive took
 		t_mark = drv.t
-	elif dig_shots == 1 and drv.shot_queue.is_empty():
+		dig_shots = 1
+	elif dig_shots == 1 and drv.t > t_mark + 4.0:
+		drv.shot("fahrzeuge_graben_tag", site.center3() + Vector3(0, 1.0, 0), 30.0, -55.0, 35.0)
+		dig_shots = 2
+	elif dig_shots == 2 and drv.shot_queue.is_empty():
 		Clock.minutes = 22.0 * 60.0
 		t_mark = drv.t
-		dig_shots = 2
-	elif dig_shots == 2 and drv.shot_queue.is_empty() and drv.t > t_mark + 4.0:
-		drv.shot("fahrzeuge_graben_nacht", site.center3() + Vector3(0, 1.0, 0), 30.0, -55.0, 35.0)
 		dig_shots = 3
-	elif dig_shots == 3 and drv.shot_queue.is_empty():
+	elif dig_shots == 3 and drv.shot_queue.is_empty() and drv.t > t_mark + 4.0:
+		drv.shot("fahrzeuge_graben_nacht", site.center3() + Vector3(0, 1.0, 0), 30.0, -55.0, 35.0)
+		dig_shots = 4
+	elif dig_shots == 4 and drv.shot_queue.is_empty():
 		Clock.minutes = 11.0 * 60.0
 		Clock.set_speed(drv.speed)
-		dig_shots = 4
+		dig_shots = 5
 	log_t += delta
 	if log_t > 30.0:
 		log_t = 0.0
@@ -214,9 +231,10 @@ func _watch_site(delta: float) -> void:
 	if site.step_id() == "dig":
 		seen_dig = true
 	if seen_dig and site.step_id() != "dig":
-		if dig_shots in [1, 2, 3]:
+		if dig_shots in [1, 2, 3, 4]:
 			return
 		ok(site.terrain.remaining_dig() < 0.05, "Graben ausgehoben (Rest %.2f m³)" % site.terrain.remaining_dig())
+		ok(ex_in_slot and ex_away < 80.0, "R 938 nach dem Abladen direkt in die Baustelle, kein Umweg (größter Abstand %.0f m)" % ex_away)
 		if ex.rig:
 			ok(site.stats.spoil_m3 > 0.5, "Aushub in Kipper verladen (%.1f m³)" % site.stats.spoil_m3)
 			var jl: Dictionary = ex.meta.get("joint_limits_deg", {})
