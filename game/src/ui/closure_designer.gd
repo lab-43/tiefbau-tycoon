@@ -27,7 +27,9 @@ const TRAFFIC := Color(0.35, 0.78, 1.0)
 const MODES := [["single", "Einzeln", "Ein Teil pro Klick"], ["line", "Gerade", "Kette entlang einer Geraden: Klick Anfang, Klick Ende (weiter mit dem nächsten Klick)"],
 	["curve", "Kurve", "Kette entlang einer Kurve: Anfang klicken, dann die Richtung, dann das Ende (wie in Cities: Skylines)"],
 	["select", "Auswählen", "Teile anklicken oder aufziehen, verschieben, drehen (R), löschen (Entf)"], ["erase", "Radierer", "Teile anklicken oder überstreichen, um sie zu entfernen"],
-	["lane", "Fahrspur", "Fahrweg des Verkehrs verlegen: blaue Punkte ziehen, Klick auf die Linie setzt einen Punkt, Rechtsklick oder Entf löscht ihn"]]
+	["lane", "Fahrspur", "Fahrweg des Verkehrs verlegen: blaue Punkte ziehen, Klick auf die Linie setzt einen Punkt, Rechtsklick oder Entf löscht ihn"],
+	["slots", "Stellplätze", "Bagger, Kipper, Haufen, Kolonnenbus und Warteplatz verschieben"]]
+const SPOT_IDS := ["exc", "load", "pile", "van", "stage"]
 const HANDLE_PX := 11.0        # pick radius of traffic path handles (screen px)
 
 var site: Site
@@ -86,6 +88,9 @@ var traffic_lbl: Label
 var traffic_auto_btn: Button
 var lane_btn: Button
 var full_btn: CheckButton
+var spots_lbl: Label
+var spots_auto_btn: Button
+var _spot_hover := ""
 var info_lbl: Label
 
 
@@ -418,6 +423,23 @@ func _build_right() -> void:
 	tr_row.add_child(traffic_auto_btn)
 	v.add_child(tr_row)
 	v.add_child(UI.sep())
+	v.add_child(UI.caps("Stellplätze"))
+	spots_lbl = UI.label("", 12, UI.MUTED)
+	spots_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(spots_lbl)
+	var sp_row := UI.hbox(6)
+	var sp_btn := UI.button("Verschieben", "move")
+	sp_btn.tooltip_text = "Werkzeug „Stellplätze“: Bagger, Kipper, Haufen, Kolonnenbus und Warteplatz ziehen"
+	sp_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sp_btn.pressed.connect(func(): set_mode("slots"))
+	sp_row.add_child(sp_btn)
+	spots_auto_btn = UI.button("Automatisch", "rotate-ccw")
+	spots_auto_btn.tooltip_text = "Eigene Stellplätze verwerfen: das Spiel stellt die Fahrzeuge wieder selbst auf"
+	spots_auto_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	spots_auto_btn.pressed.connect(reset_slots)
+	sp_row.add_child(spots_auto_btn)
+	v.add_child(sp_row)
+	v.add_child(UI.sep())
 	v.add_child(UI.caps("Stückliste"))
 	bom_box = UI.vbox(2)
 	v.add_child(bom_box)
@@ -449,7 +471,7 @@ func set_kind(k: String) -> void:
 		_end_chain()
 	kind = k
 	rot = 0.0
-	if mode in ["select", "erase", "lane"]:
+	if mode in ["select", "erase", "lane", "slots"]:
 		mode = "single" if k != "line" else "line"
 	if k == "line" and mode == "single":
 		mode = "line"
@@ -476,7 +498,7 @@ func set_mode(m: String) -> void:
 
 func _refresh_tools() -> void:
 	for k in kind_btns:
-		(kind_btns[k] as Button).button_pressed = k == kind and not (mode in ["select", "erase", "lane"])
+		(kind_btns[k] as Button).button_pressed = k == kind and not (mode in ["select", "erase", "lane", "slots"])
 	for m in mode_btns:
 		(mode_btns[m] as Button).button_pressed = m == mode
 		(mode_btns[m] as Button).disabled = (m == "single" and kind == "line") or (m == "lane" and plan.full)
@@ -553,6 +575,9 @@ func _refresh_side() -> void:
 
 
 func _refresh_traffic_info() -> void:
+	spots_lbl.text = ("Eigene Stellplätze: " + ", ".join(plan.slots.keys().map(func(k): return _spot_name(str(k)))) + ".") if not plan.slots.is_empty() \
+		else "Stellplätze automatisch: Bagger hinter dem Graben, dahinter Kipper und Haufen."
+	spots_auto_btn.disabled = plan.slots.is_empty()
 	var own := not plan.traffic.is_empty()
 	var t := ""
 	full_btn.set_pressed_no_signal(plan.full)
@@ -648,6 +673,102 @@ func set_full(on: bool) -> void:
 	_press = {}
 	_push_undo(_snapshot())
 	plan.full = on
+	_changed()
+
+
+## Drop the player's machine and parking spots (#22).
+func reset_slots() -> void:
+	if plan.slots.is_empty():
+		return
+	_press = {}
+	_push_undo(_snapshot())
+	plan.slots = {}
+	_changed()
+
+
+static func _spot_name(id: String) -> String:
+	match id:
+		"exc":
+			return "Bagger"
+		"load":
+			return "Kipper"
+		"pile":
+			return "Haufen"
+		"van":
+			return "Kolonnenbus"
+		"stage":
+			return "Warteplatz"
+	return id
+
+
+## Reference point of a spot in lane coordinates (what the player drags): turret, tipper rear, pile
+## centre, crew van, first waiting spot.
+func _spot_ref(id: String) -> Vector2:
+	var sl: Dictionary = _ext.get("slots", lay.current_extent().slots)
+	match id:
+		"exc":
+			return Vector2(float(sl.tc), float(sl.exc_lat))
+		"load":
+			return Vector2(float(sl.load_rear), float(sl.load_lat))
+		"pile":
+			return Vector2(float(sl.pile_s), float(sl.pile_lat))
+		"van":
+			return Vector2(float(_ext.van), SiteLayout.CURB)
+		"stage":
+			var st: float = sl.stage
+			return Vector2(st if st >= 0.0 else float(_ext.det1) + 10.0, SiteLayout.CURB)
+	return Vector2.ZERO
+
+
+## Footprint of a spot in lane coordinates: Rect2(s0, lat0, ds, dlat).
+func _spot_rect(id: String) -> Rect2:
+	for sp in ClosurePlan.machine_spots(lay, _ext):
+		if sp.id == id:
+			return Rect2(float(sp.s0), float(sp.lat) - float(sp.half), float(sp.s1) - float(sp.s0), float(sp.half) * 2.0)
+	var r := _spot_ref(id)
+	return Rect2(r.x - 3.0, r.y - 1.1, 6.0, 2.2)
+
+
+## Spot under a screen point: the nearest handle first, else a footprint (they overlap: the pile lies
+## where the tipper stands while it is loaded during the digging).
+func _spot_at(screen: Vector2) -> String:
+	var best := HANDLE_PX
+	var out := ""
+	for id in SPOT_IDS:
+		var d := _scr(lay.lane_pt(_spot_ref(id).x, _spot_ref(id).y)).distance_to(screen)
+		if d < best:
+			best = d
+			out = id
+	if out != "":
+		return out
+	var lc := lay.lane_coords(_mp_raw)
+	var tol := 6.0 / maxf(0.01, _ppm)
+	for id2 in ["exc", "pile", "load", "van", "stage"]:
+		if _spot_rect(id2).grow(tol).has_point(lc):
+			return id2
+	return ""
+
+
+func _spot_drag() -> void:
+	if (_mp_raw - Vector2(_press.start)).length() * _ppm > 3.0:
+		_press.moved = true
+	if not _press.moved:
+		return
+	var lc := lay.lane_coords(_mp_raw) + Vector2(_press.grab)
+	if snap and not Input.is_key_pressed(KEY_ALT) and absf(lc.y) < 0.35:
+		lc.y = 0.0
+	plan.slots = (_press.orig as Dictionary).duplicate()
+	plan.slots[str(_press.id)] = lc
+	plan.custom = true
+	_ext = plan.extent(lay)
+
+
+func _spot_release(pr: Dictionary) -> void:
+	if not pr.moved:
+		return
+	var id: String = pr.id
+	plan.slots[id] = _spot_ref(id)   # what the layout made of it (kept where vehicles can get to)
+	_push_undo(pr.snap)
 	_changed()
 
 
@@ -1049,6 +1170,7 @@ func _update_hover() -> void:
 		_mp_raw = Vector2(gp.x, gp.z)
 		_mp = _snap_point(_mp_raw) if mode in ["single", "line", "curve"] else _mp_raw
 	_lane_hover = _handle_at(_mouse) if mode == "lane" and _over_map and _press.is_empty() else {}
+	_spot_hover = _spot_at(_mouse) if mode == "slots" and _over_map and _press.is_empty() else ""
 
 
 func _unhandled_input(ev: InputEvent) -> void:
@@ -1169,6 +1291,11 @@ func _left_down(shift: bool) -> void:
 			_erase_at(_mp_raw)
 		"lane":
 			_lane_press()
+		"slots":
+			var sid := _spot_at(_mouse)
+			if sid != "":
+				_press = {"type": "spot", "id": sid, "start": _mp_raw, "grab": _spot_ref(sid) - lay.lane_coords(_mp_raw),
+					"orig": plan.slots.duplicate(), "snap": _snapshot(), "moved": false}
 
 
 func _press_move() -> void:
@@ -1197,6 +1324,8 @@ func _press_move() -> void:
 			_erase_at(_mp_raw)
 		"lane":
 			_lane_drag()
+		"spot":
+			_spot_drag()
 
 
 func _left_up() -> void:
@@ -1233,6 +1362,8 @@ func _left_up() -> void:
 				_changed()
 		"lane":
 			_lane_release(pr)
+		"spot":
+			_spot_release(pr)
 	canvas.queue_redraw()
 
 
@@ -1264,20 +1395,18 @@ func _draw_plan() -> void:
 	var font := UI.font(600)
 	var ext: Dictionary = _ext if not _ext.is_empty() else lay.current_extent()
 	# work area, trench, machine slots, van spot
-	var wa := _lane_rect(lay.s_t0 - 0.5, lay.s_c1, -lay.lw * 0.5 + 0.15, lay.lw * 0.5)
+	var wa_end := lay.s_c1
+	if not _ext.is_empty():
+		for sp in ClosurePlan.machine_spots(lay, _ext):
+			wa_end = maxf(wa_end, float(sp.s1) + 0.5)
+	var wa := _lane_rect(lay.s_t0 - 0.5, wa_end, -lay.lw * 0.5 + 0.15, lay.lw * 0.5)
 	cv.draw_colored_polygon(wa, Color(UI.ACCENT, 0.13))
 	_dashed_poly(cv, wa, Color(UI.ACCENT, 0.75), 1.5, true)
 	var tr := _lane_rect(lay.s_t0, lay.s_t1, -lay.W * 0.5, lay.W * 0.5)
 	cv.draw_colored_polygon(tr, Color(0.33, 0.21, 0.11, 0.85))
 	cv.draw_polyline(_closed(tr), Color(0.75, 0.55, 0.35), 1.5, true)
-	var slot := _lane_rect(lay.s_t1 + 2.3, lay.s_c1 - 0.5, -1.1, 1.1)
-	cv.draw_polyline(_closed(slot), Color(UI.ACCENT, 0.95), 2.0, true)
-	var van_s: float = ext.van
-	var van := _lane_rect(van_s - 3.0, van_s + 3.0, SiteLayout.CURB - 1.1, SiteLayout.CURB + 1.1)
-	cv.draw_polyline(_closed(van), Color(WHITE, 0.75), 1.5, true)
 	_tag(cv, font, _scr(lay.lane_pt((lay.s_t0 + lay.s_t1) * 0.5, lay.W * 0.5 + 0.2)), "Graben %s m" % _fmt(lay.L), Color(0.95, 0.8, 0.6))
-	_tag(cv, font, _scr(lay.lane_pt((lay.s_t1 + 2.3 + lay.s_c1) * 0.5, 1.2)), "Bagger · Kipper", UI.ACCENT)
-	_tag(cv, font, _scr(lay.lane_pt(van_s, SiteLayout.CURB + 1.2)), "Kolonnenbus", WHITE)
+	_draw_spots(cv, font)
 	# traffic paths (dashed, arrows in travel direction); a full closure shows the closed road instead
 	if plan.full:
 		_draw_closed_road(cv, font, ext)
@@ -1402,6 +1531,72 @@ func _draw_closed_road(cv: Control, font: Font, ext: Dictionary) -> void:
 	_tag(cv, font, _scr(lay.lane_pt(a, ClosurePlan.road_span(lay, a).x - 0.5)), "Vollsperrung – Durchgangsverkehr fährt über andere Straßen", Color(1.0, 0.55, 0.5))
 
 
+## Machine and parking spots (#22): excavator, tipper while loading, pile and tipper while dumping,
+## crew van, first waiting spot. In the tool "Stellplätze" with handles and the excavator's reach.
+func _draw_spots(cv: Control, font: Font) -> void:
+	if _ext.is_empty():
+		return
+	var on := mode == "slots"
+	for sp in ClosurePlan.machine_spots(lay, _ext):
+		var id: String = sp.id
+		var r := _lane_rect(float(sp.s0), float(sp.s1), float(sp.lat) - float(sp.half), float(sp.lat) + float(sp.half))
+		var hot: bool = on and (_spot_hover == id or str(_press.get("id", "")) == id)
+		match id:
+			"exc":
+				cv.draw_colored_polygon(r, Color(UI.ACCENT, 0.32 if hot else 0.2))
+				cv.draw_polyline(_closed(r), Color(UI.ACCENT, 1.0), 3.0 if hot else 2.0, true)
+			"pile":
+				cv.draw_colored_polygon(r, Color(0.55, 0.42, 0.28, 0.7 if hot else 0.5))
+				cv.draw_polyline(_closed(r), Color(0.85, 0.7, 0.5), 2.0 if hot else 1.2, true)
+			"dump":
+				_dashed_poly(cv, r, Color(UI.ACCENT, 0.6), 1.2, true)
+			_:
+				cv.draw_polyline(_closed(r), Color(UI.ACCENT, 0.95), 3.0 if hot else 2.0, true)
+		if on:
+			# the spots overlap (the pile lies where the tipper is loaded): labels on alternating sides
+			var side: float = {"exc": 1.0, "load": -1.0, "pile": 1.0, "dump": -1.0}[id]
+			var extra: float = {"exc": 0.4, "load": 0.4, "pile": 1.5, "dump": 1.5}[id]
+			var at := lay.lane_pt((float(sp.s0) + float(sp.s1)) * 0.5, float(sp.lat) + side * (float(sp.half) + extra))
+			_tag(cv, font, _scr(at) - Vector2(30, 0), str(sp.label), UI.ACCENT if id != "pile" else Color(0.95, 0.8, 0.6))
+	if not on:
+		var ms: Array = ClosurePlan.machine_spots(lay, _ext)
+		_tag(cv, font, _scr(lay.lane_pt((float(ms[0].s0) + float(ms[1].s1)) * 0.5, float(ms[0].lat) + 1.2)), "Bagger · Kipper", UI.ACCENT)
+	for id2 in ["van", "stage"]:
+		var rf := _spot_rect(id2)
+		var r2 := _lane_rect(rf.position.x, rf.end.x, rf.position.y, rf.end.y)
+		var hot2: bool = on and (_spot_hover == id2 or str(_press.get("id", "")) == id2)
+		if id2 == "van":
+			cv.draw_polyline(_closed(r2), Color(WHITE, 0.95 if hot2 else 0.75), 3.0 if hot2 else 1.5, true)
+		elif on:
+			_dashed_poly(cv, r2, Color(WHITE, 0.8 if hot2 else 0.55), 1.5, true)
+		if id2 == "van" or on:
+			_tag(cv, font, _scr(lay.lane_pt(_spot_ref(id2).x, SiteLayout.CURB + 1.2)), _spot_name(id2), WHITE)
+	if not on:
+		return
+	# reach of the excavator from its turret (digging to the trench floor / tipper and pile)
+	var tc := lay.lane_pt(_spot_ref("exc").x, _spot_ref("exc").y)
+	for rr in [[SiteLayout.EXC_REACH_DIG, 0.55], [SiteLayout.EXC_REACH, 0.3]]:
+		var circ := PackedVector2Array()
+		for k in 65:
+			circ.append(_scr(tc + Vector2.from_angle(TAU * k / 64.0) * float(rr[0])))
+		for k in 64:
+			cv.draw_dashed_line(circ[k], circ[k + 1], Color(UI.ACCENT, float(rr[1])), 1.5, 6.0)
+	cv.draw_circle(_scr(tc), 4.0, UI.ACCENT)
+	for id3 in SPOT_IDS:
+		var q := _scr(lay.lane_pt(_spot_ref(id3).x, _spot_ref(id3).y))
+		var h3: bool = _spot_hover == id3 or str(_press.get("id", "")) == id3
+		cv.draw_circle(q, 6.5 if h3 else 5.0, WHITE if h3 else UI.ACCENT)
+		cv.draw_arc(q, 7.5 if h3 else 6.0, 0.0, TAU, 20, Color(DARK, 0.9), 1.5, true)
+	if _over_map:
+		var tip := ""
+		if str(_press.get("type", "")) == "spot":
+			tip = "%s · %s" % [_spot_name(str(_press.id)), _where(_mp_raw)]
+		elif _spot_hover != "":
+			tip = "Ziehen: %s verschieben" % _spot_name(_spot_hover)
+		if tip != "":
+			_tag(cv, font, _mouse + Vector2(16, 18), tip, WHITE)
+
+
 ## Handles of both traffic paths: squares at the ends (they slide along the lane), dots in between.
 func _draw_lane_handles(cv: Control, font: Font) -> void:
 	for pid in ["k", "k2"]:
@@ -1463,6 +1658,8 @@ func _hint_text() -> String:
 			return "Teile anklicken (Umschalt: mehrere) oder Rahmen aufziehen · ziehen = verschieben · R drehen · Entf löschen"
 		"erase":
 			return "Teile oder Markierungen anklicken oder überstreichen, um sie zu entfernen"
+		"slots":
+			return "Stellplätze: Bagger, Kipper, Haufen, Kolonnenbus oder Warteplatz ziehen · Kreise: Reichweite des Baggers (Graben / Kipper und Haufen) · Alt: ohne Einrasten"
 		"lane":
 			return "Fahrspur: Punkte ziehen · Klick auf die blaue Linie setzt einen Punkt · Rechtsklick/Entf löscht ihn · Anfang und Ende gleiten am Fahrstreifen · Alt: ohne Einrasten"
 	return ""

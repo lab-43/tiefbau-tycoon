@@ -13,6 +13,9 @@ const TAPER_OUT := 6.0
 const HEAD_GAP := 2.5
 const CURB := 2.2
 const TWO_WAY_GAP := 2.5       # m between the two traffic paths for both directions at once (#19)
+const EXC_REACH_DIG := 7.4     # m from the turret axis to the trench floor at its far end (measured with the rig, #22)
+const EXC_REACH := 8.2         # m from the turret axis to a tipper body or the top of the pile
+const EXC_REAR := 2.0          # m from the turret axis back to the excavator's rear (keep it off the trench)
 
 var net: RoadNet
 var key := -1
@@ -51,6 +54,14 @@ var obst1 := 0.0
 var k_ctrl: Array = []         # traffic path of K: Vector2(s, lateral) control points on K (#19)
 var k2_ctrl: Array = []        # traffic path of K2: Vector2(s2, lateral) control points on K2
 var two_way := false           # both paths far enough apart: no bottleneck/zipper needed
+# machine and parking spots (#22): defaults from the standard layout, a player plan moves them
+var exc_lat := 0.0             # lateral offset of the excavator slot (its s is s_exc, turret at s_tc)
+var load_rear := 0.0           # s of the tipper's rear end while the excavator loads it
+var load_lat := 0.0
+var pile_s := 0.0              # centre of the material pile; the tipper dumps with its rear 1.6 m behind it
+var pile_lat := 0.0
+var stage0 := -1.0             # first waiting spot behind the site (-1: automatic, 10 m after the detour)
+var _def_tc := 0.0
 var error := ""
 
 # machine geometry (from the extracted assets; fallbacks if missing)
@@ -107,6 +118,9 @@ func setup(n: RoadNet, k: int, start_s: float, length: float, width: float, dep:
 	s_t1 = s_t0 + L
 	s_tc = s_t1 + 2.9
 	s_exc = s_tc + exc_turret_z
+	_def_tc = s_tc
+	load_rear = s_exc + exc_front + 0.75
+	pile_s = load_rear + 1.6
 	s_c1 = dump_s(tip_rear) + tip_front + 1.0
 	s_taper1 = s_c1 + TAPER_OUT
 	s_det0 = s0 - 8.0
@@ -195,15 +209,19 @@ func lane_poly(sa: float, sb: float, lat_fn: Callable, step := 1.0) -> PackedVec
 # ------------------------------------------------------------------------------------------
 
 func load_s(rear_ext: float) -> float:
-	return s_exc + exc_front + 0.75 + rear_ext
+	return load_rear + rear_ext
 
 
 func dump_s(rear_ext: float) -> float:
-	return load_s(rear_ext) + 3.2
+	return pile_s + 1.6 + rear_ext
 
 
 func pile_center() -> Vector2:
-	return lane_pt(s_exc + exc_front + 0.75 + 1.6, 0.0)
+	return lane_pt(pile_s, pile_lat)
+
+
+func turret_pt() -> Vector2:
+	return lane_pt(s_tc, exc_lat)
 
 
 func van_pose() -> Dictionary:
@@ -215,7 +233,7 @@ func crew_point() -> Vector2:
 
 
 func stage_s(i: int) -> float:
-	return s_det1 + 10.0 + i * 14.0
+	return (stage0 if stage0 >= 0.0 else s_det1 + 10.0) + i * 14.0
 
 
 ## Lowbed parks after the tail so that its ramp lands behind the closure; returns the tractor origin s.
@@ -236,13 +254,18 @@ func trench_dir() -> Vector2:
 	return lane_dir((s_t0 + s_t1) * 0.5)
 
 
+## Area of the site on K (the closure and the machine spots, #22 may move them off the lane centre).
 func closure_polygon() -> PackedVector2Array:
 	var pts := PackedVector2Array()
 	var n := 16
+	var a := minf(s0, obst0) - 2.0
+	var b := maxf(maxf(s_taper1, tail_s()), pile_s + 1.6 + tip_rear + tip_front) + 2.0
+	var lo := minf(-lw * 0.5 - 0.3, minf(minf(exc_lat, load_lat), pile_lat) - 1.6)
+	var hi := maxf(lw * 0.5 + 1.5, maxf(maxf(exc_lat, load_lat), pile_lat) + 1.6)
 	for i in n + 1:
-		pts.append(lane_pt(lerpf(s0 - 2.0, s_taper1 + 2.0, float(i) / n), -lw * 0.5 - 0.3))
+		pts.append(lane_pt(lerpf(a, b, float(i) / n), lo))
 	for i in range(n, -1, -1):
-		pts.append(lane_pt(lerpf(s0 - 2.0, s_taper1 + 2.0, float(i) / n), lw * 0.5 + 1.5))
+		pts.append(lane_pt(lerpf(a, b, float(i) / n), hi))
 	return pts
 
 
@@ -308,7 +331,8 @@ func in_lane(lc: Vector2) -> bool:
 func current_extent() -> Dictionary:
 	return {"det0": s_det0, "det1": s_det1, "full0": p_full0, "full1": p_full1, "obst0": obst0, "obst1": obst1,
 		"van": s_van, "s2_a": s2_a, "s2_b": s2_b, "shift": shift, "k_ctrl": k_ctrl.duplicate(), "k2_ctrl": k2_ctrl.duplicate(),
-		"two_way": two_way}
+		"two_way": two_way, "slots": {"tc": s_tc, "exc_lat": exc_lat, "load_rear": load_rear, "load_lat": load_lat,
+		"pile_s": pile_s, "pile_lat": pile_lat, "stage": stage0}}
 
 
 func default_extent() -> Dictionary:
@@ -316,6 +340,7 @@ func default_extent() -> Dictionary:
 	var ext := {"det0": s0 - 8.0, "det1": s_taper1 + 5.0, "full0": s_c0 - 1.0, "full1": s_c1, "obst0": s0 + 1.0,
 		"obst1": s_taper1 - 1.0, "van": s0 - 20.0, "s2_a": k2.s2_a, "s2_b": k2.s2_b, "shift": k2.shift}
 	_finish_extent(ext, {})
+	_finish_slots(ext, {})
 	return ext
 
 
@@ -444,10 +469,58 @@ static func paths_apart(a: PackedVector2Array, b: PackedVector2Array, min_gap :=
 ## Traffic geometry for the items of a player plan: the detour starts 8 m before the first item that
 ## stands in K and reaches the full shift where the plan blocks K up to its traffic-side edge. Kept
 ## within limits so the crew van, the machine slots and the waiting spots still fit.
-func extent_for(items: Array, traffic: Dictionary = {}) -> Dictionary:
+func extent_for(items: Array, traffic: Dictionary = {}, slots: Dictionary = {}) -> Dictionary:
 	var ext := _extent_items(items)
 	_finish_extent(ext, traffic)
+	_finish_slots(ext, slots)
 	return ext
+
+
+## Machine and parking spots of a plan (#22). slots (lane coordinates, all optional): exc = turret
+## (s, lat), load = tipper rear while loading (s, lat), pile = pile centre (s, lat), van / stage = (s, _)
+## along the curb. Kept where the vehicles can get to: behind the trench, in order excavator → tipper,
+## between the far edge of the road and 1.5 m onto the curb; reach and traffic are checked by the plan.
+func _finish_slots(ext: Dictionary, slots: Dictionary) -> void:
+	var tc := _def_tc
+	var el := 0.0
+	if slots.has("exc"):
+		var v: Vector2 = slots.exc
+		tc = clampf(v.x, s_t1 + EXC_REAR, s_t1 + 12.0)
+		el = _clamp_lat(tc, v.y)
+	var front := tc + exc_turret_z + exc_front
+	var lr := front + 0.75
+	var ll := 0.0
+	if slots.has("load"):
+		var v2: Vector2 = slots.load
+		lr = clampf(v2.x, front + 0.3, front + 10.0)
+		ll = _clamp_lat(lr, v2.y)
+	var ps := lr + 1.6
+	var pl := ll
+	if slots.has("pile"):
+		var v3: Vector2 = slots.pile
+		ps = clampf(v3.x, front + 0.8, front + 12.0)
+		pl = _clamp_lat(ps, v3.y)
+	elif slots.has("load"):
+		ps = lr + 1.6
+	var st := -1.0
+	if slots.has("stage"):
+		st = clampf((slots.stage as Vector2).x, float(ext.det1) + 6.0, maxf(float(ext.det1) + 6.0, len_k - 14.0))
+	if slots.has("van"):
+		ext.van = clampf((slots.van as Vector2).x, 15.0, maxf(15.0, float(ext.det0) - 8.0))
+	ext["slots"] = {"tc": tc, "exc_lat": el, "load_rear": lr, "load_lat": ll, "pile_s": ps, "pile_lat": pl, "stage": st}
+
+
+func _clamp_lat(s: float, lat: float) -> float:
+	var sp := road_span(s)
+	return clampf(lat, sp.x + 1.3, lw * 0.5 + 1.5)
+
+
+## Lateral extent of the whole carriageway (K and K2) in K coordinates near s: Vector2(lo, hi).
+func road_span(s: float) -> Vector2:
+	var away := 1.0 if oncoming else -1.0
+	var s2: float = lane2_coords(lane_pt(s)).x
+	var far: float = lane_coords(lane2_pt(s2, away * lw2 * 0.5)).y
+	return Vector2(minf(far, -lw * 0.5), maxf(far, lw * 0.5))
 
 
 func _extent_items(items: Array) -> Dictionary:
@@ -502,6 +575,16 @@ func apply_extent(ext: Dictionary) -> void:
 	k_ctrl = (ext.k_ctrl as Array).duplicate() if ext.has("k_ctrl") else auto_k_ctrl(ext)
 	k2_ctrl = (ext.k2_ctrl as Array).duplicate() if ext.has("k2_ctrl") else [Vector2(s2_a, 0.0), Vector2(s2_b, 0.0)]
 	two_way = bool(ext.get("two_way", false))
+	var sl: Dictionary = ext.get("slots", {})
+	if not sl.is_empty():
+		s_tc = sl.tc
+		s_exc = s_tc + exc_turret_z
+		exc_lat = sl.exc_lat
+		load_rear = sl.load_rear
+		load_lat = sl.load_lat
+		pile_s = sl.pile_s
+		pile_lat = sl.pile_lat
+		stage0 = sl.stage
 
 
 func detour_pts_for(ext: Dictionary) -> PackedVector2Array:

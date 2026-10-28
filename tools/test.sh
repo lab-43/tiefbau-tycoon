@@ -126,6 +126,9 @@ for s in "${SCEN[@]}"; do
       if grep -q "SCRIPT ERROR" /tmp/tt_e2e_umbau.log; then FAIL=1; echo "FAIL  umbau: Skriptfehler im Log"; grep -A3 "SCRIPT ERROR" /tmp/tt_e2e_umbau.log | head -8 | sed 's/^/      /'; fi ;;
     fahrzeuge)  # new machines (#24): HQ, ground/lights/joints, low-loader round trips, R 938 digging
       run fahrzeuge "E2E OK fahrzeuge" --e2e=fahrzeuge ;;
+    stellplaetze)  # machine and parking spots (#22): vehicles park where planned, excavator reaches them
+      run stellplaetze "E2E OK stellplaetze" --e2e=stellplaetze
+      if grep -q "SCRIPT ERROR" /tmp/tt_e2e_stellplaetze.log; then FAIL=1; echo "FAIL  stellplaetze: Skriptfehler im Log"; grep -A3 "SCRIPT ERROR" /tmp/tt_e2e_stellplaetze.log | head -8 | sed 's/^/      /'; fi ;;
     *) echo "unbekanntes Szenario: $s"; FAIL=1 ;;
   esac
 done

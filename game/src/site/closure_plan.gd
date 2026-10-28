@@ -31,6 +31,7 @@ var lines: Array = []       # PackedVector2Array per yellow marking
 var custom := false         # false = standard template (layout order, traffic geometry unchanged)
 var traffic := {}           # player-laid traffic paths (#19): {"k": [Vector2(s, lat)], "k2": [...]}; empty = automatic
 var full := false           # full road closure (#20): no through traffic on the site's road, it takes other roads
+var slots := {}             # machine and parking spots laid by the player (#22): {exc|load|pile|van|stage: Vector2(s, lat)}
 
 
 static func is_linear(kind: String) -> bool:
@@ -98,10 +99,27 @@ static func _across(lay: SiteLayout, s: float, from_k2: bool) -> Array:
 
 ## Lateral extent of the whole carriageway (K and K2) in K coordinates near s: Vector2(lo, hi).
 static func road_span(lay: SiteLayout, s: float) -> Vector2:
-	var away := 1.0 if lay.oncoming else -1.0
-	var s2: float = lay.lane2_coords(lay.lane_pt(s)).x
-	var far: float = lay.lane_coords(lay.lane2_pt(s2, away * lay.lw2 * 0.5)).y
-	return Vector2(minf(far, -lay.lw * 0.5), maxf(far, lay.lw * 0.5))
+	return lay.road_span(s)
+
+
+## Footprints of the machines at their spots (#22), in lane coordinates: [{id, label, s0, s1, lat, half}]
+## (s0..s1 along K, lat ± half across). From the extent's resolved slots.
+static func machine_spots(lay: SiteLayout, ext: Dictionary) -> Array:
+	var sl: Dictionary = ext.get("slots", {})
+	if sl.is_empty():
+		sl = lay.current_extent().slots
+	var tc: float = sl.tc
+	var tip_len := lay.tip_rear + lay.tip_front
+	var lr: float = sl.load_rear
+	var ps: float = sl.pile_s
+	# chassis widths as in the standard layout (its Leitbaken stand 0.2 m beside them); the excavator's
+	# tail swings over low things, its chassis starts 0.6 m behind the turret axis
+	return [
+		{"id": "exc", "label": "Bagger", "s0": tc - 0.6, "s1": tc + lay.exc_turret_z + lay.exc_front, "lat": float(sl.exc_lat), "half": 1.1},
+		{"id": "load", "label": "Kipper (Laden)", "s0": lr, "s1": lr + tip_len, "lat": float(sl.load_lat), "half": 1.1},
+		{"id": "pile", "label": "Haufen", "s0": ps - 1.2, "s1": ps + 1.2, "lat": float(sl.pile_lat), "half": 1.1},
+		{"id": "dump", "label": "Kipper (Abkippen)", "s0": ps + 1.6, "s1": ps + 1.6 + tip_len, "lat": float(sl.pile_lat), "half": 1.1},
+	]
 
 
 ## The standard closure of the layout (what the game built before #9), in its build order.
@@ -122,6 +140,7 @@ func copy() -> ClosurePlan:
 		p.lines.append(PackedVector2Array(l))
 	p.custom = custom
 	p.full = full
+	p.slots = slots.duplicate()
 	for k in traffic:
 		p.traffic[k] = (traffic[k] as Array).duplicate()
 	return p
@@ -129,7 +148,7 @@ func copy() -> ClosurePlan:
 
 ## Traffic geometry this plan leads to (detour, blocked range, crew van spot, traffic paths).
 func extent(lay: SiteLayout) -> Dictionary:
-	return lay.extent_for(items, traffic) if custom else lay.default_extent()
+	return lay.extent_for(items, traffic, slots) if custom else lay.default_extent()
 
 
 func is_empty() -> bool:
@@ -452,8 +471,10 @@ func checks(lay: SiteLayout) -> Array:
 			break
 	out.append({"id": "spur", "ok": through == "", "required": true, "text": "Fahrspuren am Arbeitsbereich vorbei",
 		"hint": ("Eine Fahrspur führt %s durch den Arbeitsbereich. " % through if through != "" else "") + "Mit dem Werkzeug „Fahrspur“ die blauen Linien verschieben."})
-	# 5. machine slots free
-	out.append(_check_plaetze(lay, lc_of))
+	# 5. machine slots free, within reach, off the traffic paths (#22)
+	out.append(_check_plaetze(lay, lc_of, ext))
+	out.append(_check_reach(lay, ext))
+	out.append(_check_spots_traffic(lay, ext))
 	# 6. taper ahead of the cross barrier
 	var n_taper := 0
 	for i in items.size():
@@ -505,14 +526,56 @@ func _check_grube(lay: SiteLayout, lc_of: Array) -> Dictionary:
 		"hint": "Absperrgitter an beiden Längsseiten des Grabens."}
 
 
-func _check_plaetze(lay: SiteLayout, lc_of: Array) -> Dictionary:
+func _check_plaetze(lay: SiteLayout, lc_of: Array, ext: Dictionary) -> Dictionary:
 	var slot_block: Array = []
+	var spots := machine_spots(lay, ext)
 	for i in items.size():
 		var lc6: Vector2 = lc_of[i]
-		if lc6.x > lay.s_t1 + 2.3 and lc6.x < lay.s_c1 - 0.5 and absf(lc6.y) < 1.1:
-			slot_block.append(i)
+		for sp in spots:
+			if lc6.x > float(sp.s0) and lc6.x < float(sp.s1) and absf(lc6.y - float(sp.lat)) < float(sp.half):
+				slot_block.append(i)
+				break
 	return {"id": "plaetze", "ok": slot_block.is_empty(), "required": true, "text": "Platz für Bagger und Kipper frei", "bad": slot_block,
-		"hint": _bad_text(slot_block, "im Maschinenplatz", lay) + "Im orange umrandeten Platz darf nichts stehen."}
+		"hint": _bad_text(slot_block, "auf einem Stellplatz", lay) + "Auf den orange umrandeten Stellplätzen darf nichts stehen."}
+
+
+## The excavator reaches the whole trench, the tipper it loads and the pile (#22).
+func _check_reach(lay: SiteLayout, ext: Dictionary) -> Dictionary:
+	var sl: Dictionary = ext.get("slots", lay.current_extent().slots)
+	var tc := Vector2(float(sl.tc), float(sl.exc_lat))
+	var why := ""
+	var d_trench := tc.distance_to(Vector2(lay.s_t0, 0.0))
+	var d_load := tc.distance_to(Vector2(float(sl.load_rear) + 2.0, float(sl.load_lat)))
+	var d_pile := tc.distance_to(Vector2(float(sl.pile_s), float(sl.pile_lat)))
+	if d_trench > SiteLayout.EXC_REACH_DIG:
+		why = "Bis zum vorderen Grabenende sind es %s m, der Bagger gräbt höchstens %s m weit. " % [_fmt(d_trench), _fmt(SiteLayout.EXC_REACH_DIG)]
+	if d_load > SiteLayout.EXC_REACH:
+		why += "Den Kipper erreicht er nicht (%s m, höchstens %s m). " % [_fmt(d_load), _fmt(SiteLayout.EXC_REACH)]
+	if d_pile > SiteLayout.EXC_REACH:
+		why += "Den Haufen erreicht er nicht (%s m, höchstens %s m). " % [_fmt(d_pile), _fmt(SiteLayout.EXC_REACH)]
+	return {"id": "reichweite", "ok": why == "", "required": true, "text": "Bagger erreicht Graben, Kipper und Haufen",
+		"hint": why + "Mit dem Werkzeug „Stellplätze“ den Bagger näher an den Graben oder Kipper und Haufen näher an den Bagger setzen."}
+
+
+## No machine spot lies on the path of the traffic (#22).
+func _check_spots_traffic(lay: SiteLayout, ext: Dictionary) -> Dictionary:
+	var paths: Array = [lay.detour_pts_for(ext), lay.zone2_pts_for(ext)]
+	var hit := ""
+	for sp in machine_spots(lay, ext):
+		for k in 3:
+			var s := lerpf(float(sp.s0), float(sp.s1), k * 0.5)
+			for side in [-1.0, 1.0]:
+				var q := lay.lane_pt(s, float(sp.lat) + side * float(sp.half))
+				for pth in paths:
+					var pp: PackedVector2Array = pth
+					if pp.size() >= 2 and float(Geo.closest_on_polyline(pp, Geo.cumulative(pp), q)[0]) < 1.1:
+						hit = str(sp.label)
+			if hit != "":
+				break
+		if hit != "":
+			break
+	return {"id": "stellplatz_verkehr", "ok": hit == "", "required": true, "text": "Stellplätze außerhalb des Fahrwegs",
+		"hint": ("%s steht im Fahrweg des Verkehrs. " % hit if hit != "" else "") + "Stellplätze oder Fahrspuren verschieben."}
 
 
 ## Checks of a full road closure (#20): no traffic passes, so no separation, detour or priority rules;
@@ -528,7 +591,9 @@ func _checks_full(lay: SiteLayout, lc_of: Array) -> Array:
 		out.append({"id": "voll_hinten", "ok": back >= 0.0, "required": true, "text": "Fahrbahn hinter dem Arbeitsbereich ganz gesperrt",
 			"hint": "Der Gegenverkehr kommt von der anderen Seite: auch hinter dem Platz für Bagger und Kipper quer über die ganze Fahrbahn absperren."})
 	out.append(_check_grube(lay, lc_of))
-	out.append(_check_plaetze(lay, lc_of))
+	var ext_f := extent(lay)
+	out.append(_check_plaetze(lay, lc_of, ext_f))
+	out.append(_check_reach(lay, ext_f))
 	var z250 := false
 	var warn := false
 	for i in items.size():
@@ -652,13 +717,21 @@ func to_dict() -> Dictionary:
 		for v in (traffic[k] as Array):
 			arr.append([(v as Vector2).x, (v as Vector2).y])
 		tr[k] = arr
-	return {"v": 1, "custom": custom, "items": its, "lines": ls, "traffic": tr, "full": full}
+	var sd := {}
+	for k2 in slots:
+		sd[k2] = [(slots[k2] as Vector2).x, (slots[k2] as Vector2).y]
+	return {"v": 1, "custom": custom, "items": its, "lines": ls, "traffic": tr, "full": full, "slots": sd}
 
 
 static func from_dict(d: Dictionary) -> ClosurePlan:
 	var p := ClosurePlan.new()
 	p.custom = bool(d.get("custom", true))
 	p.full = bool(d.get("full", false))
+	var sd: Dictionary = d.get("slots", {})
+	for k in sd:
+		var q: Array = sd[k]
+		if q.size() >= 2:
+			p.slots[str(k)] = Vector2(float(q[0]), float(q[1]))
 	for a in d.get("items", []):
 		var arr: Array = a
 		if arr.size() < 4 or not KINDS.has(str(arr[0])):

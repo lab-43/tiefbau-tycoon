@@ -59,6 +59,7 @@ var kit_used := false            # the closure kit is out of the crew van (taken
 var rebuild := false             # an accepted plan still has to be built during the works
 var _rebuilding := false         # the crew is rebuilding right now
 var _pending_plan: ClosurePlan = null   # accepted while a machine cycle ran; applied at the next safe point
+var _moving := {}                # Vehicle -> true: re-parking inside the closure after a plan change (#22)
 const WORK_STEPS := ["dig", "pipe", "refill", "asphalt", "demob"]
 var workers: Array = []
 var crew_van: Vehicle
@@ -405,6 +406,7 @@ func release_vehicle(v: Vehicle) -> void:
 		_crew_board()
 		crew_van = null
 	vehicles.erase(v)
+	_moving.erase(v)
 	spot_of.erase(v)
 	in_place.erase(v)
 	_tip_busy.erase(v)
@@ -428,6 +430,9 @@ func release_vehicle(v: Vehicle) -> void:
 ## Called when a vehicle that is working here drives off on its own command.
 func on_vehicle_leaving(v: Vehicle) -> void:
 	in_place.erase(v)
+	if _moving.has(v) and v.state != "driving":
+		return   # only moving to its new spot inside the closure (#22)
+	_moving.erase(v)   # sent away (also while it was moving to its new spot)
 	spot_of.erase(v)
 	v.working = false
 	if v == crew_van:
@@ -484,7 +489,7 @@ func _dispatch(v: Vehicle) -> void:
 			if phase >= 6:
 				_return_to_hq(v)
 			elif traffic_on and (occupant("exc") == null or occupant("exc") == v) and (occupant("load") == null or step_id() == "closure"):
-				_go_slot(v, "exc", lay.s_exc)
+				_go_slot(v, "exc", lay.s_exc, lay.exc_lat)
 			else:
 				_go_stage(v)
 		"bulk":
@@ -519,7 +524,7 @@ func _flatbed_next(v: Vehicle) -> void:
 	if phase == 0:
 		_go_stage(v)
 	elif step_id() == "pipe" and traffic_on and occupant("load") == null:
-		_go_slot(v, "load", lay.load_s(v.rear_ext))
+		_go_slot(v, "load", lay.load_s(v.rear_ext), lay.load_lat)
 	else:
 		_go_stage(v)
 
@@ -554,8 +559,17 @@ func _go_stage(v: Vehicle) -> void:
 		_reserve(v, "stage")
 
 
+## Lateral offset along a manoeuvre that ends at (sb, lb): from la it blends smoothly over the last
+## `blend` m before sb (the spots of #22 may lie off the lane centre).
+static func _lat_blend(sa: float, la: float, sb: float, lb: float, blend := 10.0) -> Callable:
+	var span := maxf(0.5, minf(blend, absf(sb - sa)))
+	return func(s: float) -> float:
+		var t := clampf(1.0 - absf(sb - s) / span, 0.0, 1.0)
+		return lerpf(la, lb, t * t * (3.0 - 2.0 * t))
+
+
 ## Tail entry: road to a stop point behind the closure, then reverse along the closed lane into the slot.
-func _go_slot(v: Vehicle, spot: String, slot_s: float) -> void:
+func _go_slot(v: Vehicle, spot: String, slot_s: float, slot_lat := 0.0) -> void:
 	var obs_s0 := lay.s_det1 - 4.0
 	# already waiting at the curb behind the site → reverse directly from there
 	if v.state == "parked" and v.pos2().distance_to(lay.lane_pt(lay.stage_s(0), SiteLayout.CURB)) < 60.0 and _behind_site(v):
@@ -563,17 +577,17 @@ func _go_slot(v: Vehicle, spot: String, slot_s: float) -> void:
 		var s_here: float = Geo.closest_on_polyline(lay._g[0], lay._g[1], p0)[1]
 		var join_s := s_here - 7.0
 		var a := HQ.bezier(p0, p0 - v.forward2() * 4.0, lay.lane_pt(join_s + 3.0), lay.lane_pt(join_s))
-		var b := lay.lane_poly(join_s, slot_s, func(_s): return 0.0)
+		var b := lay.lane_poly(join_s, slot_s, _lat_blend(join_s, 0.0, slot_s, slot_lat))
 		var path := HQ.join(a, b)
 		var pc := Router.poly_piece(path, 1.8, true, "rev")
-		if v.drive_plan({}, job.short_title(), [], func(veh): _slot_arrived(veh, spot, slot_s), [pc], {"key": lay.key, "s0": obs_s0, "s1": s_here + 6.0}):
+		if v.drive_plan({}, job.short_title(), [], func(veh): _slot_arrived(veh, spot, slot_s, slot_lat), [pc], {"key": lay.key, "s0": obs_s0, "s1": s_here + 6.0}):
 			_reserve(v, spot)
 		return
 	var s_stop := minf(lay.s_det1 + 3.0 + v.front_ext, lay.len_k - 1.0)
-	var rev_pts := lay.lane_poly(s_stop, slot_s, func(_s): return 0.0)
+	var rev_pts := lay.lane_poly(s_stop, slot_s, _lat_blend(s_stop, 0.0, slot_s, slot_lat))
 	var rev := Router.poly_piece(rev_pts, 1.8, true, "rev")
 	rev["cusp"] = true
-	var ok: bool = v.drive_plan({"key": lay.key, "s": s_stop}, job.short_title(), [rev], func(veh): _slot_arrived(veh, spot, slot_s))
+	var ok: bool = v.drive_plan({"key": lay.key, "s": s_stop}, job.short_title(), [rev], func(veh): _slot_arrived(veh, spot, slot_s, slot_lat))
 	if ok:
 		_reserve(v, spot)
 	if ok and v.agent:
@@ -593,10 +607,40 @@ func _behind_site(v: Vehicle) -> bool:
 	return r[1] > lay.tail_s() - SiteLayout.TAPER_OUT and r[0] < 6.0
 
 
-func _slot_arrived(v: Vehicle, spot: String, slot_s: float) -> void:
-	var p := lay.pose(slot_s, 0.0)
+func _slot_arrived(v: Vehicle, spot: String, slot_s: float, slot_lat := 0.0) -> void:
+	_moving.erase(v)
+	var p := lay.pose(slot_s, slot_lat)
 	v.place(gw(p.pos, 0.0), p.yaw)
 	_arrived(v, spot)
+
+
+## Where a vehicle at one of the machine spots belongs under the plan in force: {s, lat}.
+func _spot_target(v: Vehicle, spot: String) -> Dictionary:
+	if spot == "exc":
+		return {"s": lay.s_exc, "lat": lay.exc_lat}
+	if role(v) == "bulk" and phase > 2:
+		return {"s": lay.dump_s(v.rear_ext), "lat": lay.pile_lat}
+	return {"s": lay.load_s(v.rear_ext), "lat": lay.load_lat}
+
+
+## A changed plan moved this machine's spot (#22): it drives there directly inside the closure,
+## forwards or in reverse, without leaving the site (the work step stays as it is).
+func _repark(v: Vehicle, spot: String) -> void:
+	var tgt := _spot_target(v, spot)
+	var lc := lay.lane_coords(v.pos2())
+	var t_s: float = tgt.s
+	var t_lat: float = tgt.lat
+	if Vector2(lc.x, lc.y).distance_to(Vector2(t_s, t_lat)) < 0.3:
+		return
+	var rev: bool = t_s < lc.x
+	var path := lay.lane_poly(lc.x, t_s, _lat_blend(lc.x, lc.y, t_s, t_lat, 1.0e6), 0.5)
+	path[0] = v.pos2()
+	var pc := Router.poly_piece(path, 1.5, rev, "rev" if rev else "")
+	_moving[v] = true
+	if not v.drive_plan({}, job.short_title(), [], func(veh): _slot_arrived(veh, spot, t_s, t_lat), [pc]):
+		_moving.erase(v)
+	else:
+		spot_of[v] = spot
 
 
 func _arrived(v: Vehicle, spot: String) -> void:
@@ -652,7 +696,9 @@ func exit_plan(v: Vehicle) -> Dictionary:
 				return {"blocked": true}
 	var s_exit := maxf(lay.s_det1 + 3.0 + v.rear_ext, s_here + 6.0)
 	s_exit = minf(s_exit, lay.len_k - 1.0)
-	var pts := lay.lane_poly(s_here, s_exit, func(_s): return 0.0)
+	var lat_here: float = lay.lane_coords(v.pos2()).y
+	var pts := lay.lane_poly(s_here, s_exit, _lat_blend(s_exit, 0.0, s_here, lat_here))
+	pts[0] = v.pos2()
 	var pc := Router.poly_piece(pts, 3.0)
 	in_place.erase(v)
 	spot_of.erase(v)
@@ -674,7 +720,7 @@ func _redispatch_waiting() -> void:
 		if spot_of.get(v, "") == "stage" and in_place.has(v) and v.state == "parked":
 			var r := role(v)
 			if r == "dig" and phase < 6 and traffic_on and occupant("exc") == null and occupant("load") == null:
-				_go_slot(v, "exc", lay.s_exc)
+				_go_slot(v, "exc", lay.s_exc, lay.exc_lat)
 			elif r == "pipes":
 				if (step_id() == "pipe" and traffic_on and occupant("load") == null) or v.cargo.pipes_new <= 0 or _pipe_swapped():
 					_flatbed_next(v)
@@ -955,6 +1001,7 @@ func _apply_plan() -> void:
 	for _l in yellow_lines:
 		yellow_fracs.append(0.0)
 	lay.apply_extent(plan.extent(lay))
+	_polygon = lay.closure_polygon()
 	_update_yellow()
 
 
@@ -1010,6 +1057,10 @@ func set_plan(p: ClosurePlan, build := true) -> void:
 			if old_lines[k] == yellow_lines[l]:
 				yellow_fracs[l] = old_fracs[k]
 	_update_yellow()
+	# machines already at their spots move to the new ones (#22)
+	for mv in in_place.keys():
+		if is_instance_valid(mv) and spot_of.get(mv, "") in ["exc", "load"] and not _tip_busy.has(mv) and mv.state != "loading":
+			_repark(mv, spot_of[mv])
 	# re-register the detour with the new geometry; a running detour stays (old items still stand)
 	var was_on := traffic_on
 	if traffic_on:
@@ -2005,7 +2056,7 @@ func _tipper_next(v: Vehicle) -> void:
 			if not (in_place.has(v) and spot_of.get(v, "") == "load"):
 				# the excavator has to be in its slot first (it reverses in past the loading slot)
 				if _excavator() != null:
-					_go_slot(v, "load", lay.load_s(v.rear_ext))
+					_go_slot(v, "load", lay.load_s(v.rear_ext), lay.load_lat)
 				else:
 					_go_stage(v)
 			return
@@ -2033,7 +2084,7 @@ func _tipper_next(v: Vehicle) -> void:
 			if in_place.has(v) and spot_of.get(v, "") == "load":
 				_tip_here(v)
 			else:
-				_go_slot(v, "load", lay.dump_s(v.rear_ext))
+				_go_slot(v, "load", lay.dump_s(v.rear_ext), lay.pile_lat)
 		else:
 			_go_stage(v)
 		return

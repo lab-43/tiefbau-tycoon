@@ -143,6 +143,8 @@ func _process(delta: float) -> void:
 			_umbau_test(delta)
 		"fahrzeuge":
 			_fahrzeuge_test(delta)
+		"stellplaetze":
+			_stellplaetze_test(delta)
 
 
 func _smoke() -> void:
@@ -778,6 +780,15 @@ func _verkehrslichter_test(delta: float) -> void:
 		_vl = load("res://test/e2e_verkehrslichter.gd").new()
 		_vl.drv = self
 	_vl.tick(delta)
+
+
+## Machine and parking spots (test/e2e_stellplaetze.gd, #22).
+var _stell: RefCounted
+func _stellplaetze_test(delta: float) -> void:
+	if _stell == null:
+		_stell = load("res://test/e2e_stellplaetze.gd").new()
+		_stell.drv = self
+	_stell.tick(delta)
 
 
 ## Closure changed during the works (test/e2e_umbau.gd, #21).
