@@ -18,6 +18,7 @@ var areas: Array = []                 # {id, kind, outer, holes, tags}
 var signals: Dictionary = {}          # osm node id -> Vector2
 var crossings: Dictionary = {}        # osm node id -> {pos, kind}
 var give_way: Dictionary = {}         # osm node id -> Vector2 (give_way / stop)
+var stops: Dictionary = {}            # osm node id -> true (stop sign: Haltlinie instead of Wartelinie)
 var bus_stops: Array = []             # Vector2
 var lamps: Array = []                 # Vector2
 var trees: Array = []                 # Vector2

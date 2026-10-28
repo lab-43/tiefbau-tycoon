@@ -15,12 +15,26 @@ var chunk_size := 500.0
 var origin := Vector2.ZERO
 var chunks := {}   # Vector2i -> {"asphalt": MeshLayer, "sidewalk":..., "curb":..., "mark":...}
 var terrain: Terrain = null   # ground heights (#8): layers lift their vertices onto it, bridges onto their deck
+var marks: RoadMarkings   # markings across roads and junctions; marks.stats counts what was painted
 
 
 func _init(n: RoadNet, chunk: float, bounds_origin: Vector2) -> void:
 	net = n
 	chunk_size = chunk
 	origin = bounds_origin
+	marks = RoadMarkings.new(n)
+
+
+## Roads with lane and centre lines (residential streets in Germany usually have none).
+static func is_marked(e: Dictionary) -> bool:
+	return MARKED_CLASSES.has(e.cls) and not e.narrow
+
+
+## Lateral offset of the line between the two directions (right of the a -> b direction).
+static func center_offset(e: Dictionary) -> float:
+	var shift: float = ((e.park_l + e.cyc_l) - (e.park_r + e.cyc_r)) * 0.5
+	var total: float = (e.lf + e.lb) * e.lw
+	return -total * 0.5 + (0 if e.oneway else e.lb) * e.lw + shift
 
 
 func chunk_of(p: Vector2) -> Vector2i:
@@ -226,79 +240,183 @@ func _dashed(l: MeshLayer, center: PackedVector2Array, cum: PackedFloat32Array, 
 		s += dash + gap
 
 
+## A longitudinal line from sa to sb at lateral offset off (dash <= 0: solid) that pauses over the
+## intervals in excl (pedestrian crossings). Returns the painted length.
+func _line(l: MeshLayer, center: PackedVector2Array, cum: PackedFloat32Array, sa: float, sb: float, off: float, w: float,
+		dash: float, gap: float, excl: Array) -> float:
+	var parts: Array = [Vector2(sa, sb)]
+	for x in excl:
+		var nxt: Array = []
+		for p in parts:
+			if x.y <= p.x or x.x >= p.y:
+				nxt.append(p)
+				continue
+			if x.x > p.x:
+				nxt.append(Vector2(p.x, x.x))
+			if x.y < p.y:
+				nxt.append(Vector2(x.y, p.y))
+		parts = nxt
+	var painted := 0.0
+	for p in parts:
+		if p.y - p.x < 0.3:
+			continue
+		if dash <= 0.0:
+			_strip(l, center, cum, p.x, p.y, off, w)
+			painted += p.y - p.x
+		else:
+			var s: float = p.x + gap * 0.5
+			while s < p.y - 0.2:
+				var e := minf(s + dash, p.y)
+				_strip(l, center, cum, s, e, off, w)
+				painted += e - s
+				s += dash + gap
+	return painted
+
+
+## What crosses the lanes arriving at one end of edge ei: {"kind": "" | "halt" | "warte", "s": arc
+## length of the line}. Haltlinie (Z 294) at signals and stop signs, Wartelinie (Z 341) where the
+## road has to give way (sign, or a marked road meeting a main road). It sits 0.6 m before the end
+## of the lanes and at least 1 m before a pedestrian crossing (RMS).
+func _end_line(ei: int, e: Dictionary, at_b: bool, s0: float, s1: float) -> Dictionary:
+	var none := {"kind": "", "s": s1 if at_b else s0}
+	var n: Dictionary = net.nodes[e.b if at_b else e.a]
+	var lanes: int = e.lf if at_b else e.lb
+	if lanes == 0 or n.ends.size() < 3 or n.get("cont", false):
+		return none
+	var kind := ""
+	var ref := ei * 2 + (1 if at_b else 0)
+	if n.ctrl == "signals" or (e.get("stop_b", false) if at_b else e.get("stop_a", false)):
+		kind = "halt"
+	elif (e.giveway_b if at_b else e.giveway_a):
+		kind = "warte"
+	elif n.ctrl == "priority" and is_marked(e) and not (ref in n.get("major_ends", [])):
+		kind = "warte"
+	if kind == "":
+		return none
+	var hb := RoadMarkings.STOP_W * 0.5
+	var s_end := s1 if at_b else s0
+	var s := s_end - 0.6 if at_b else s_end + 0.6
+	var room := 1.0 + hb + 2.0   # crossings are 4 m wide (s ± 2)
+	for c in e.crossings:
+		if not (c.kind in ["zebra", "signals"]):
+			continue
+		var cs: float = c.s
+		if at_b and cs > s_end - 12.0 and cs < s_end + 3.0:
+			s = minf(s, cs - room)
+		elif not at_b and cs < s_end + 12.0 and cs > s_end - 3.0:
+			s = maxf(s, cs + room)
+	# crossings drawn on a merged junction area, just beyond the end of the lanes
+	var smp := Geo.sample(e.pts, e.cum, s_end)
+	var p_end: Vector2 = smp[0]
+	var fwd: Vector2 = (smp[1] as Vector2) if at_b else -(smp[1] as Vector2)
+	for c in n.get("crossings", []):
+		if not (c.kind in ["zebra", "signals"]):
+			continue
+		var rel: Vector2 = (c.p as Vector2) - p_end
+		var along := rel.dot(fwd)
+		if absf(rel.dot(Geo.right_of(fwd))) < e.width * 0.5 + 3.0 and along > -3.0 and along < 6.0:
+			if at_b:
+				s = minf(s, s_end + along - room)
+			else:
+				s = maxf(s, s_end - along + room)
+	if (at_b and s < s0 + 1.0) or (not at_b and s > s1 - 1.0):
+		s = s_end - 0.6 if at_b else s_end + 0.6
+	return {"kind": kind, "s": s}
+
+
+## German markings along one road (RMS): centre line, lane dividers (solid towards signals, a
+## Warnlinie in front), edge and cycle lines, stop and give-way lines, crossings and direction arrows.
+## Lines through transitions and junctions: RoadMarkings.
 func _edge_markings(ei: int, e: Dictionary, ck: Vector2i, s0: float, s1: float) -> void:
-	# at a transition between two roads (no junction) the lines run on to the node
-	if net.nodes[e.a].get("cont", false):
-		s0 = 0.0
-	if net.nodes[e.b].get("cont", false):
-		s1 = e.len
 	var mk := layer(ck, "mark")
 	var pts: PackedVector2Array = e.pts
 	var cum: PackedFloat32Array = e.cum
 	var urban: bool = e.speed <= 60.0 / 3.6 + 0.1
 	var dash := 3.0 if urban else 6.0
 	var gap := 6.0 if urban else 12.0
-	var marked: bool = MARKED_CLASSES.has(e.cls) and not e.narrow
+	var marked: bool = is_marked(e)
 	var n_a: Dictionary = net.nodes[e.a]
 	var n_b: Dictionary = net.nodes[e.b]
+	# edge and cycle lines run on to the node at a transition; lane and centre lines are drawn through
+	# it along the turn paths (RoadMarkings.through_lines)
+	var e0 := 0.0 if n_a.get("cont", false) else s0
+	var e1: float = e.len if n_b.get("cont", false) else s1
 	var sig_a: bool = n_a.ctrl == "signals"
 	var sig_b: bool = n_b.ctrl == "signals"
-	var solid_a := 20.0 if sig_a else 0.0
-	var solid_b := 20.0 if sig_b else 0.0
 	var lf: int = e.lf
 	var lb: int = e.lb
 	var lw: float = e.lw
-	var shift: float = ((e.park_l + e.cyc_l) - (e.park_r + e.cyc_r)) * 0.5
-	var total := (lf + lb) * lw
-	var x_div := -total * 0.5 + (0 if e.oneway else lb) * lw + shift
+	var x_div := center_offset(e)
 	var length := s1 - s0
-	if marked and length > 2.0:
-		# center line between directions
+	# lines across the lanes at both ends; the longitudinal lines stop there
+	var end_b := _end_line(ei, e, true, s0, s1)
+	var end_a := _end_line(ei, e, false, s0, s1)
+	var sb_l: float = end_b.s - RoadMarkings.STOP_W * 0.5 if end_b.kind != "" else s1
+	var sa_l: float = end_a.s + RoadMarkings.STOP_W * 0.5 if end_a.kind != "" else s0
+	# longitudinal lines pause over pedestrian crossings
+	var excl: Array = []
+	for c in e.crossings:
+		if c.kind == "zebra" or c.kind == "signals":
+			excl.append(Vector2(c.s - 2.4, c.s + 2.4))
+	if marked and length > 2.0 and sb_l - sa_l > 1.0:
+		var solid_a := 20.0 if sig_a and lb > 0 else 0.0
+		var solid_b := 20.0 if sig_b and lf > 0 else 0.0
+		# centre line between the directions: solid towards a signal (Fahrstreifenbegrenzung) with a
+		# Warnlinie in front, solid on roads with four lanes or more, else a Leitlinie
 		if not e.oneway and lb > 0 and lf > 0:
-			var sa := s0
-			var sb := s1
+			var multi := (lf + lb) >= 4
+			# at a transition the centre line may stop early: the shift to the next road is spread
+			var sa := sa_l + marks.center_back(ei * 2)
+			var sb := sb_l - marks.center_back(ei * 2 + 1)
 			if solid_a > 0.0:
-				_strip(mk, pts, cum, s0, minf(s0 + solid_a, s1), x_div, MARK_W)
-				sa = s0 + solid_a
+				_line(mk, pts, cum, sa, minf(sa + solid_a, sb), x_div, MARK_W, 0.0, 0.0, excl)
+				sa = minf(sa + solid_a, sb)
+				if not multi:
+					var w_end := minf(sa + RoadMarkings.WARN_LEN, sb)
+					marks.stats.warnlinie_m += _line(mk, pts, cum, sa, w_end, x_div, MARK_W, RoadMarkings.WARN_DASH, RoadMarkings.WARN_GAP, excl)
+					sa = w_end
 			if solid_b > 0.0:
-				_strip(mk, pts, cum, maxf(s1 - solid_b, s0), s1, x_div, MARK_W)
-				sb = s1 - solid_b
-			if (lf + lb) >= 4:
-				# multi-lane two-way: solid center line
-				_strip(mk, pts, cum, sa, sb, x_div, MARK_W)
-			else:
-				_dashed(mk, pts, cum, sa, sb, x_div, MARK_W, dash, gap)
-		# lane dividers within each direction
+				_line(mk, pts, cum, maxf(sb - solid_b, sa), sb, x_div, MARK_W, 0.0, 0.0, excl)
+				sb = maxf(sb - solid_b, sa)
+				if not multi:
+					var w_start := maxf(sb - RoadMarkings.WARN_LEN, sa)
+					marks.stats.warnlinie_m += _line(mk, pts, cum, w_start, sb, x_div, MARK_W, RoadMarkings.WARN_DASH, RoadMarkings.WARN_GAP, excl)
+					sb = w_start
+			_line(mk, pts, cum, sa, sb, x_div, MARK_W, 0.0 if multi else dash, gap, excl)
+		# lane dividers within each direction, solid for the last 15 m towards a signal
 		for li in range(1, lf):
 			var off := x_div + li * lw
-			_dashed(mk, pts, cum, s0 + (0.0), s1 - solid_b * 0.75, off, MARK_W, dash, gap)
+			var cut_b := maxf(s0, sb_l - solid_b * 0.75)
+			_line(mk, pts, cum, s0, cut_b, off, MARK_W, dash, gap, excl)
 			if solid_b > 0.0:
-				_strip(mk, pts, cum, maxf(s0, s1 - solid_b * 0.75), s1, off, MARK_W)
+				_line(mk, pts, cum, cut_b, sb_l, off, MARK_W, 0.0, 0.0, excl)
 		for li in range(1, lb):
 			var off2 := x_div - li * lw
-			_dashed(mk, pts, cum, s0 + solid_a * 0.75, s1, off2, MARK_W, dash, gap)
+			var cut_a := minf(s1, sa_l + solid_a * 0.75)
+			_line(mk, pts, cum, cut_a, s1, off2, MARK_W, dash, gap, excl)
 			if solid_a > 0.0:
-				_strip(mk, pts, cum, s0, minf(s1, s0 + solid_a * 0.75), off2, MARK_W)
+				_line(mk, pts, cum, sa_l, cut_a, off2, MARK_W, 0.0, 0.0, excl)
 		# edge lines on fast roads
 		if not urban:
 			var hw: float = e.width * 0.5
-			_strip(mk, pts, cum, s0, s1, hw - 0.25, 0.15)
-			_strip(mk, pts, cum, s0, s1, -hw + 0.25, 0.15)
+			_line(mk, pts, cum, e0, e1, hw - 0.25, 0.15, 0.0, 0.0, excl)
+			_line(mk, pts, cum, e0, e1, -hw + 0.25, 0.15, 0.0, 0.0, excl)
 	# cycle lane separation lines (any class)
 	if e.cyc_r > 0.0:
-		_strip(mk, pts, cum, s0, s1, e.width * 0.5 - e.park_r - e.cyc_r, 0.25)
+		_line(mk, pts, cum, e0, e1, e.width * 0.5 - e.park_r - e.cyc_r, RoadMarkings.BROAD, 0.0, 0.0, excl)
 	if e.cyc_l > 0.0:
-		_strip(mk, pts, cum, s0, s1, -e.width * 0.5 + e.park_l + e.cyc_l, 0.25)
-	# stop lines at signalized junctions
-	if sig_b and lf > 0 and length > 4.0:
-		var a_off := x_div
-		var b_off := x_div + lf * lw
-		_cross_bar(mk, pts, cum, s1 - 0.6, a_off, b_off, 0.4)
-	if sig_a and lb > 0 and length > 4.0:
-		var a2 := x_div - lb * lw
-		var b2 := x_div if not e.oneway else x_div
-		if not e.oneway:
-			_cross_bar(mk, pts, cum, s0 + 0.6, a2, b2, 0.4)
+		_line(mk, pts, cum, e0, e1, -e.width * 0.5 + e.park_l + e.cyc_l, RoadMarkings.BROAD, 0.0, 0.0, excl)
+	# stop and give-way lines across the arriving lanes
+	if end_b.kind != "" and length > 4.0:
+		_end_bar(mk, pts, cum, end_b, x_div, x_div + lf * lw)
+	if end_a.kind != "" and length > 4.0:
+		_end_bar(mk, pts, cum, end_a, x_div - lb * lw, x_div)
+	# direction arrows on multi-lane approaches, the first one 3 m in front of the stop line
+	if marked:
+		if lf >= 2 and n_b.ends.size() >= 3 and not n_b.get("cont", false):
+			marks.lane_arrows(mk, ei, 0, (s1 - sb_l) + RoadMarkings.ARROW_BACK)
+		if lb >= 2 and n_a.ends.size() >= 3 and not n_a.get("cont", false):
+			marks.lane_arrows(mk, ei, 1, (sa_l - s0) + RoadMarkings.ARROW_BACK)
 	# pedestrian crossings
 	for c in e.crossings:
 		var s: float = c.s
@@ -307,17 +425,34 @@ func _edge_markings(ei: int, e: Dictionary, ck: Vector2i, s0: float, s1: float) 
 			continue
 		var hw2: float = e.width * 0.5
 		if c.kind == "zebra":
+			# Fußgängerüberweg (Z 293): 0.50 m stripes, 0.50 m apart, 4 m long
+			marks.stats.zebra += 1
 			var x := -hw2 + 0.25
 			while x < hw2 - 0.25:
 				_strip(mk, pts, cum, s - 2.0, s + 2.0, x + 0.25, 0.5)
 				x += 1.0
 		elif c.kind == "signals":
+			# Fußgängerfurt: two dashed broad lines across the road, 4 m apart
+			marks.stats.furt += 1
 			for side in [-1.0, 1.0]:
 				var ss: float = s + side * 2.0
 				var x2 := -hw2
 				while x2 < hw2:
-					_cross_bar(mk, pts, cum, ss, x2, minf(x2 + 0.5, hw2), 0.25)
-					x2 += 1.0
+					_cross_bar(mk, pts, cum, ss, x2, minf(x2 + RoadMarkings.FURT_DASH, hw2), RoadMarkings.BROAD)
+					x2 += RoadMarkings.FURT_DASH + RoadMarkings.FURT_GAP
+
+
+## Haltlinie (solid) or Wartelinie (broad dashes) at arc length end.s between lateral offsets x0, x1.
+func _end_bar(mk: MeshLayer, pts: PackedVector2Array, cum: PackedFloat32Array, end: Dictionary, x0: float, x1: float) -> void:
+	if end.kind == "halt":
+		_cross_bar(mk, pts, cum, end.s, x0, x1, RoadMarkings.STOP_W)
+		marks.stats.haltlinie += 1
+	else:
+		var x := x0 + RoadMarkings.GIVE_GAP * 0.5
+		while x < x1 - 0.1:
+			_cross_bar(mk, pts, cum, end.s, x, minf(x + RoadMarkings.GIVE_DASH, x1), RoadMarkings.GIVE_W)
+			x += RoadMarkings.GIVE_DASH + RoadMarkings.GIVE_GAP
+		marks.stats.wartelinie += 1
 
 
 ## Pedestrian crossing at point p across a road running in direction d with half width hw (used for
@@ -325,18 +460,21 @@ func _edge_markings(ei: int, e: Dictionary, ck: Vector2i, s0: float, s1: float) 
 func _crossing_at(l: MeshLayer, p: Vector2, d: Vector2, hw: float, kind: String) -> void:
 	var r := Geo.right_of(d)
 	if kind == "zebra":
+		marks.stats.zebra += 1
 		var x := -hw + 0.25
 		while x < hw - 0.25:
 			var c := p + r * (x + 0.25)
 			_rect(l, c, d, 2.0, 0.25)
 			x += 1.0
 	elif kind == "signals":
+		marks.stats.furt += 1
 		for side in [-1.0, 1.0]:
 			var x2 := -hw
 			while x2 < hw:
-				var c2: Vector2 = p + d * (side * 2.0) + r * (x2 + minf(0.5, hw - x2) * 0.5)
-				_rect(l, c2, r, minf(0.5, hw - x2) * 0.5, 0.125)
-				x2 += 1.0
+				var hl := minf(RoadMarkings.FURT_DASH, hw - x2) * 0.5
+				var c2: Vector2 = p + d * (side * 2.0) + r * (x2 + hl)
+				_rect(l, c2, r, hl, RoadMarkings.BROAD * 0.5)
+				x2 += RoadMarkings.FURT_DASH + RoadMarkings.FURT_GAP
 
 
 ## Flat rectangle centred at c, half length hl along d and half width hw across.
@@ -365,16 +503,22 @@ func _cross_bar(l: MeshLayer, pts: PackedVector2Array, cum: PackedFloat32Array, 
 
 func _junction(ni: int) -> void:
 	var n: Dictionary = net.nodes[ni]
+	var ck := chunk_of(n.pos)
+	if n.ends.size() >= 2:
+		var mk0 := layer(ck, "mark")
+		marks.through_lines(mk0, ni)
+		marks.knot_lines(mk0, ni)
 	var poly: PackedVector2Array = n.get("polygon", PackedVector2Array())
 	if poly.size() < 3:
 		return
-	var ck := chunk_of(n.pos)
 	var asp := layer(ck, "asphalt")
 	asp.polygon_up(poly, Y_ROAD, 1.0, Color.WHITE, n.get("holes", []))
 	for extra in n.get("extra_polys", []):
 		asp.polygon_up(extra, Y_ROAD, 1.0)
+	var mk := layer(ck, "mark")
 	for c in n.get("crossings", []):
-		_crossing_at(layer(ck, "mark"), c.p, c.d, c.hw, c.kind)
+		_crossing_at(mk, c.p, c.d, c.hw, c.kind)
+	marks.sperrflaechen(mk, ni)
 	# transitions between two roads (RoadNet._continuation_geometry): sidewalks along the joint line
 	for sw_strip in n.get("cont_sw", []):
 		_sidewalk_strip(ck, sw_strip[0], sw_strip[1], sw_strip[2], sw_strip[3], _area_clips(n))

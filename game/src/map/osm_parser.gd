@@ -89,6 +89,8 @@ func _node(el: Dictionary) -> void:
 			data.crossings[id] = {"pos": p, "kind": kind}
 		"stop", "give_way":
 			data.give_way[id] = p
+			if tags.get("highway", "") == "stop":
+				data.stops[id] = true
 		"bus_stop":
 			data.bus_stops.append(p)
 		"street_lamp":

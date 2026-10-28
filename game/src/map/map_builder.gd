@@ -4,7 +4,7 @@ extends RefCounted
 ## The scene-tree part (creating MeshInstances) happens on the main thread in build_scene().
 
 const CHUNK := 500.0
-const BAKE_VERSION := 8   # 4: water on top of the base ground, no bank walls (#4); 5: merged junctions (#5); 6: smooth transitions (#5); 7: arc turn paths, islands (#5); 8: ground heights (#8)
+const BAKE_VERSION := 9   # 4: water on top of the base ground, no bank walls (#4); 5: merged junctions (#5); 6: smooth transitions (#5); 7: arc turn paths, islands (#5); 8: ground heights (#8); 9: markings after RMS (#5)
 const GROUND_Y := 0.0     # opaque base ground plane; flat map layers below it are invisible (test/layer_test.gd)
 
 var progress := 0.0

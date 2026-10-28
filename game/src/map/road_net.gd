@@ -303,7 +303,7 @@ func _make_edge(r: Dictionary, a: int, b: int, data: OsmData) -> Dictionary:
 		"turn_f": str(tags.get("turn:lanes", tags.get("turn:lanes:forward", ""))) if true else "",
 		"turn_b": str(tags.get("turn:lanes:backward", "")),
 		"trim_a": 0.0, "trim_b": 0.0, "crossings": [], "signal_a": false, "signal_b": false,
-		"giveway_a": false, "giveway_b": false, "sig": "",
+		"giveway_a": false, "giveway_b": false, "stop_a": false, "stop_b": false, "sig": "",
 	}
 
 
@@ -465,10 +465,13 @@ func _mark_crossings(data: OsmData) -> void:
 					e.signal_b = true
 			if data.give_way.has(nid):
 				var res3 := Geo.closest_on_polyline(e.pts, e.cum, data.give_way[nid])
+				var stop: bool = data.stops.has(nid)
 				if res3[1] < 25.0:
 					e.giveway_a = true
+					e.stop_a = e.stop_a or stop
 				if e.len - res3[1] < 25.0:
 					e.giveway_b = true
+					e.stop_b = e.stop_b or stop
 	# crossings on the pieces removed inside merged junction groups: drawn on the junction area
 	for n in nodes:
 		if not n.has("inner_lines"):
@@ -485,7 +488,43 @@ func _mark_crossings(data: OsmData) -> void:
 					cr.append({"p": smp[0], "d": smp[1], "hw": ln.hw, "kind": c.kind})
 		n.erase("inner_lines")
 		if not cr.is_empty():
-			n["crossings"] = cr
+			n["crossings"] = _dedupe_crossings(n, cr)
+
+
+## A crossing node shared by two removed pieces came twice, with two directions, and was drawn as
+## an X. Keep one per place: the one along the road whose end at the group lies nearest (the road
+## the pedestrians cross there).
+func _dedupe_crossings(n: Dictionary, cr: Array) -> Array:
+	var out: Array = []
+	for c in cr:
+		var dup := -1
+		for i in out.size():
+			if (out[i].p as Vector2).distance_to(c.p) < 1.5:
+				dup = i
+		if dup < 0:
+			out.append(c)
+			continue
+		var ref_d := _nearest_end_dir(n, c.p)
+		if absf((c.d as Vector2).dot(ref_d)) > absf((out[dup].d as Vector2).dot(ref_d)):
+			out[dup] = c
+	return out
+
+
+func _nearest_end_dir(n: Dictionary, p: Vector2) -> Vector2:
+	var best := INF
+	var d := Vector2.ZERO
+	for er in n.ends:
+		var e: Dictionary = edges[er >> 1]
+		var pts: PackedVector2Array = e.pts
+		if pts.size() < 2:
+			continue
+		var start: bool = (er & 1) == 0
+		var q: Vector2 = pts[0] if start else pts[pts.size() - 1]
+		var q2: Vector2 = pts[1] if start else pts[pts.size() - 2]
+		if q.distance_to(p) < best:
+			best = q.distance_to(p)
+			d = (q2 - q).normalized()
+	return d
 
 
 # ------------------------------------------------------------------------------------------
@@ -884,6 +923,7 @@ func _group_pieces(n: Dictionary, star_poly: PackedVector2Array, infos: Array, w
 			pieces.append(w)
 	for ip in n.get("inner_polys", []):
 		pieces.append(ip)
+	n["inner_roads"] = n.get("inner_polys", [])   # road surfaces of the removed pieces (RoadMarkings.sperrflaechen)
 	n.erase("inner_polys")
 	n.erase("inner_dirs")
 	var by_ref := {}
