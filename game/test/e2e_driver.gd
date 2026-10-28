@@ -578,6 +578,7 @@ var _pin_i := 0
 ## patterns have 2 / 3 flashes per cycle, and with --shots close-ups of each vehicle with beacons on.
 var _li := 0
 var _lfail := 0
+var _lt := 0.0
 func _leuchten() -> void:
 	var vs: Array = world.fleet.vehicles
 	match step:
@@ -617,20 +618,43 @@ func _leuchten() -> void:
 		1:
 			if not shot_queue.is_empty():
 				return
+			# same view twice: beacons frozen lit, then frozen dark
 			if _li < vs.size() * 2:
 				var veh: Vehicle = vs[_li / 2]
-				var yaw := rad_to_deg(veh.rotation.y + PI) + (40.0 if _li % 2 == 0 else -140.0)
-				shot("leuchten_%02d_%s" % [_li, veh.def_id], veh.global_position + Vector3(0, 1.6, 0), 9.0 if veh.def_id == "van_crew" else 13.0, yaw, 30.0)
+				veh.beacon_freeze = 1 if _li % 2 == 0 else 0
+				var yaw := rad_to_deg(veh.rotation.y + PI) + 40.0
+				shot("leuchten_%02d_%s_%s" % [_li, veh.def_id, "an" if _li % 2 == 0 else "aus"], veh.global_position + Vector3(0, 1.6, 0), 9.0 if veh.def_id == "van_crew" else 13.0, yaw, 30.0)
 				_li += 1
 				return
 			for v in vs:
 				if v.def_id == "van_crew":
 					Game.select(v)
 					shot("leuchten_panel", v.global_position + Vector3(0, 1.6, 0), 12.0, rad_to_deg(v.rotation.y + PI) + 40.0, 30.0)
+			step = 3
+		3:
+			if not shot_queue.is_empty():
+				return
+			Game.select(null)
+			Clock.minutes = 22.0 * 60.0
+			_lt = t
+			_li = 0
+			step = 4
+		4:
+			if not shot_queue.is_empty() or t < _lt + 5.0:
+				return
+			if _li < 2:
+				for v in vs:
+					if v.def_id == "van_crew":
+						v.beacon_freeze = 1 if _li == 0 else 0
+						shot("leuchten_nacht_%s" % ("an" if _li == 0 else "aus"), v.global_position + Vector3(0, 1.6, 0), 9.0, rad_to_deg(v.rotation.y + PI) + 40.0, 30.0)
+				_li += 1
+				return
 			step = 2
 		2:
 			if not shot_queue.is_empty():
 				return
+			for v in vs:
+				v.beacon_freeze = -1
 			if _lfail > 0:
 				print("E2E FAIL leuchten: %d Fehler" % _lfail)
 				get_tree().quit(1)
