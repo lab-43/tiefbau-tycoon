@@ -10,7 +10,11 @@ const CELL := 120.0
 var net: RoadNet
 var edir_out := {}      # edir -> Array[[conn_id, to_edir]]
 var lane_grid := {}     # Vector2i -> Array[lane key]
-var conn_vmax := {}     # conn id -> speed
+var conn_vmax := {}     # conn id -> speed (route cost; driving uses the piece speed and its bend profile)
+var _conn_prof := {}    # conn id -> Array[[s_from, s_to, v]] (lazy, see conn_profile)
+var _lane_prof := {}    # lane key -> the same for the bends of a lane
+
+const A_TURN := 2.8     # m/s², lateral acceleration in the bends of turn paths
 
 
 func setup(n: RoadNet) -> void:
@@ -87,13 +91,70 @@ func nearest_lane(p: Vector2, max_d := 80.0, filter: Callable = Callable()) -> D
 func lane_piece(key: int, s0: float, s1: float) -> Dictionary:
 	var g: Array = net.lane_geo[key]
 	var pc := Agent.make_piece(Agent.LANE, key, g[0], g[1], s0, s1, edge_speed(key), "L%d" % key)
+	if not _lane_prof.has(key):
+		# wide window: OSM roads have small kinks at their nodes, only real bends count
+		_lane_prof[key] = curve_profile(g[0], edge_speed(key), 6.0)
+	pc["vprof"] = _lane_prof[key]
 	return pc
 
 
 func conn_piece(ci: int) -> Dictionary:
 	var c: Dictionary = net.connectors[ci]
-	var pc := Agent.make_piece(Agent.CONN, ci, c.pts, c.cum, 0.0, c.len, conn_vmax.get(ci, 8.0), "C%d" % ci, ci, c.node)
+	var pc := Agent.make_piece(Agent.CONN, ci, c.pts, c.cum, 0.0, c.len, _conn_limit(c), "C%d" % ci, ci, c.node)
+	pc["vprof"] = conn_profile(ci)
 	return pc
+
+
+func _conn_limit(c: Dictionary) -> float:
+	return minf(net.edges[c.from >> 4].speed, net.edges[c.to >> 4].speed)
+
+
+## Speed limits in the bends of turn path ci: [[s_from, s_to, v], …]. Cars brake for the bend and
+## speed up after it. One speed for the whole path either raced through the tight arc of a
+## straight–arc–straight path (its mean radius is much larger) or crawled along its straights (#5).
+## Computed on first use: a city has some 10⁵ turn paths.
+func conn_profile(ci: int) -> Array:
+	if not _conn_prof.has(ci):
+		var c: Dictionary = net.connectors[ci]
+		_conn_prof[ci] = curve_profile(c.pts, _conn_limit(c))
+	return _conn_prof[ci]
+
+
+## Bends of a polyline slower than `limit`: v = √(A_TURN·r), r from the heading change over ±half_win
+## metres (a lone kink counts as a bend of that length, not as a radius of zero).
+static func curve_profile(pts: PackedVector2Array, limit: float, half_win := 1.5) -> Array:
+	var p := Geo.densify(pts, 0.5)
+	var cum := Geo.cumulative(p)
+	var n := p.size()
+	var res: Array = []
+	if n < 3:
+		return res
+	var i := 0
+	var k := 1
+	for j in range(1, n - 1):
+		# segment (i, i+1) ends half_win before vertex j, segment (k-1, k) starts half_win after it
+		while i + 2 <= j and cum[j] - cum[i + 2] >= half_win:
+			i += 1
+		k = maxi(k, j + 1)
+		while k < n - 1 and cum[k - 1] - cum[j] < half_win:
+			k += 1
+		var d0 := p[i + 1] - p[i]
+		var d1 := p[k] - p[k - 1]
+		if d0.length_squared() < 1e-6 or d1.length_squared() < 1e-6:
+			continue
+		var dh := absf(d0.angle_to(d1))
+		if dh < 0.01:
+			continue
+		var span := maxf(0.5, (cum[k - 1] + cum[k] - cum[i] - cum[i + 1]) * 0.5)
+		var v := clampf(sqrt(A_TURN * span / dh), 2.5, limit)
+		if v > limit - 0.3:
+			continue
+		if not res.is_empty() and res[-1][1] >= cum[j] - 0.75:
+			res[-1][1] = cum[j]
+			res[-1][2] = minf(res[-1][2], v)
+		else:
+			res.append([cum[j], cum[j], v])
+	return res
 
 
 func blend_piece(key_a: int, key_b: int, s0: float, s1: float) -> Dictionary:

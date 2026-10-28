@@ -19,6 +19,7 @@ var radius := 700.0
 var enabled := true
 var max_traffic := 220
 var density_scale := 1.0
+var yaw_chord := 1.5      # body heading from the chord ±1.5 m around the agent (lanes, turn paths); 0 = plain tangent
 var rng := RandomNumberGenerator.new()
 
 var _acc := 0.0
@@ -335,13 +336,13 @@ func _drive(ag: Agent, dt: float) -> void:
 					ag.player.on_piece_enter(ag, ag.route[ag.pi])
 				return
 	var pc: Dictionary = ag.route[ag.pi]
-	var v0: float = minf(ag.vmax, pc.vmax)
-	# anticipate slower pieces ahead
+	var v0: float = minf(ag.vmax, _speed_cap(pc, ag.s, 0.0))
+	# anticipate slower pieces and bends ahead
 	var dist_ahead: float = pc.s1 - ag.s
 	var j := ag.pi + 1
 	while j < ag.route.size() and dist_ahead < 70.0:
 		var nx: Dictionary = ag.route[j]
-		v0 = minf(v0, sqrt(nx.vmax * nx.vmax + 2.0 * 2.0 * dist_ahead))
+		v0 = minf(v0, _speed_cap(nx, nx.s0, dist_ahead))
 		dist_ahead += nx.s1 - nx.s0
 		j += 1
 	var lead := _leader(ag)
@@ -435,9 +436,62 @@ func _drive(ag: Agent, dt: float) -> void:
 	ag.p_prev = ag.p_cur
 	ag.yaw_prev = ag.yaw_cur
 	var pose := Router.piece_pose(ag.route[ag.pi], ag.s)
-	var dvec: Vector2 = pose[1]
+	var dvec: Vector2 = _smooth_dir(ag, pose[0], pose[1])
 	ag.p_cur = Geo.v3(pose[0], 0.05)
 	ag.yaw_cur = atan2(-dvec.x, -dvec.y)
+
+
+## Heading for the body: the chord between the route points yaw_chord behind and ahead of the agent.
+## Lane and turn path polylines have small kinks (OSM nodes, joints between pieces); the tangent jumps
+## there and the car would twitch (#5). Only on road pieces: manoeuvres (POLY, reversing, cusps) keep
+## the exact tangent.
+func _smooth_dir(ag: Agent, p: Vector2, tangent: Vector2) -> Vector2:
+	if yaw_chord <= 0.0:
+		return tangent
+	var back: Variant = _route_point(ag, -yaw_chord)
+	var ahead: Variant = _route_point(ag, yaw_chord)
+	var a: Vector2 = back if back != null else p
+	var b: Vector2 = ahead if ahead != null else p
+	if (back == null and ahead == null) or a.distance_squared_to(b) < 0.25:
+		return tangent
+	# on an arc the chord is parallel to the tangent in its middle; where the line backtracks (a joint
+	# that overshoots by a few centimetres) the tangent points backwards, the chord does not
+	return (b - a).normalized()
+
+
+## Point at arc length offset ds from the agent along its route, or null when a manoeuvre piece,
+## a cusp or the end of the known route is in the way.
+func _route_point(ag: Agent, ds: float) -> Variant:
+	var i := ag.pi
+	var s := ag.s + ds
+	for _guard in 8:
+		var pc: Dictionary = ag.route[i]
+		if pc.t == Agent.POLY or pc.get("rev", false):
+			return null
+		if s > pc.s1:
+			if i + 1 >= ag.route.size() or ag.route[i + 1].get("cusp", false):
+				return null
+			s = ag.route[i + 1].s0 + (s - pc.s1)
+			i += 1
+		elif s < pc.s0:
+			if i == 0 or pc.get("cusp", false):
+				return null
+			s = ag.route[i - 1].s1 - (pc.s0 - s)
+			i -= 1
+		else:
+			return Router.piece_pose(pc, s)[0]
+	return null
+
+
+## Highest speed allowed now for piece pc whose position s lies `ahead` metres in front of the agent:
+## its own speed and the bends of its profile (Router.conn_profile), braking at 2 m/s².
+func _speed_cap(pc: Dictionary, s: float, ahead: float) -> float:
+	var cap: float = sqrt(pc.vmax * pc.vmax + 4.0 * ahead)
+	for sec in pc.get("vprof", []):
+		if sec[1] < s:
+			continue
+		cap = minf(cap, sqrt(sec[2] * sec[2] + 4.0 * (ahead + maxf(0.0, sec[0] - s))))
+	return cap
 
 
 func _advance(ag: Agent, ds: float) -> void:

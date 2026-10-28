@@ -1,10 +1,11 @@
 #!/bin/bash
 # Runs end-to-end scenarios headless on the offline Utrecht map and reports pass/fail.
 # usage: tools/test.sh [scenario ...]            default: smoke issue
-#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite debug leuchten verkehrslichter rig markierungen absperrung  (save+load = save mid-dig,
+#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren debug leuchten verkehrslichter rig markierungen absperrung  (save+load = save mid-dig,
 #              then load and finish; rig = excavator linkage/cylinders, see game/test/rig_test.gd;
 #              ebenen = height order of flat map layers, see game/test/layer_test.gd – also part of pbf;
-#              sichtweite = city meshes sit at their chunk (visibility ranges), game/test/range_test.gd – also part of pbf)
+#              sichtweite = city meshes sit at their chunk (visibility ranges), game/test/range_test.gd – also part of pbf;
+#              fahren = calm driving: no twitching cars, no racing through bends, game/test/drive_test.gd on testdata/kreuzungen)
 #   env: E2E_SPEED (default 10), E2E_TIMEOUT seconds per scenario (default 1500), E2E_SHOTS=<dir>
 # Logs: /tmp/tt_e2e_<scenario>.log. Exit 1 if any scenario fails.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -41,6 +42,11 @@ sichtweite() {  # city meshes sit where their geometry is (visibility ranges cou
   if timeout 300 "$G" --headless --path "$ROOT/game" -s res://test/range_test.gd -- "$ROOT/testdata/utrecht.osm.pbf" > "$log" 2>&1 \
      && grep -q "RANGE OK" "$log"; then echo "OK    sichtweite $(grep -o 'RANGE OK.*' "$log")"; else FAIL=1; echo "FAIL  sichtweite – $log"; grep -E "RANGE|SCRIPT ERROR" "$log" | tail -8 | sed 's/^/      /'; fi
 }
+fahren() {  # traffic on the junction fixtures: twitches and too fast bends per km (#5)
+  local log=/tmp/tt_e2e_fahren.log
+  if timeout 600 "$G" --headless --path "$ROOT/game" res://test/drive_test.tscn -- --fixtures="$ROOT/testdata/kreuzungen" > "$log" 2>&1 \
+     && grep -q "FAHREN OK" "$log"; then echo "OK    fahren $(grep -o 'FAHREN OK.*' "$log")"; else FAIL=1; echo "FAIL  fahren – $log"; grep -E "FAHREN|SCRIPT ERROR|^  " "$log" | tail -10 | sed 's/^/      /'; fi
+}
 for s in "${SCEN[@]}"; do
   case "$s" in
     smoke)  run smoke  "E2E OK" --e2e=smoke ;;
@@ -58,6 +64,7 @@ for s in "${SCEN[@]}"; do
       ebenen; sichtweite ;;
     ebenen) ebenen ;;
     sichtweite) sichtweite ;;
+    fahren) fahren ;;
     rig)  # excavator linkage + cylinders over all poses (needs the private model, skips without it)
       log=/tmp/tt_e2e_rig.log
       if timeout 300 "$G" --headless --path "$ROOT/game" -s res://test/rig_test.gd > "$log" 2>&1 \
