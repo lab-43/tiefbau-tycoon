@@ -26,6 +26,9 @@ Neues Spiel
      Er wird aufbewahrt und für weitere Karten in derselben Gegend wiederverwendet.
    - Quelle 2, nur wenn kein passender Auszug existiert: die Karte stückweise von den Overpass-Servern
      (overpass-api.de, overpass.private.coffee), in 1-km-Kacheln.
+   - Geländehöhen: einmal pro Karte rund 20 Höhenkacheln (gut 1 MB) von Mapterhorn (tiles.mapterhorn.com),
+     für Deutschland aus den amtlichen DGM1 der Länder (Hamburg: © FHH, LGV, dl-de/by-2.0), sonst
+     Copernicus GLO-30. Ohne Internet bleibt die Karte flach; beim nächsten Start wird es erneut versucht.
    Der Ladebildschirm zeigt live:
    - den Ablauf mit Zeiten
    - die Kachelkarte
