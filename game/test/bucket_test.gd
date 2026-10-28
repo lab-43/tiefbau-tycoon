@@ -23,23 +23,25 @@ func _run() -> void:
 		_scene()
 	var models := [["ersatz", false]]
 	if ResourceLoader.exists("res://assets/consim/excavator_a918/excavator_a918.glb"):
-		models.append(["a918", true])
+		models.append(["a918", true, "excavator_a918"])
 	else:
 		print("SCHAUFEL Hinweis: privates Baggermodell fehlt, nur Ersatzmodell geprüft")
+	if ResourceLoader.exists("res://assets/consim/excavator_r938/excavator_r938.glb"):
+		models.append(["r938", true, "excavator_r938"])   # #24: crawler excavator, mono boom
 	for m in models:
-		await _check_model(m[0], m[1])
+		await _check_model(m[0], m[1], m[2] if m.size() > 2 else "")
 	print("SCHAUFEL %s: %d Fehler" % ["OK" if fails == 0 else "FAIL", fails])
 	quit(0 if fails == 0 else 1)
 
 
-func _check_model(tag: String, glb: bool) -> void:
+func _check_model(tag: String, glb: bool, id := "") -> void:
 	var veh := Node3D.new()
 	root.add_child(veh)
 	var model: Node3D
 	var meta := {}
 	if glb:
-		model = (load("res://assets/consim/excavator_a918/excavator_a918.glb") as PackedScene).instantiate()
-		meta = VehicleModels.load_meta("excavator_a918")
+		model = (load("res://assets/consim/%s/%s.glb" % [id, id]) as PackedScene).instantiate()
+		meta = VehicleModels.load_meta(id)
 	else:
 		model = Node3D.new()
 		VehicleModels._excavator(model, {})
@@ -88,7 +90,10 @@ func _check_model(tag: String, glb: bool) -> void:
 		return
 	# carrying: the load surface faces up; tipping: the bucket empties before "dropped"
 	rig.set_load(ld.capacity, "soil")
-	_pose(rig, 5.0, 2.5, -88.0)
+	# carry/dump point: A 918 size; the R 938's arm is ~1.6x longer, it dumps further out and higher (its tipper)
+	var cr := 7.0 if id == "excavator_r938" else 5.0
+	var ch := 4.2 if id == "excavator_r938" else 2.5
+	_pose(rig, cr, ch, -88.0)
 	var up := _surface_up(ld)
 	print("SCHAUFEL %s Tragen: Oberfläche zeigt %.2f nach oben, Öffnung %.2f" % [tag, up, ld.opening_up()])
 	if up < 0.5:
@@ -100,7 +105,7 @@ func _check_model(tag: String, glb: bool) -> void:
 		if kind == "dropped":
 			seen.dropped = ld.shown_fill() if ld.visible else 0.0
 	rig.cycle_event.connect(on_ev)
-	rig.run([{"dur": 1.6, "yaw": 0.0, "r": 5.0, "h": 2.5, "bucket": 55.0, "ev": "dropped", "pour": true}])
+	rig.run([{"dur": 1.6, "yaw": 0.0, "r": cr, "h": ch, "bucket": 55.0, "ev": "dropped", "pour": true}])
 	var mid_shot := false
 	for i in 200:
 		rig.update(0.02)
@@ -213,7 +218,7 @@ func _surface_up(ld: BucketLoad) -> float:
 
 func _pose(rig: ExcavatorRig, r: float, h: float, bucket_deg: float) -> void:
 	var from := rig.polar_of(rig.tip_position())
-	var fb := rad_to_deg(rig.bucket_angle)
+	var fb := rad_to_deg(rig.bucket_command())
 	for i in range(1, 11):
 		var w := float(i) / 10.0
 		rig.reach_polar(0.0, lerpf(from.y, r, w), lerpf(from.z, h, w), deg_to_rad(lerpf(fb, bucket_deg, w)))

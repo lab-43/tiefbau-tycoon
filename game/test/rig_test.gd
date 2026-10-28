@@ -71,7 +71,7 @@ func _run() -> void:
 		["lift", 5.0, 0.75, -85.0, -18.0], ["travel_back", 4.6, 2.0, -80.0, 0.0]]
 	for ps in poses:
 		# approach in small steps like the sequencer does (branch tracking of the four-bar needs continuity)
-		var from_b := rad_to_deg(rig.bucket_angle)
+		var from_b := rad_to_deg(rig.bucket_command())
 		var from_bl := rad_to_deg(rig.blade_angle)
 		var to_bl: float = ps[4] if ps.size() > 4 else from_bl
 		var from := rig.polar_of(rig.tip_position())

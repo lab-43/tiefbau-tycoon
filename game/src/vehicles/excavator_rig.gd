@@ -21,7 +21,7 @@ var lim := {}                  # node name -> [min_rad, max_rad]
 var rest := {}                 # node -> Basis
 var angles := {}               # node -> current hinge angle (rad)
 var yaw := 0.0
-var bucket_angle := 0.0
+var bucket_angle := 0.0        # bucket joint angle (rad) relative to the model's rest pose
 var blade_angle := 0.0
 var ok := false
 var load_node: BucketLoad
@@ -49,6 +49,12 @@ var _seq_i := -1
 var _seq_t := 0.0
 var _from := {}
 var busy := false
+# Bucket commands (reach_*, run frames, material_cycle) are joint angles from the rest pose, tuned on the A 918.
+# A model whose JSON has "bucket_world_zero_deg" (R 938, #24: longer arm, other rest pose, so the stick hangs at a
+# very different angle for the same target) uses world attitude instead: command c points the bucket
+# (pin -> cutting edge) at c + zero in the arm plane (u forward, v up), whatever the stick does.
+var _w0 := 0.0
+var _world_bucket := false
 
 
 func setup(vehicle: Node3D, mdl: Node3D, meta: Dictionary) -> void:
@@ -96,6 +102,9 @@ func setup(vehicle: Node3D, mdl: Node3D, meta: Dictionary) -> void:
 		_piv.append(pts[i])
 		if i > 0:
 			_vec.append(pts[i] - pts[i - 1])
+	if meta.has("bucket_world_zero_deg"):
+		_world_bucket = true
+		_w0 = deg_to_rad(float(meta.bucket_world_zero_deg))
 	# four-bar linkage
 	var fb: Dictionary = meta.get("bucket_linkage", {})
 	if link_a and link_b and fb.has("B_link_a_pivot"):
@@ -242,10 +251,14 @@ func reach_world(target: Vector3, bucket_rad: float, keep_yaw := false) -> void:
 		yaw = atan2(-lt.x, -lt.z)
 		if r > absf(_bx) + 0.01:
 			yaw += asin(clampf(_bx / r, -1.0, 1.0))
-	bucket_angle = clampf(bucket_rad, lim[bucket][0], lim[bucket][1])
+	bucket_angle = _bucket_joint(bucket_rad)
 	turret.basis = Basis(Vector3.UP, yaw) * rest[turret]
 	var tl: Vector3 = turret.global_transform.affine_inverse() * target
 	_solve_planar(Vector2(-tl.z, tl.y), bucket_angle)
+	if _world_bucket:   # the joint angle depends on the solved chain: refine (warm start, converges in a few rounds)
+		for k in 3:
+			bucket_angle = _bucket_joint(bucket_rad)
+			_solve_planar(Vector2(-tl.z, tl.y), bucket_angle)
 	_apply()
 
 
@@ -254,7 +267,7 @@ func reach_polar(y: float, r: float, h: float, bucket_rad: float) -> void:
 	if not ok:
 		return
 	yaw = y
-	bucket_angle = clampf(bucket_rad, lim[bucket][0], lim[bucket][1])
+	bucket_angle = _bucket_joint(bucket_rad)
 	turret.basis = Basis(Vector3.UP, yaw) * rest[turret]
 	var ground_y := veh.global_position.y
 	var tg := turret.global_transform
@@ -265,7 +278,33 @@ func reach_polar(y: float, r: float, h: float, bucket_rad: float) -> void:
 	world_t.y = ground_y + h
 	var tl: Vector3 = tg.affine_inverse() * world_t
 	_solve_planar(Vector2(-tl.z, tl.y), bucket_angle)
+	if _world_bucket:   # the joint angle depends on the solved chain: refine (warm start, converges in a few rounds)
+		for k in 3:
+			bucket_angle = _bucket_joint(bucket_rad)
+			_solve_planar(Vector2(-tl.z, tl.y), bucket_angle)
 	_apply()
+
+
+## Bucket joint angle (rad, clamped to its limits) for a bucket command (see _world_bucket).
+func _bucket_joint(cmd: float) -> float:
+	var j := cmd
+	if _world_bucket:
+		j = wrapf(cmd + _w0 - (_vec[chain.size()] as Vector2).angle() - _chain_sum(), -PI, PI)
+	return clampf(j, lim[bucket][0], lim[bucket][1])
+
+
+## The current bucket attitude as a command (inverse of _bucket_joint without the clamp).
+func bucket_command() -> float:
+	if _world_bucket:
+		return wrapf((_vec[chain.size()] as Vector2).angle() + _chain_sum() + bucket_angle - _w0, -PI, PI)
+	return bucket_angle
+
+
+func _chain_sum() -> float:
+	var acc := 0.0
+	for n in chain:
+		acc += float(angles[n])
+	return acc
 
 
 ## Converts a world point into (yaw, r, h) relative to this excavator.
@@ -318,7 +357,7 @@ func run(frames: Array) -> void:
 	_seq = frames
 	_seq_i = 0
 	_seq_t = 0.0
-	_from = {"yaw": yaw, "pos": polar_of(tip_position()), "bucket": bucket_angle, "blade": blade_angle}
+	_from = {"yaw": yaw, "pos": polar_of(tip_position()), "bucket": bucket_command(), "blade": blade_angle}
 	busy = true
 
 
@@ -354,7 +393,7 @@ func update(delta: float) -> void:
 			cycle_event.emit(kf.ev, kf.get("data", {}))
 		_seq_i += 1
 		_seq_t = 0.0
-		_from = {"yaw": yaw, "pos": Vector3(y1, kf.get("r", p0.y), kf.get("h", p0.z)), "bucket": bucket_angle, "blade": blade_angle}
+		_from = {"yaw": yaw, "pos": Vector3(y1, kf.get("r", p0.y), kf.get("h", p0.z)), "bucket": bucket_command(), "blade": blade_angle}
 		if _seq_i >= _seq.size():
 			_seq_i = -1
 			busy = false
