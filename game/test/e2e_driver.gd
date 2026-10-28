@@ -35,7 +35,7 @@ func _ready() -> void:
 		elif a.begins_with("--traffic="):
 			traffic = float(a.substr(10))
 	Events.world_ready.connect(_on_ready)
-	if scenario == "load":
+	if scenario in ["load", "altstand_load"]:
 		get_parent().continue_game.call_deferred()
 	if scenario == "repro":
 		_repro_start.call_deferred()
@@ -121,6 +121,8 @@ func _process(delta: float) -> void:
 			_save_test(delta)
 		"load":
 			_load_test(delta)
+		"altstand_save", "altstand_load":
+			_altstand_test(delta)
 		"leuchten":
 			_leuchten()
 		"verkehrslichter":
@@ -785,3 +787,12 @@ func _gelaende_test(delta: float) -> void:
 		_gel = load("res://test/e2e_gelaende.gd").new()
 		_gel.drv = self
 	_gel.tick(delta)
+
+
+## Saves from an older map build (test/e2e_altstand.gd, #23).
+var _alt: RefCounted
+func _altstand_test(delta: float) -> void:
+	if _alt == null:
+		_alt = load("res://test/e2e_altstand.gd").new()
+		_alt.drv = self
+	_alt.tick(delta)

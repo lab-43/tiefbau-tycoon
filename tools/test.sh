@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs end-to-end scenarios headless on the offline Utrecht map and reports pass/fail.
 # usage: tools/test.sh [scenario ...]            default: smoke issue
-#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren debug leuchten verkehrslichter rig schaufel markierungen absperrung gelaende vollsperrung umbau  (save+load = save mid-dig,
+#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren debug leuchten verkehrslichter rig schaufel altstand markierungen absperrung gelaende vollsperrung umbau  (save+load = save mid-dig,
 #              then load and finish; rig = excavator linkage/cylinders, see game/test/rig_test.gd;
 #              schaufel = soil in the bucket (game/test/bucket_test.gd, stand-in model always, real model if present);
 #              ebenen = height order of flat map layers, see game/test/layer_test.gd – also part of pbf;
@@ -58,6 +58,9 @@ for s in "${SCEN[@]}"; do
     leuchten) run leuchten "E2E OK leuchten" --e2e=leuchten ;;
     verkehrslichter) run verkehrslichter "E2E OK verkehrslichter" --e2e=verkehrslichter ;;
     save+load) run save "E2E OK save" --e2e=save && AUTO=0 run load "E2E OK money" --e2e=load ;;
+    altstand)  # save from an older map build: jobs with lane keys of another road numbering are found again (#23)
+      run altstand_save "E2E OK altstand_save" --e2e=altstand_save && AUTO=0 run altstand_load "E2E OK altstand" --e2e=altstand_load
+      if grep -q "SCRIPT ERROR" /tmp/tt_e2e_altstand_load.log; then FAIL=1; echo "FAIL  altstand: Skriptfehler im Log (Release-Versionen stürzen daran ab)"; grep -A3 "SCRIPT ERROR" /tmp/tt_e2e_altstand_load.log | head -8 | sed 's/^/      /'; fi ;;
     pbf)
       log=/tmp/tt_e2e_pbf.log
       if timeout 300 "$G" --headless --path "$ROOT/game" -s res://test/pbf_test.gd -- "$ROOT/testdata/utrecht.osm.pbf" > "$log" 2>&1 \

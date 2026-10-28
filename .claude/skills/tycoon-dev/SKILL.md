@@ -37,11 +37,13 @@ description: Use this skill to set up, check, test, build or deliver the Tiefbau
 | `tools/test.sh fahren` | 6 s | Verkehr auf den Prüfstand-Kreuzungen: Rucke und zu schnelle Kurven pro km (`game/test/drive_test.tscn`, `--v` zeigt jeden Fund). Pflicht bei Änderungen an Spuren, Abbiegewegen, `traffic_sim.gd` oder `router.gd` |
 | `tools/test.sh rig` | 5 s | Bagger-Gestänge und Zylinder in allen Stellungen (braucht private Assets). Seitenansichten: `xvfb-run -a godot --path game --rendering-driver vulkan -s res://test/rig_test.gd -- --shots=<dir>` |
 | `tools/test.sh schaufel` | 2 s | Erde im Baggerlöffel (#11): liegt im Hohlraum, nichts ragt durchs Blech, zeigt beim Tragen nach oben, rutscht beim Kippen heraus. Ersatzmodell immer, echtes Modell mit privaten Assets. Bilder: `xvfb-run -a godot --path game --rendering-driver vulkan -s res://test/bucket_test.gd -- --shots=<dir>` |
+| `tools/test.sh altstand` | 1 min | Spielstand von einer älteren Kartenaufbereitung (#23): Aufträge mit fehlenden oder falschen Straßenschlüsseln sind nach dem Laden an derselben Stelle wieder da, kein Skriptfehler. Pflicht, wenn `BAKE_VERSION` steigt oder Laden/Speichern von Aufträgen geändert wird |
 
 - **Wann welcher Test:**
   - Änderungen an Baustelle, Fahrzeugen oder Verkehr: `job` ist Pflicht.
   - Änderungen am Bagger-Rig (`excavator_rig.gd`, `rig_util.gd`, `bucket_load.gd`): `rig` und `schaufel`, bei sichtbaren Änderungen mit Bildern.
-  - Änderungen an Speichern/Laden: `save+load`.
+  - Änderungen an Speichern/Laden: `save+load`, bei Aufträgen auch `altstand`.
+  - Ein `SCRIPT ERROR` im Log ist in der Windows-Release-Version oft ein Absturz (Lektion editor-binary).
   - Änderungen an der Karte: `pbf` (enthält `ebenen`), plus Ladeweg mit Mock-Servern (Abschnitt 4). Wer Höhen von Kartenebenen ändert, erhöht `MapBuilder.BAKE_VERSION`, sonst lädt Jonathans PC die alte gespeicherte Karte.
 - **Logs:** `/tmp/tt_e2e_<szenario>.log`. Der Treiber ist `game/test/e2e_driver.gd`; neue Szenarien gehören dort hinein und in `tools/test.sh`.
 - **Spielschalter:**

@@ -68,6 +68,10 @@ func setup(n: RoadNet, k: int, start_s: float, length: float, width: float, dep:
 	W = width
 	depth = dep
 	pipe_d = pipe
+	# saved jobs keep the key of the map build they were made on; a missing key crashes release builds (#23)
+	if not net.lane_geo.has(key) or (key >> 4) >= net.edges.size():
+		error = "Straße nicht gefunden"
+		return false
 	_g = net.lane_geo[key]
 	len_k = (_g[1] as PackedFloat32Array)[(_g[1] as PackedFloat32Array).size() - 1]
 	var e: Dictionary = net.edges[key >> 4]

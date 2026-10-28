@@ -400,7 +400,9 @@ func load_state(d: Dictionary) -> void:
 	_next_id = d.get("next_id", 1)
 	_next_offer_at = d.get("next_offer", Clock.total_minutes() + 120.0)
 	for jd in d.get("offers", []):
-		offers.append(Job.from_dict(jd))
+		var oj := Job.from_dict(jd)
+		if _relocate(oj):
+			offers.append(oj)
 	for jd in d.get("history", []):
 		history.append(Job.from_dict(jd))
 	for p in d.get("patches", []):
@@ -408,6 +410,19 @@ func load_state(d: Dictionary) -> void:
 		_add_patch(p)
 	for jd in d.get("active", []):
 		var j := Job.from_dict(jd)
+		var key0 := j.key
+		var site_d: Dictionary = jd.get("site", {})
+		if not _relocate(j):
+			var msg := "%s (%s) passt nicht auf die neu aufbereitete Karte und wurde abgebrochen." % [j.short_title(), j.location()]
+			push_warning(msg)
+			Events.warn.call_deferred(msg)
+			continue
+		if j.key != key0 and not site_d.is_empty():
+			# the player's traffic paths are lane coordinates of the old lane: back to automatic (#23)
+			site_d = site_d.duplicate(true)
+			var pl: Dictionary = site_d.get("plan", {})
+			if pl.has("traffic"):
+				pl["traffic"] = {}
 		var lay := SiteLayout.new()
 		if not lay.setup(world.net, j.key, j.s0, j.length, j.width, j.depth, j.pipe_d):
 			continue
@@ -418,6 +433,54 @@ func load_state(d: Dictionary) -> void:
 		pit_slots[slot] = site
 		site.setup(world, self, j, lay, j.id)
 		sites[j.id] = site
-		if jd.has("site"):
-			site.load_state(jd.site)
+		if not site_d.is_empty():
+			site.load_state(site_d)
 	Events.job_offers_changed.emit()
+
+
+const RELOCATE_TOL := 2.5      # m between the saved and the rebuilt trench centre
+
+
+## Saved jobs keep the lane key of the map build they were made on. A newer build (other BAKE_VERSION) numbers
+## the roads anew: the key can be missing or belong to another street (#23). Keeps the key if the trench still
+## lies where it was saved, otherwise finds the right lane at the saved trench centre again (both directions of the
+## nearest road, the closer one wins). Returns false if the job does not fit on this map.
+func _relocate(j: Job) -> bool:
+	var net: RoadNet = world.net
+	var lay := SiteLayout.new()
+	var fits := lay.setup(net, j.key, j.s0, j.length, j.width, j.depth, j.pipe_d)
+	if j.center == Vector2.ZERO:
+		return fits                # saves from before the centre was stored
+	if fits and lay.trench_center().distance_to(j.center) < RELOCATE_TOL:
+		return true
+	var near := net.nearest_lane(j.center, 30.0)
+	if near.is_empty():
+		return false
+	var ei: int = int(near.key) >> 4
+	var best_key := -1
+	var best_s0 := 0.0
+	var best_d := RELOCATE_TOL
+	for dir in [0, 1]:
+		var n := net.lane_count(ei, dir)
+		if n < 1:
+			continue
+		var key := RoadNet.lane_key(ei, dir, n - 1)
+		if not net.lane_geo.has(key):
+			continue
+		var g: Array = net.lane_geo[key]
+		var s_c: float = Geo.closest_on_polyline(g[0], g[1], j.center)[1]
+		var s0 := s_c - SiteLayout.TAPER - SiteLayout.HEAD_GAP - j.length * 0.5
+		var l2 := SiteLayout.new()
+		if not l2.setup(net, key, s0, j.length, j.width, j.depth, j.pipe_d):
+			continue
+		var dc := l2.trench_center().distance_to(j.center)
+		if dc < best_d:
+			best_d = dc
+			best_key = key
+			best_s0 = s0
+	if best_key < 0:
+		return false
+	print("Auftrag %d: Straße neu zugeordnet (Abschnitt %d -> %d, %.1f m)" % [j.id, j.key, best_key, best_d])
+	j.key = best_key
+	j.s0 = best_s0
+	return true
