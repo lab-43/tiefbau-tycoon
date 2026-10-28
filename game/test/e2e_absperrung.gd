@@ -16,6 +16,9 @@ var t_mark := 0.0
 var def_ext := {}
 var speed_before := 0
 var placed_before := 0
+var tpl_before: Array = []
+var van_t := -1.0
+var site3: Site
 
 
 func ok(cond: bool, what: String) -> void:
@@ -42,6 +45,10 @@ func tick(_delta: float) -> void:
 			var acts := site.actions().map(func(a): return a.id)
 			ok(acts.has("plan") and acts.has("closure"), "Aktionen planen + Standard (%s)" % str(acts))
 			def_ext = site.lay.default_extent()
+			tpl_before = site.lay.items()
+			var l0 := site.lay
+			ok(l0.in_lane(Vector2(l0.s_c0, l0.lw * 0.5)) and l0.in_lane(Vector2(l0.s_c0, -l0.lw * 0.5)) and not l0.in_lane(Vector2(l0.s_c0, l0.lw * 0.5 + 0.1)),
+				"Teile genau auf der Fahrstreifenkante zählen als im Fahrstreifen")
 			_send(w, site, ["van_crew"])
 			DebugTools.turbo(30.0)
 			t_mark = drv.t
@@ -100,6 +107,13 @@ func tick(_delta: float) -> void:
 			ok(lay.s_det0 < float(def_ext.det0) - 5.0, "Verschwenkung beginnt früher (%.1f statt %.1f)" % [lay.s_det0, def_ext.det0])
 			ok(lay.s_van < float(def_ext.van) - 5.0, "Kolonnenbus-Platz vor die Verschwenkung verlegt (%.1f statt %.1f)" % [lay.s_van, def_ext.van])
 			ok(site.crew_van.state == "driving" or site.crew_van.pos2().distance_to(lay.lane_pt(lay.s_van, SiteLayout.CURB)) < 1.0, "Kolonnenbus parkt um (%s)" % site.crew_van.state)
+			# the standard template does not depend on the geometry of the plan in force
+			var tpl_after := ClosurePlan.from_layout(lay).items
+			var tpl_same := tpl_after.size() == tpl_before.size()
+			for i in mini(tpl_after.size(), tpl_before.size()):
+				if (tpl_after[i].pos as Vector2).distance_to(tpl_before[i].pos) > 0.01:
+					tpl_same = false
+			ok(tpl_same, "Standard-Vorlage unabhängig vom übernommenen Plan")
 			# order: signs first, then from upstream to downstream
 			var first_non_sign := -1
 			var order_ok := true
@@ -114,6 +128,8 @@ func tick(_delta: float) -> void:
 			t_mark = drv.t
 			step = 4
 		4:
+			if van_t < 0.0 and site.crew_present():
+				van_t = drv.t - t_mark
 			if site.phase < 2:
 				if drv.t - t_mark > 4000.0:
 					ok(false, "Absperrung nicht fertig (%d/%d, %s)" % [site._placed_count(), site.item_defs.size(), site.status])
@@ -132,6 +148,7 @@ func tick(_delta: float) -> void:
 			ok(site.yellow_lines.size() == 1 and site.yellow_frac >= 1.0, "gelbe Markierung komplett")
 			ok(site.traffic_on, "Verkehr verschwenkt")
 			ok(site.crew_van.pos2().distance_to(lay2.lane_pt(lay2.s_van, SiteLayout.CURB)) < 1.0, "Kolonnenbus am neuen Platz")
+			ok(van_t >= 0.0 and van_t < 150.0, "Kolonnenbus setzt zurück statt um den Block zu fahren (%.0f s)" % van_t)
 			var sd := site.save_state()
 			var pd: Dictionary = sd.get("plan", {})
 			ok(not pd.is_empty() and sd.get("plan_ok", false), "Plan im Spielstand")
@@ -211,14 +228,15 @@ func tick(_delta: float) -> void:
 			DebugTools._cancel_activity(site2)
 			placed_before = site2._placed_count()
 			ok(site2.can_edit_plan() == "", "Plan nach Unterbrechung wieder änderbar")
-			# changed plan: drop two standing items, move one, add a cone
+			# changed plan: every standing item is dropped (the kit is already out of the van), a cone added
 			var p := site2.plan.copy()
 			var removed := 0
 			var standing: Array = []
 			for i in site2.item_defs.size():
 				if site2.item_nodes[i] != null:
 					standing.append(i)
-			var drop: Array = [standing[1], standing[2]]
+			var drop: Array = standing.duplicate()
+			var on_before := site2.traffic_on
 			var keep: Array = []
 			for i in p.items.size():
 				if not drop.has(i):
@@ -233,6 +251,10 @@ func tick(_delta: float) -> void:
 			site2.set_plan(p, true)
 			ok(site2._orphans.size() == removed, "%d aufgestellte Teile nicht mehr im Plan → werden eingesammelt" % site2._orphans.size())
 			ok(site2._placed_count() == placed_before - removed, "übrige aufgestellte Teile behalten (%d)" % site2._placed_count())
+			ok(site2.traffic_on == on_before, "Verkehrsführung bleibt, solange alte Teile stehen")
+			ok(site2._can_closure() == "", "Absperrung baubar, obwohl das Material schon draußen ist (%s)" % site2._can_closure())
+			var sd2 := site2.save_state()
+			ok((sd2.get("orphans", []) as Array).size() == removed and sd2.get("kit", false), "einzusammelnde Teile und Material im Spielstand")
 			t_mark = drv.t
 			step = 8
 		8:
@@ -248,6 +270,51 @@ func tick(_delta: float) -> void:
 				if ch.has_meta("kind") and str(ch.get_meta("kind")) in ClosurePlan.KINDS:
 					nodes += 1
 			ok(nodes == site2.item_defs.size(), "keine übrig gebliebenen Teile (%d Knoten, %d geplant)" % [nodes, site2.item_defs.size()])
+			DebugTools.finish_all(site2)
+			t_mark = drv.t
+			step = 9
+		9:
+			if drv.t - t_mark < 5.0:
+				return
+			# third site: a plan without anything in the closed lane must still be workable
+			site3 = _place(jm)
+			ok(site3 != null, "dritter Auftrag platziert")
+			if site3 == null:
+				_end()
+				return
+			DebugTools.finish_step(site3)
+			var l3 := site3.lay
+			var p3 := ClosurePlan.new()
+			p3.custom = true
+			p3.items.append(ClosurePlan.make_item("z123", l3.lane_pt(l3.s0 - 20.0, l3.lw * 0.5 + 0.8), SiteLayout.yaw_of(l3.lane_dir(l3.s0 - 20.0))))
+			p3.lines.append(l3.lane_poly(l3.s_c0, l3.s_c0 + 8.0, func(_s): return l3.lw * 0.5 + 0.8, 1.0))
+			site3.set_plan(p3, true)
+			ok(not site3.traffic_on, "Plan ohne Teil im Fahrstreifen: noch kein Umleiten")
+			_send(w, site3, ["van_crew"])
+			t_mark = drv.t
+			step = 10
+		10:
+			if site3.phase < 2:
+				if drv.t - t_mark > 4000.0:
+					ok(false, "Absperrung 3 nicht fertig (%s)" % site3.status)
+					_end()
+				return
+			ok(site3.traffic_on, "nach dem Aufbau wird der Verkehr trotzdem umgeleitet (Baggerplatz erreichbar)")
+			ok(site3._can_dig() != "Erst die Absperrung aufbauen", "Graben ausheben möglich (%s)" % site3._can_dig())
+			for id in ["dig", "pipe", "refill", "asphalt", "demob"]:
+				if site3.step_id() == id:
+					DebugTools.finish_step(site3)
+			ok(site3.traffic_on, "Umleitung bis zum Abbau")
+			site3.do_action("teardown")
+			t_mark = drv.t
+			step = 11
+		11:
+			if not site3.retired and site3.step_id() == "teardown":
+				if drv.t - t_mark > 3000.0:
+					ok(false, "Abbau 3 nicht fertig")
+					_end()
+				return
+			ok(not site3.traffic_on, "Umleitung nach dem Abbau aufgehoben")
 			_end()
 
 
@@ -370,6 +437,12 @@ func _design() -> void:
 			after = it.pos
 	ok(after.distance_to(before) > 2.5 and after.distance_to(before) < 3.5, "Z 123 verschoben (%.2f m)" % after.distance_to(before))
 	_key(KEY_Z, true)
+	# Ctrl+Z while dragging: the drag is dropped, redo still possible
+	var n_undo := des._undo.size()
+	var n_redo := des._redo.size()
+	_drag_screen(des._scr(sign_p), des._scr(sign_p) + Vector2(40, 0), true)
+	ok(des._undo.size() == n_undo - 1 and des._redo.size() == n_redo + 1, "Strg+Z während des Ziehens (Rückgängig %d→%d, Wiederholen %d→%d)" % [n_undo, des._undo.size(), n_redo, des._redo.size()])
+	_key(KEY_Y, true)
 	# box select the trench fences
 	var a := des._scr(lay.lane_pt(lay.s_t0 - 1.0, -hw - 3.0))
 	var b := des._scr(lay.lane_pt(lay.s_t1 + 1.0, hw + 2.5))
@@ -460,7 +533,7 @@ func _drag(p0: Vector2, p1: Vector2) -> void:
 	_drag_screen(des._scr(p0), des._scr(p1))
 
 
-func _drag_screen(a: Vector2, b: Vector2) -> void:
+func _drag_screen(a: Vector2, b: Vector2, undo_midway := false) -> void:
 	var mv := InputEventMouseMotion.new()
 	mv.position = a
 	_vp().push_input(mv, true)
@@ -474,6 +547,8 @@ func _drag_screen(a: Vector2, b: Vector2) -> void:
 		m2.position = a.lerp(b, (k + 1) / 6.0)
 		m2.button_mask = MOUSE_BUTTON_MASK_LEFT
 		_vp().push_input(m2, true)
+		if undo_midway and k == 3:
+			_key(KEY_Z, true)
 	var up := InputEventMouseButton.new()
 	up.button_index = MOUSE_BUTTON_LEFT
 	up.pressed = false

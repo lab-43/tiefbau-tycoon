@@ -54,6 +54,7 @@ var yellow_frac: float:
 		for i in yellow_fracs.size():
 			yellow_fracs[i] = v
 var _orphans: Array = []         # placed items a changed plan no longer contains (the crew collects them)
+var kit_used := false            # the closure kit is out of the crew van (taken at the start, back after teardown)
 var workers: Array = []
 var crew_van: Vehicle
 var terrain: SiteTerrain
@@ -566,7 +567,7 @@ func _go_slot(v: Vehicle, spot: String, slot_s: float) -> void:
 
 func _behind_site(v: Vehicle) -> bool:
 	var r: Array = Geo.closest_on_polyline(lay._g[0], lay._g[1], v.pos2())
-	return r[1] > lay.s_taper1 and r[0] < 6.0
+	return r[1] > lay.tail_s() and r[0] < 6.0
 
 
 func _slot_arrived(v: Vehicle, spot: String, slot_s: float) -> void:
@@ -773,7 +774,7 @@ func _can_closure() -> String:
 		return "Der Plan ist leer"
 	if not crew_present():
 		return "Kolonnenbus ist nicht vor Ort"
-	if crew_van.cargo.barriers <= 0 and _placed_count() == 0:
+	if crew_van.cargo.barriers <= 0 and not kit_used:
 		return "Kein Absperrmaterial im Kolonnenbus"
 	return ""
 
@@ -788,8 +789,9 @@ func _placed_count() -> int:
 
 func _start_closure() -> void:
 	_ensure_workers()
-	if crew_van.cargo.barriers > 0:
+	if not kit_used and crew_van.cargo.barriers > 0:
 		crew_van.cargo.barriers -= 1
+		kit_used = true
 	plan_confirmed = true
 	build_when_ready = false
 	running = true
@@ -886,9 +888,9 @@ func set_plan(p: ClosurePlan, build := true) -> void:
 		and absf(float(ext_new.van) - lay.s_van) > 0.5
 	var van_driving := false
 	if van_moves:
-		# the van leaves with the old layout (exit_plan), then parks ahead of the new taper
+		# the crew gets in, the van reverses along the curb to its new spot ahead of the taper
 		_crew_board()
-		van_driving = _drive_van_to(float(ext_new.van))
+		van_driving = _reverse_van_to(float(ext_new.van))
 	var old_defs := item_defs
 	var old_nodes := item_nodes.duplicate()
 	var old_lines := yellow_lines
@@ -911,6 +913,8 @@ func set_plan(p: ClosurePlan, build := true) -> void:
 		if hit >= 0:
 			used[hit] = true
 			item_nodes[hit] = n
+			if not is_equal_approx(float(od.get("phase", 0.0)), float(item_defs[hit].get("phase", 0.0))):
+				SiteProps.set_phase(n, float(item_defs[hit].phase))
 		else:
 			_orphans.append(n)
 	for l in yellow_lines.size():
@@ -918,9 +922,11 @@ func set_plan(p: ClosurePlan, build := true) -> void:
 			if old_lines[k] == yellow_lines[l]:
 				yellow_fracs[l] = old_fracs[k]
 	_update_yellow()
+	# re-register the detour with the new geometry; a running detour stays (old items still stand)
+	var was_on := traffic_on
 	if traffic_on:
 		_traffic_deactivate()
-	if _any_in_lane_placed():
+	if was_on or _traffic_should_be_on():
 		_traffic_activate()
 	if van_moves and not van_driving and is_instance_valid(crew_van):
 		var vp := lay.van_pose()
@@ -938,16 +944,48 @@ func set_plan(p: ClosurePlan, build := true) -> void:
 	Events.site_changed.emit(self)
 
 
-func _drive_van_to(new_s: float) -> bool:
+## The new van spot lies behind the van on the same curb: reverse there (traffic waits behind a
+## safety zone) instead of driving around the block.
+func _reverse_van_to(new_s: float) -> bool:
 	var v := crew_van
-	var dest_s := new_s - 12.0
-	var ok := v.drive_plan({"key": lay.key, "s": dest_s}, job.short_title(), [v.pull_over_piece(lay.key, dest_s, SiteLayout.CURB, 12.0)], func(veh):
+	var r: Array = Geo.closest_on_polyline(lay._g[0], lay._g[1], v.pos2())
+	var s_here: float = r[1]
+	if new_s > s_here - 0.5:
+		return false
+	var path := lay.lane_poly(s_here, new_s, func(_s): return SiteLayout.CURB, 1.0)
+	path[0] = v.pos2()
+	var pc := Router.poly_piece(path, 1.8, true, "rev")
+	var ok := v.drive_plan({}, job.short_title(), [], func(veh):
 		var vp := lay.van_pose()
 		veh.place(Vector3(vp.pos.x, 0, vp.pos.y), vp.yaw)
-		_arrived(veh, "van"))
+		_arrived(veh, "van"), [pc], {"key": lay.key, "s0": new_s - 8.0, "s1": s_here + 6.0})
 	if ok:
 		_reserve(v, "van")
 	return ok
+
+
+## Traffic is shifted while an item stands in K; plans without any item in K still close the lane
+## while the work runs (dig … demob) and until their teardown is finished.
+func _traffic_should_be_on() -> bool:
+	if _any_in_lane_placed():
+		return true
+	if phase < 2 or phase > 7:
+		return false
+	if phase < 7:
+		return true
+	for d in item_defs:
+		if d.get("in_lane", false):
+			return false
+	return _placed_count() > 0 or _lines_count(0.001) > 0
+
+
+func _orphans_state() -> Array:
+	var out: Array = []
+	for o in _orphans:
+		if is_instance_valid(o) and o.has_meta("kind"):
+			var gp: Vector3 = o.global_position
+			out.append([str(o.get_meta("kind")), gp.x, gp.z, o.global_rotation.y])
+	return out
 
 
 ## Debug tools: drop items that a changed plan no longer contains at once.
@@ -980,13 +1018,19 @@ func _tick_crew_tasks() -> void:
 		if _wtasks.is_empty() and not any_busy:
 			for i in workers.size():
 				_worker_home(workers[i], i)
+			if not traffic_on:
+				_traffic_activate()   # the work zone needs the detour even if no item stands in the lane
 			_complete("closure")
 	elif step_id() == "teardown":
 		total = item_defs.size() + yellow_lines.size()
 		done = total - _placed_count() - _lines_count(0.001)
 		progress = float(done) / maxf(1.0, total)
 		if _wtasks.is_empty() and not any_busy:
-			crew_van.cargo.barriers += 1
+			if kit_used:
+				crew_van.cargo.barriers += 1
+				kit_used = false
+			if traffic_on:
+				_traffic_deactivate()
 			for i in workers.size():
 				_worker_home(workers[i], i)
 			_complete("teardown")
@@ -2135,7 +2179,7 @@ func save_state() -> Dictionary:
 		placed.append(n != null)
 	return {"phase": phase, "placed": placed, "yellow": yellow_frac, "yellow_fracs": yellow_fracs.duplicate(),
 		"plan": plan.to_dict() if plan.custom else {}, "plan_ok": plan_confirmed, "plan_build": build_when_ready,
-		"terrain": terrain.save_state(),
+		"kit": kit_used, "orphans": _orphans_state(), "terrain": terrain.save_state(),
 		"pile_mat": pile_mat, "pile_m3": pile_m3, "needs": needs, "layer": layer, "auto": auto_continue,
 		"pipe_old": pipe_old != null, "pipe_new": pipe_new != null}
 
@@ -2149,6 +2193,14 @@ func load_state(d: Dictionary) -> void:
 	var placed: Array = d.get("placed", [])
 	plan_confirmed = bool(d.get("plan_ok", placed.has(true) or phase > 1))
 	build_when_ready = bool(d.get("plan_build", false))
+	kit_used = bool(d.get("kit", placed.has(true) or (phase > 1 and phase < 8)))
+	for o in d.get("orphans", []):
+		var oa: Array = o
+		if oa.size() >= 4 and ClosurePlan.KINDS.has(str(oa[0])):
+			var on := SiteProps.item(str(oa[0]))
+			add_child(on)
+			on.global_transform = Transform3D(Basis(Vector3.UP, float(oa[3])), Vector3(float(oa[1]), 0.05, float(oa[2])))
+			_orphans.append(on)
 	for i in mini(placed.size(), item_defs.size()):
 		if placed[i]:
 			var df: Dictionary = item_defs[i]
@@ -2156,14 +2208,12 @@ func load_state(d: Dictionary) -> void:
 			add_child(node)
 			node.global_transform = Transform3D(Basis(Vector3.UP, df.yaw), Vector3(df.pos.x, 0.05, df.pos.y))
 			item_nodes[i] = node
-			if df.group == "taper":
-				traffic_on = false
-	if _any_in_lane_placed():
-		_traffic_activate()
 	var yf: Array = d.get("yellow_fracs", [])
 	for i in yellow_fracs.size():
 		yellow_fracs[i] = float(yf[i]) if i < yf.size() else float(d.get("yellow", 0.0))
 	_update_yellow()
+	if _traffic_should_be_on():
+		_traffic_activate()
 	terrain.load_state(d.get("terrain", {}))
 	if phase >= 2:
 		terrain.set_hole(jm.pit_slot_of(self), true)

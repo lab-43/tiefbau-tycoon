@@ -210,7 +210,12 @@ func stage_s(i: int) -> float:
 
 ## Lowbed parks after the tail so that its ramp lands behind the closure; returns the tractor origin s.
 func lowbed_s(back_to_ramp_end: float) -> float:
-	return s_taper1 + 3.0 + back_to_ramp_end
+	return tail_s() + 3.0 + back_to_ramp_end
+
+
+## End of the closure on K (standard: end of the tail taper; a player plan may reach further).
+func tail_s() -> float:
+	return maxf(s_taper1, obst1 + 1.0)
 
 
 func trench_center() -> Vector2:
@@ -296,9 +301,9 @@ func lane_coords(p: Vector2) -> Vector2:
 	return Vector2(s, lat)
 
 
-## Inside the closed lane K (blocks it).
+## Inside the closed lane K (blocks it). Items snapped exactly onto a lane edge count as inside.
 func in_lane(lc: Vector2) -> bool:
-	return lc.x >= 0.0 and lc.x <= len_k and absf(lc.y) < lw * 0.5
+	return lc.x >= 0.0 and lc.x <= len_k and absf(lc.y) <= lw * 0.5 + 0.05
 
 
 func current_extent() -> Dictionary:
@@ -383,10 +388,12 @@ func items() -> Array:
 	out.append(_item("z123", lane_pt(maxf(3.0, s0 - 48.0), side), yaw_of(lane_dir(maxf(3.0, s0 - 48.0))), "signs"))
 	out.append(_item("z208", lane_pt(maxf(3.0, s0 - 30.0), side), yaw_of(lane_dir(maxf(3.0, s0 - 30.0))), "signs"))
 	var k2_sign_kind := "z308" if oncoming else ""
-	var s2_123 := maxf(3.0, s2_a - 45.0)
+	# standard positions: from the default K2 range (a player plan may have moved s2_a)
+	var s2a_def: float = _k2_for(s0 - 8.0, s_taper1 + 5.0).s2_a
+	var s2_123 := maxf(3.0, s2a_def - 45.0)
 	out.append({"kind": "z123", "pos": lane2_pt(s2_123, lw2 * 0.5 + 0.7), "yaw": yaw_of(lane2_dir(s2_123)), "phase": 0.0, "group": "signs"})
 	if k2_sign_kind != "":
-		var s2_308 := maxf(3.0, s2_a - 24.0)
+		var s2_308 := maxf(3.0, s2a_def - 24.0)
 		out.append({"kind": "z308", "pos": lane2_pt(s2_308, lw2 * 0.5 + 0.7), "yaw": yaw_of(lane2_dir(s2_308)), "phase": 0.0, "group": "signs"})
 	# taper (Verschwenkung) with running warning lights
 	var n_taper := 5

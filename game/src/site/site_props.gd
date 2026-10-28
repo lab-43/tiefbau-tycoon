@@ -89,6 +89,15 @@ static func item(kind: String, phase := 0.0) -> Node3D:
 	return n
 
 
+## Changes the running-light phase of an item's warning lights (a changed closure plan, #9).
+static func set_phase(n: Node3D, phase: float) -> void:
+	for mi in n.find_children("*", "MeshInstance3D", true, false):
+		var m3 := mi as MeshInstance3D
+		for si in m3.mesh.get_surface_count():
+			if m3.get_surface_override_material(si) == warn_mat():
+				m3.set_instance_shader_parameter("phase", phase)
+
+
 static func _fallback(kind: String) -> Node3D:
 	var n := Node3D.new()
 	var mi := MeshInstance3D.new()

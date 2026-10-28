@@ -231,9 +231,10 @@ static func _cancel_activity(s: Site) -> void:
 		ex.working = false
 
 
-static func _instant_closure(s: Site, was_running: bool) -> void:
-	if not was_running and s._placed_count() == 0 and s.crew_van and is_instance_valid(s.crew_van) and s.crew_van.cargo.barriers > 0:
+static func _instant_closure(s: Site, _was_running: bool) -> void:
+	if not s.kit_used and s.crew_van and is_instance_valid(s.crew_van) and s.crew_van.cargo.barriers > 0:
 		s.crew_van.cargo.barriers -= 1
+		s.kit_used = true
 	s.plan_confirmed = true
 	s.build_when_ready = false
 	s.clear_orphans()
@@ -275,8 +276,9 @@ static func _instant_teardown(s: Site) -> void:
 	s.yellow_frac = 0.0
 	s._update_yellow()
 	s._traffic_deactivate()
-	if s.crew_van and is_instance_valid(s.crew_van):
+	if s.kit_used and s.crew_van and is_instance_valid(s.crew_van):
 		s.crew_van.cargo.barriers += 1
+		s.kit_used = false
 
 
 static func _deliver_needs(s: Site, mats: Array) -> void:

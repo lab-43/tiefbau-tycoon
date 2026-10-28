@@ -537,6 +537,7 @@ func _changed(user_edit := true) -> void:
 func undo() -> void:
 	if _undo.is_empty():
 		return
+	_press = {}   # a drag in progress is dropped with the undone state
 	_end_chain()
 	_redo.append(plan.copy())
 	plan = _undo.pop_back()
@@ -549,6 +550,7 @@ func undo() -> void:
 func redo() -> void:
 	if _redo.is_empty():
 		return
+	_press = {}
 	_end_chain()
 	_undo.append(plan.copy())
 	plan = _redo.pop_back()
@@ -578,11 +580,10 @@ func clear_all() -> void:
 	_changed()
 
 
-func _add_items(list: Array) -> bool:
-	if plan.items.size() + list.size() > ClosurePlan.MAX_ITEMS:
+func _fits(n: int) -> bool:
+	if plan.items.size() + n > ClosurePlan.MAX_ITEMS:
 		Events.warn("Zu viele Teile (höchstens %d)" % ClosurePlan.MAX_ITEMS)
 		return false
-	plan.items.append_array(list)
 	return true
 
 
@@ -624,9 +625,11 @@ func _place_single(p: Vector2) -> void:
 	var origin := p
 	if ClosurePlan.is_linear(kind):
 		origin = p - ClosurePlan.axis_x(yaw) * ClosurePlan.ELEM_LEN * 0.5
+	if not _fits(1):
+		return
 	_push_undo(_snapshot())
-	if _add_items([ClosurePlan.make_item(kind, origin, wrapf(yaw, -PI, PI))]):
-		_changed()
+	plan.items.append(ClosurePlan.make_item(kind, origin, wrapf(yaw, -PI, PI)))
+	_changed()
 
 
 ## Path of the chain segment that the next click would commit (empty if none).
@@ -656,6 +659,11 @@ func _chain_click(p: Vector2) -> void:
 	var path := _pending_path()
 	if Geo.polyline_length(path) < 0.3:
 		return
+	var list: Array = []
+	if kind != "line":
+		list = ClosurePlan.chain(kind, path, float(spacing.get(kind, 5.0)), lay, _chain_segments > 0)
+		if not _fits(list.size()):
+			return
 	_push_undo(_snapshot())
 	if kind == "line":
 		if _chain_line < 0 or _chain_line >= plan.lines.size():
@@ -667,10 +675,7 @@ func _chain_click(p: Vector2) -> void:
 				pl.append(path[k])
 			plan.lines[_chain_line] = pl
 	else:
-		var list := ClosurePlan.chain(kind, path, float(spacing.get(kind, 5.0)), lay, _chain_segments > 0)
-		if not _add_items(list):
-			_undo.pop_back()
-			return
+		plan.items.append_array(list)
 	_chain_segments += 1
 	var end := path[path.size() - 1]
 	_chain = PackedVector2Array([end])
