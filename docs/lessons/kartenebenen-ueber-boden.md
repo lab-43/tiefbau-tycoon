@@ -12,3 +12,4 @@ pruefung: e2e:ebenen
 - Wasser liegt über allen Flächen (Hafen-Landuse überlappt die Becken) und unter Gleisbett, Wegen und Straßen. Aktuell: Flächen 0,010–0,030 · Wasser 0,031 · Gleisbett 0,032 · Wege 0,04 · Straße 0,05.
 - Wer Höhen oder Inhalt der gebackenen Meshes ändert, erhöht `MapBuilder.BAKE_VERSION`. Sonst lädt das Spiel die alte `baked_v<n>.bin` und die Änderung kommt bei Jonathan nie an.
 - `tools/test.sh ebenen` (läuft auch bei `pbf`) prüft die Reihenfolge an Utrecht. Mit dem alten Wert schlägt er fehl.
+- Erhöhen zwei Sessions `BAKE_VERSION` parallel (#5 und #8 beide auf 5), beim Rebase die höhere Zahl plus 1 nehmen und beide Gründe im Kommentar behalten.

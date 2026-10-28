@@ -35,6 +35,7 @@ Alle Punkte stammen aus echten Fehlern. Die Details und Belege stehen in `docs/l
 - **Headless** (`--headless`) rendert nicht. Screenshots gehen nur mit `tools/gd.sh run` (xvfb + Vulkan). Viewport-Texturen sind headless leer.
 - **Editor-Binary vs. Export:** Das Linux-Binary hat das Feature „editor“. Export-Verhalten (portable.txt, Daten-pck) über Schalter testbar machen, nicht über `OS.has_feature` (editor-binary).
 - **Kein override.cfg** (kein-override-cfg). Logs schreibt `GameLogger`.
+- **Mesh-Kompression:** `ARRAY_FLAG_COMPRESS_ATTRIBUTES` rundet Positionen auf 1/65535 der AABB. Für Millimeter-Abstände zwischen Ebenen ist das zu grob (mesh-kompression).
 
 ## Projektkonventionen
 
@@ -42,6 +43,7 @@ Alle Punkte stammen aus echten Fehlern. Die Details und Belege stehen in `docs/l
 - **Zahlen und Preise:** in `src/core/balance.gd`, nicht verstreut.
 - **Kommunikation:** zwischen Systemen über `Events` (Signalbus), z. B. `Events.notify`, `site_changed` oder `request_focus`. Spielermeldungen mit `Events.info/ok/warn/error("…")` auf Deutsch.
 - **Koordinaten:** `Vector2(x, z)` in Metern, x = Osten, z = Süden (Godot −Z = Norden). Spurkoordinaten (Schlüssel, s, seitlich) erklärt der Skill `spiel-architektur`.
+- **Höhen:** Die Karte hat Gelände. Orte auf der Karte nie mit fester Höhe bauen, sondern `Terrain.at(p)`, `Terrain.near(p, y)` oder in der Baustelle `Site.gw(p, y)`. Flache Kartenebenen bekommen ihre Tiefe im Shader (`terrain_depth`) (gelaende-hoehen).
 - **Speichern:** Jedes System hat `save_state() -> Dictionary` / `load_state(d)`. Neue Felder immer mit `d.get("feld", standard)` lesen, damit alte Spielstände laden. Das gilt auch für Spielstände aus Meldungen.
 - **Spieltexte** sind deutsch; Kommentare und Bezeichner englisch.
 - **Neue Klassen** bekommen einen `##`-Kommentar ganz oben: was die Klasse tut und wem sie gehört. `session_start` und Agenten lesen diese Zeile.
