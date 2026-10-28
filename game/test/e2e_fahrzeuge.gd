@@ -120,7 +120,7 @@ func tick(delta: float) -> void:
 			var nb2 := _v("tractor_nooteboom")
 			var m2 := _machine()
 			if nb2.cargo.machine == null and nb2.state == "parked" and m2.carried_by == null and m2.state == "parked":
-				ok(absf(m2.global_position.y) < 0.01, "%s wieder auf dem Boden" % m2.def_id)
+				ok(absf(m2.global_position.y - Terrain.at3(m2.global_position.x, m2.global_position.z)) < 0.01, "%s wieder auf dem Boden" % m2.def_id)
 				_check_ground(m2, "abgeladen")
 				if load_round == 0:
 					load_round = 1
@@ -252,13 +252,14 @@ func _watch_site(delta: float) -> void:
 # Checks
 # ------------------------------------------------------------------------------------------
 
-## Wheels: hub height minus radius = ground; crawler tracks: lowest point of the chain meshes = ground.
+## Wheels: hub height minus radius = ground; crawler tracks: lowest point of the chain meshes = ground
+## (ground = Terrain height, 0 on the flat test map).
 func _check_ground(v: Vehicle, where: String) -> void:
 	var worst := 0.0
 	var n := 0
 	for wd in v._wheels:
 		var wn: Node3D = wd[0]
-		var gap: float = wn.global_position.y - float(wd[1])
+		var gap: float = wn.global_position.y - float(wd[1]) - Terrain.at3(wn.global_position.x, wn.global_position.z)
 		n += 1
 		if absf(gap) > absf(worst):
 			worst = gap
@@ -266,7 +267,7 @@ func _check_ground(v: Vehicle, where: String) -> void:
 		var tr := v.part(tn)
 		if tr:
 			n += 1
-			var lo := _lowest_of(tr)
+			var lo := _lowest_of(tr) - Terrain.at3(tr.global_position.x, tr.global_position.z)
 			if absf(lo) > absf(worst):
 				worst = lo
 	ok(n > 0 and absf(worst) <= GROUND_TOL, "%s %s: %d Räder/Ketten auf dem Boden (größte Abweichung %.3f m)" % [v.def_id, where, n, worst])
@@ -363,7 +364,8 @@ func _check_joints(v: Vehicle) -> void:
 			v.set_ramp(4.68, 20.0)
 			var lo := 10.0
 			for h in v._ramp_hinges:
-				lo = minf(lo, _lowest_of(h[0], "beacon_"))
+				var hn: Node3D = h[0]
+				lo = minf(lo, _lowest_of(hn, "beacon_") - Terrain.at3(hn.global_position.x, hn.global_position.z))
 			ok(absf(lo) <= GROUND_TOL, "%s Rampe offen: Ende am Boden (%.3f m, Neigung %.2f°)" % [v.def_id, lo, rad_to_deg(v._trailer_pitch)])
 			v.set_ramp(0.0, 0.0)
 	var arm := v.part("loader_arm")
