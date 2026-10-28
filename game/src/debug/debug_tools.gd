@@ -243,7 +243,7 @@ static func _instant_closure(s: Site, _was_running: bool) -> void:
 			var df: Dictionary = s.item_defs[i]
 			var node := SiteProps.item(df.kind, df.phase)
 			s.add_child(node)
-			node.global_transform = Transform3D(Basis(Vector3.UP, df.yaw), Vector3(df.pos.x, 0.05, df.pos.y))
+			node.global_transform = Transform3D(Basis(Vector3.UP, df.yaw), Site.gw(df.pos, 0.05))
 			s.item_nodes[i] = node
 	s.yellow_frac = 1.0
 	s._update_yellow()

@@ -90,13 +90,13 @@ def check_gd(path, rel, lines):
         if re.search(r"Program Files|steamapps", line):
             report("ERROR", f"{rel}:{i}", "Pfad in den Steam-Spielordner – dort wird nie geschrieben", "privat-assets")
         m = GROUND_RE.search(code)
-        if m and rel.startswith(GROUND_DIRS) and not DIRECTION_NAMES.match(m.group(1)) and "request_focus" not in code:
+        if m and rel.startswith(GROUND_DIRS) and not DIRECTION_NAMES.match(m.group(1).split(".")[-1]) and "request_focus" not in code:
             report("WARN", f"{rel}:{i}", "Weltpunkt mit fester Höhe aus einer Kartenposition – Geländehöhe fehlt "
                    "(Site.gw(), Terrain.at(); Richtungen mit # lint-ok markieren)", "gelaende-hoehen")
 
 
 # Positions on the map need the ground height (#8): Vector3(p.x, 0.05, p.y) in gameplay code ignores it.
-GROUND_RE = re.compile(r"Vector3\(([A-Za-z_][A-Za-z0-9_]*)\.x,\s*-?[0-9.]+,\s*\1\.y\)")
+GROUND_RE = re.compile(r"Vector3\(([A-Za-z_][A-Za-z0-9_.]*)\.x,\s*-?[0-9.]+,\s*\1\.y\)")
 GROUND_DIRS = ("game/src/site/", "game/src/vehicles/", "game/src/world/", "game/src/traffic/", "game/src/debug/", "game/src/ui/")
 DIRECTION_NAMES = re.compile(r"^(n|nn|n2|nrm|normal|d|dir|dirv|fwd|toward|right|r|out|side|delta|along)$")
 

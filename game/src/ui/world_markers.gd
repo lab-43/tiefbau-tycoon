@@ -208,7 +208,7 @@ func _collect(w: World) -> Array:
 	var site_e := {}
 	if view.hq and not w.hq_info.is_empty():
 		var lc: Vector2 = w.hq_info.get("lot_center", Vector2.ZERO)
-		hq_e = _entry("hq", null, Vector3(lc.x, 10.0, lc.y), "house", 0)
+		hq_e = _entry("hq", null, Vector3(lc.x, Terrain.at(lc) + 10.0, lc.y), "house", 0)
 		hq_e.title = "Zentrale"
 		out.append(hq_e)
 	if view.sites:
@@ -224,7 +224,7 @@ func _collect(w: World) -> Array:
 	if view.offers:
 		for j in w.jobs.offers:
 			var job: Job = j
-			var e2 := _entry("offer", job, Vector3(job.center.x, 0.5, job.center.y), "clipboard-list", 3)
+			var e2 := _entry("offer", job, Vector3(job.center.x, Terrain.at(job.center) + 0.5, job.center.y), "clipboard-list", 3)
 			e2.title = Balance.money(job.pay)
 			out.append(e2)
 	if view.vehicles:
