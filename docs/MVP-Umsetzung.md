@@ -233,3 +233,24 @@ Fahrzeuge (Kolonnenbus, Pritsche, Kipper, Sattelzug mit Tieflader, Mobilbagger):
 - **Eigene Fahrspuren (#19):** Nur für die Dauer der Baustelle (Teil des Plans, nach dem Abbau fährt der Verkehr wieder wie vorher). Jede Fahrspur sind Stützpunkte `(s, seitlicher Versatz)` auf ihrem Fahrstreifen, dazwischen ein weicher Übergang (wie die automatische Verschwenkung). Die Spur der Baustellenseite beginnt vor und endet hinter dem gesperrten Bereich und bleibt innerhalb der roten Grenzen. Liegen beide Spuren überall mindestens 2,5 m auseinander, gibt es keine Engstelle mehr: Beide Richtungen fahren gleichzeitig (bei gleicher Richtung kein Reißverschluss), Z 208/308 sind dann nicht nötig. Wohin die Spur führt (z. B. über den Gehweg), entscheidet der Spieler; geprüft wird nur, dass sie den Arbeitsbereich meidet.
 - **Bewusst noch nicht:** Material ist unbegrenzt und kostet nichts, Verstöße haben keine Folgen, eigene Vorlagen lassen sich nicht speichern, geplant wird nur vor dem Aufbau (nicht während die Kolonne baut). Rückfragen dazu stehen in Meldung #9.
 - **Technik:** `src/site/closure_plan.gd` (Plan, Ketten, Prüfung, Speichern, `traffic`), `src/ui/closure_designer.gd` (Planungsmodus), `SiteLayout.extent_for` / `_finish_extent` (Verkehr aus dem Plan, Fahrspuren als Stützpunkte `k_ctrl`/`k2_ctrl`, `two_way`), `CameraRig.enter_topdown`. Test: `tools/test.sh absperrung`.
+
+## Geländehöhen (Meldung #8)
+- **Datenquelle:** Mapterhorn (`tiles.mapterhorn.com`, Open-Data-Projekt von Oliver Wipfli u. a., Schweiz, gehostet bei Cloudflare, gefördert von NLnet/NGI0).
+  - Höhenkacheln im Terrarium-Format (Höhe = R·256 + G + B/256 − 32768 m), verlustfreies WebP, 512 px.
+  - Für Deutschland stecken die amtlichen **DGM1** aller 16 Länder drin (1 m, nackter Boden ohne Gebäude und Bäume). Hamburg: „Digitales Höhenmodell Hamburg DGM 1“, © FHH, LGV, Datenlizenz dl-de/by-2.0. Außerhalb: Copernicus GLO-30 (30 m).
+  - Kostenlos, ohne Konto. Nutzungsregeln für den öffentlichen Kachel-Endpunkt nennt die Seite keine; das Spiel lädt pro Karte einmal 20–64 Kacheln mit eigenem User-Agent (ohne Mail-Adresse) und speichert sie.
+  - Zoomstufe 13 (5,7 m pro Pixel in Hamburg). Die Höhen sind dort in 25-cm-Stufen gerundet (z12: 50 cm, z14: 12,5 cm) – deshalb wird geglättet.
+  - Rückfall: AWS Terrain Tiles (Mapzen, SRTM-basiert, gröber). Ohne Netz bleibt die Karte flach und das Spiel versucht es beim nächsten Start noch einmal (`baked_v5_flach.bin`).
+  - Geprüft am PC (eingebauter Browser, 28.10.): Elbe 0 m, Alster 3 m, Geest bis 40 m, Michel und Elbphilharmonie fehlen (nackter Boden).
+- **Aufbereitung** (`src/map/terrain_bake.gd`, im Worker-Thread):
+  - Kacheln → 10-m-Raster in lokalen Metern → Land weichgezeichnet (Gauß, ~15 m), Wasserflächen dabei ausgenommen → 5-m-Raster.
+  - Jede Wasserfläche liegt flach auf ihrer Höhe (Median der Höhen darin), der Boden darunter 1 m tiefer. Knoten am Ufer behalten die Landhöhe, die Böschung liegt im Wasser.
+  - Der Hof der Zentrale wird eben gemacht und läuft über 30 m ins Gelände aus.
+  - Brücken: die Fahrbahn läuft gerade zwischen den Brückenenden (Ketten aus mehreren Abschnitten werden verbunden) und geht an Land-Enden weich ins Gelände über. Ebenso Fuß- und Bahnbrücken. Eine Mindest-Durchfahrtshöhe über anderen Straßen gibt es noch nicht.
+- **Darstellung:**
+  - Das Raster ist eine globale Shader-Textur (`terrain_tex`, `terrain_rect`, `terrain_size`). Boden, Flächen, Straßen, Wege und Markierungen berechnen pro Pixel die genaue Höhe und schreiben sie als Tiefe (`terrain_depth` in `common.gdshaderinc`). Die Ebenen bleiben deshalb in ihrer Reihenfolge, auch wenn ihre Dreiecke den Hang nur grob nachbilden.
+  - Auf der CPU hebt `MeshLayer` jeden Punkt aufs Gelände (`terrain` gesetzt), große Flächen werden in 15-m-Zellen geschnitten.
+  - Gebäude: Dach h über der mittleren Geländehöhe des Umrisses, Wände bis unter den tiefsten Punkt.
+  - Der flache Boden ist durch Gitter-Kacheln ersetzt (Ebene `ground`, 20 m), mit einem groben Rand bis zum Horizont.
+- **Spiel:** `Terrain.at(p)`, `Terrain.near(p, y)` (Boden oder Brücke), `Terrain.piece_y(...)` für Routen. Verkehr und Firmenfahrzeuge neigen sich am Hang, Anhänger folgen. Kamera, Mausklick (Strahl aufs Gelände), Zentrale, Baustellen, Arbeiter, Ampeln und Laternen stehen auf dem Gelände.
+- **Tests:** `tools/test.sh gelaende` (Testgelände mit künstlichen Hügeln, dazu Download von einem lokalen Kachelserver als PNG und WebP: `game/test/mock_terrain.py`). Schalter: `--terrain=synthetic`, `--terrain-url=<Vorlage mit {z}/{x}/{y}>`, `--no-terrain`.
