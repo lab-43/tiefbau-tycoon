@@ -25,6 +25,7 @@ Alle Punkte stammen aus echten Fehlern. Die Details und Belege stehen in `docs/l
 - **HTTPRequest:** nie `use_threads = true`, das blockiert den Hauptthread beim Abbrechen. Für große Downloads `download_chunk_size` auf 1 << 18 setzen (http-ohne-threads).
 - **Weiterleitungen:** Godot folgt nur 301/302. Für 303/307/308 die Schleife aus `geofabrik.gd` verwenden (http-weiterleitungen).
 - **Lange Arbeit** (Parsen, Aufbereiten, Speichern großer Daten) läuft in `Thread`/`WorkerThreadPool`. Fortschritt über Mutex und Polling, nie Nodes aus dem Thread anfassen (hauptthread-frei).
+- **Controls über der 3D-Welt** (Markierungen): `MOUSE_FILTER_PASS`, nur den eigenen Klick mit `accept_event()` annehmen, Rechtsklick-Befehle über `World.marker_command`. STOP schluckt Ziehen und Rechtsklick der Kamera. In Tests `push_input` statt `_gui_input` (ui-ueber-welt-pass).
 - **Node-Namen** ohne `. : @ / "`, sonst bricht `get_node` (node-namen).
 - **Namen wiederverwenden:** vor `queue_free()` erst `remove_child()` (queue-free-namen).
 - **Anker:** `set_anchors_preset()` setzt keine Offsets. `set_anchors_and_offsets_preset()` verwenden oder die Offsets direkt danach setzen (ui-anker).
