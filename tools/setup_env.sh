@@ -45,11 +45,13 @@ if [ $TEMPLATES = 1 ]; then
 fi
 
 # --- 3. screenshots (xvfb + vulkan software renderer) -----------------------------------------
-if [ $APT = 1 ] && ! command -v xvfb-run >/dev/null 2>&1; then
+# Some images already ship xvfb but no Vulkan driver: Godot then silently falls back to the
+# Compatibility renderer (gles3) and screenshots no longer match Forward+ on Jonathan's PC.
+if [ $APT = 1 ] && { ! command -v xvfb-run >/dev/null 2>&1 || ! ls /usr/share/vulkan/icd.d/lvp_icd*.json >/dev/null 2>&1; }; then
   if command -v apt-get >/dev/null 2>&1; then
     say "xvfb + mesa-vulkan-drivers werden installiert …"
-    (apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xvfb mesa-vulkan-drivers libvulkan1 >/dev/null) \
-      || echo "!! apt ging nicht – Screenshots gehen dann nicht (headless Tests schon)"
+    (apt-get update -qq; DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xvfb mesa-vulkan-drivers libvulkan1 >/dev/null) \
+      || echo "!! apt ging nicht – Screenshots gehen dann nicht oder nur im Kompatibilitätsmodus (headless Tests schon)"
   fi
 fi
 
