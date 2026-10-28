@@ -28,6 +28,7 @@ description: Use this skill to set up, check, test, build or deliver the Tiefbau
 |---|---|---|
 | `python3 tools/lint.py` | 1 s | Projektregeln aus den Lektionen (privat, Threads, user://, Mail …) |
 | `tools/check.sh` | 2 s | Kompiliert alle Skripte mit Autoloads, Fehler mit Datei:Zeile |
+| `tools/agent/test_issues.sh` | 3 s | Meldungswerkzeug: parallele Übernahmen, Nummern, Rechte, Sperren |
 | `tools/test.sh` | ~40 s | smoke + issue (Standard, auch in merge.sh) |
 | `tools/test.sh job` | ~7 min | ein kompletter Auftrag mit Startfuhrpark |
 | `tools/test.sh lowbed save+load pbf` | 4 min · ~8 min · 20 s | Tieflader, Speichern/Laden mitten im Graben, PBF-Leser |

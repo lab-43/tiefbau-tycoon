@@ -21,13 +21,13 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
     fi
   fi
 fi
-G="${GODOT:-}"; [ -z "$G" ] && { [ -x /opt/godot/godot ] && G=/opt/godot/godot || G=$(command -v godot 2>/dev/null); }
+. "$ROOT/tools/lib.sh"; find_godot
 MISS=""
 [ -z "$G" ] && MISS="$MISS Godot"
 [ -d game/assets/consim ] || MISS="$MISS Assets"
 [ -d game/.godot ] || MISS="$MISS Import"
 [ -n "$MISS" ] && echo "Umgebung unvollständig (fehlt:$MISS) → tools/setup_env.sh (Skill tycoon-dev)."
-echo "Meldungen/Übernahmen liegen auf Jonathans PC: python3 tools/agent/issues.py next (per Geräte-Shell, Skill issue-ablauf)."
+echo "Meldungen, Übernahmen und Sperren liegen auf Jonathans PC: issues.py next in der Geräte-Shell (Skill issue-ablauf), nicht im Container."
 if [ -d docs/lessons ]; then
   echo "Lektionen (docs/lessons, vor Änderungen im Bereich lesen):"
   for f in docs/lessons/*.md; do

@@ -92,24 +92,33 @@ static func thread(folder: String) -> Array:
 	return out
 
 
-## Appends one entry (adds time and author). Append-only, so the game and agents never overwrite
-## each other's lines.
+## Appends one entry (adds time, author and a unique "eid"). Append-only, so the game and agents never
+## overwrite each other's lines. Godot has no O_APPEND: between seek_end() and the write an agent could
+## append at the same moment, so the line is verified and written again if it got lost.
 static func append(folder: String, entry: Dictionary) -> void:
 	entry["t"] = Time.get_datetime_string_from_system(false, true)
+	entry["eid"] = "%08x" % (randi() & 0x7fffffff)
 	if not entry.has("by"):
 		entry["by"] = "Spieler"
 	var p := folder.path_join("verlauf.jsonl")
-	var f := FileAccess.open(p, FileAccess.READ_WRITE) if FileAccess.file_exists(p) else FileAccess.open(p, FileAccess.WRITE)
-	if f == null:
-		push_error("Meldung: Verlauf nicht schreibbar: " + p)
-		return
-	f.seek_end()
-	f.store_line(JSON.stringify(entry))
-	f.close()
+	var line := JSON.stringify(entry)
+	for attempt in 4:
+		var f := FileAccess.open(p, FileAccess.READ_WRITE) if FileAccess.file_exists(p) else FileAccess.open(p, FileAccess.WRITE)
+		if f == null:
+			push_error("Meldung: Verlauf nicht schreibbar: " + p)
+			return
+		f.seek_end()
+		f.store_line(line)
+		f.close()
+		for e in thread(folder).slice(-50):
+			if String(e.get("eid", "")) == entry.eid:
+				return
+	push_error("Meldung: Eintrag im Verlauf nicht wiedergefunden: " + p)
 
 
-## Name of the session that currently works on the issue ("" if none). Claims older than 6 h
-## without heartbeat count as abandoned.
+## Name of the session that currently works on the issue ("" if none). Same rules as
+## tools/agent/issues.py: highest claims/<n>/, released by a "freigegeben" file, alive while
+## owner.json heartbeat or the mtime of "herzschlag" is younger than 6 h.
 static func active_claim(folder: String) -> String:
 	var cdir := folder.path_join("claims")
 	if not DirAccess.dir_exists_absolute(cdir):
@@ -120,24 +129,39 @@ static func active_claim(folder: String) -> String:
 			best = maxi(best, d.to_int())
 	if best < 0:
 		return ""
-	var owner := _read_json(cdir.path_join(str(best)).path_join("owner.json"))
-	if owner.is_empty() or owner.get("released", false):
+	var g := cdir.path_join(str(best))
+	if FileAccess.file_exists(g.path_join("freigegeben")):
 		return ""
+	var owner := _read_json(g.path_join("owner.json"))
 	var hb: float = float(owner.get("heartbeat_unix", 0))
-	if Time.get_unix_time_from_system() - hb > 6 * 3600:
+	for f in ["owner.json", "herzschlag"]:
+		if FileAccess.file_exists(g.path_join(f)):
+			hb = maxf(hb, float(FileAccess.get_modified_time(g.path_join(f))))
+	if owner.get("released", false) or Time.get_unix_time_from_system() - hb > 6 * 3600:
 		return ""
 	return String(owner.get("session", "?"))
 
 
+## Next free issue id, reserved with mkdir <issues>/.ids/<n> (atomic, like tools/agent/issues.py),
+## so a report from the game and an agent creating a task at the same moment never share an id.
 static func next_id() -> int:
 	var m := 0
 	var r := root()
-	if DirAccess.dir_exists_absolute(r):
-		for d in DirAccess.get_directories_at(r):
-			var head := d.get_slice("-", 0)
-			if head.is_valid_int():
-				m = maxi(m, head.to_int())
-	return m + 1
+	var ids := r.path_join(".ids")
+	DirAccess.make_dir_recursive_absolute(ids)
+	for d in DirAccess.get_directories_at(r):
+		var head := d.get_slice("-", 0)
+		if head.is_valid_int():
+			m = maxi(m, head.to_int())
+	for d in DirAccess.get_directories_at(ids):
+		if d.is_valid_int():
+			m = maxi(m, d.to_int())
+	var n := m + 1
+	while DirAccess.make_dir_absolute(ids.path_join(str(n))) != OK:
+		n += 1
+		if n > m + 1000:  # folder not writable: fall back to the plain maximum
+			return m + 1
+	return n
 
 
 static func slug(t: String) -> String:

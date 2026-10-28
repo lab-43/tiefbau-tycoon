@@ -55,6 +55,24 @@ def check_private(files, label):
             report("ERROR", f, f"Datei größer als {MAX_FILE_MB} MB {label}", "privat-assets")
 
 
+def check_modes():
+    """Scripts that are called directly must be executable in git (fresh clones)."""
+    for l in git("ls-files", "-s") or []:
+        mode, _, _, path = l.split(None, 3)
+        if (path.endswith(".sh") or path.startswith("tools/agent/") and path.endswith(".py")) and mode != "100755":
+            report("ERROR", path, "nicht ausführbar im Git (git update-index --chmod=+x %s)" % path, "skripte-ausfuehrbar")
+
+
+def check_author():
+    """The next commit must not carry a private address (agent commits go to GitHub)."""
+    ident = subprocess.run(["git", "-C", str(ROOT), "var", "GIT_AUTHOR_IDENT"], capture_output=True, text=True).stdout
+    m = re.search(r"<([^>]*)>", ident)
+    mail = m.group(1) if m else ""
+    if mail and mail.lower() not in ALLOWED_MAIL and not mail.endswith("users.noreply.github.com"):
+        report("ERROR", ".git/config", "Commit-Autor hat eine private Adresse – git config user.email noreply@anthropic.com",
+               "keine-mail")
+
+
 def check_gd(path, rel, lines):
     for i, line in enumerate(lines, 1):
         code = line.split("#", 1)[0] if not line.lstrip().startswith("#") else ""
@@ -71,6 +89,21 @@ def check_gd(path, rel, lines):
                 report("WARN", f"{rel}:{i}", "set_anchors_preset() lässt die Offsets stehen – set_anchors_and_offsets_preset() oder Offsets setzen", "ui-anker")
         if re.search(r"Program Files|steamapps", line):
             report("ERROR", f"{rel}:{i}", "Pfad in den Steam-Spielordner – dort wird nie geschrieben", "privat-assets")
+
+
+GENERATED = ("build/", "userdata/", "private/", "game/.godot", "game/build_info.json", "game/assets/consim",
+             "game/assets/barriers", "/tmp")
+
+
+def check_refs(rel, lines, tracked):
+    """Files a script uses via $ROOT/<path> must be in git, or a fresh clone breaks (lesson gitignore-anker)."""
+    for i, line in enumerate(lines, 1):
+        for m in re.finditer(r'\$ROOT/([A-Za-z0-9_./-]+)', line):
+            path = m.group(1).rstrip("./")
+            if not path or "$" in path or path.startswith(GENERATED) or "lint-ok" in line:
+                continue
+            if path not in tracked and not any(t.startswith(path + "/") for t in tracked):
+                report("ERROR", f"{rel}:{i}", f"benutzt {path}, das nicht im Git ist (.gitignore?)", "gitignore-anker")
 
 
 def check_sh(path, rel, lines):
@@ -117,8 +150,11 @@ def check_lesson(rel, text):
 def main():
     staged = "--staged" in sys.argv
     files = tracked_files()
+    tracked = set(files)
     check_private(files, "im Git")
+    check_modes()
     if staged:
+        check_author()
         st = git("diff", "--cached", "--name-only", "--diff-filter=AM") or []
         check_private(st, "zum Commit vorgemerkt")
         files = sorted(set(files) | set(st))
@@ -138,6 +174,7 @@ def main():
                 check_gd(p, rel, lines)
             elif p.suffix == ".sh":
                 check_sh(p, rel, lines)
+                check_refs(rel, lines, tracked)
             if p.suffix in (".yml", ".yaml"):
                 check_yaml(rel, text)
             if rel.startswith("docs/lessons/") and p.suffix == ".md" and p.name != "README.md":

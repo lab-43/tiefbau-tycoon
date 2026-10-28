@@ -9,8 +9,8 @@
 #   --test-build  also writes Starten.cmd that runs this pck with the exe in ../main (issue builds)
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-G="${GODOT:-}"
-[ -z "$G" ] && { [ -x /opt/godot/godot ] && G=/opt/godot/godot || G=$(command -v godot || true); }
+. "$ROOT/tools/lib.sh"
+find_godot || true
 [ -z "$G" ] && { echo "Godot nicht gefunden – erst tools/setup_env.sh ausführen"; exit 1; }
 OUT="${1:-$ROOT/build/out}"
 TEST=0; [ "$2" = "--test-build" ] && TEST=1

@@ -6,8 +6,8 @@
 #       tools/gd.sh run -- --autostart --fixture=utrecht --e2e=smoke --shots=/tmp/shots
 #   tools/gd.sh shot res://scene.tscn out.png [frames] [WxH]   render a single scene to a PNG
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-G="${GODOT:-}"
-[ -z "$G" ] && { [ -x /opt/godot/godot ] && G=/opt/godot/godot || G=$(command -v godot || true); }
+. "$ROOT/tools/lib.sh"
+find_godot
 P="$ROOT/game"
 case "$1" in
   check) "$ROOT/tools/check.sh" ;;

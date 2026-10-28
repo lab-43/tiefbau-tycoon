@@ -27,10 +27,13 @@ Der PC-Ordner ist ein Git-Klon (Branch main). Dort wird **nicht** entwickelt und
 
 ## build/main aktualisieren (nur nach Zusammenführen)
 
-1. Prüfen, was auf dem PC liegt: `cat "$HOME/mnt/Tiefbau Tycoon/build/main/VERSION.txt" build/main/daten.hash`.
-2. Liegt dort schon ein neuerer main-Stand, nichts tun. Das prüft `git merge-base --is-ancestor <pc-commit> HEAD`.
-3. `BaustellenManager.pck`, `LIESMICH.txt`, `portable.txt` und `VERSION.txt` übertragen, das Daten-pck nur bei geändertem `daten.hash`.
-4. `VERSION.txt` zuletzt schreiben, denn sie markiert den vollständigen Stand.
+1. Sperre holen (Geräte-Shell): `python3 $I lock build-main --session S --note "<version>"`. `$I` ist die Agentenkopie von `issues.py` (Skill issue-ablauf).
+   - Exit 2: Eine andere Session aktualisiert gerade. Ein paar Minuten warten und erneut versuchen.
+   - Die Sperre verfällt nach 30 min ohne Lebenszeichen.
+2. Prüfen, was auf dem PC liegt: `cat "$HOME/mnt/Tiefbau Tycoon/build/main/VERSION.txt"`. Liegt dort schon ein Stand, der den eigenen enthält, nichts tun. Prüfen mit `git merge-base --is-ancestor <eigener-commit> <pc-commit>`.
+3. Mit `tools/build.sh build/main` aus dem aktuellen `origin/main` bauen, nicht aus dem eigenen Branch.
+4. `BaustellenManager.pck`, `LIESMICH.txt` und `portable.txt` übertragen. Das Daten-pck nur, wenn `daten.hash` sich unterscheidet. `VERSION.txt` zuletzt, denn sie markiert den vollständigen Stand.
+5. `python3 $I unlock build-main --session S`.
 
 ## Lesen (PC → Container)
 

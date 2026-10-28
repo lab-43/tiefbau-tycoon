@@ -1,0 +1,67 @@
+BAUSTELLEN MANAGER – MVP (privat)
+=================================
+
+Start
+-----
+build\main\BaustellenManager.exe starten. Im selben Ordner müssen BaustellenManager.pck (Programm)
+und BaustellenManager-Daten.pck (Modelle, Demokarte) liegen.
+(Bei Problemen BaustellenManager.console.exe starten, dann siehst du Fehlermeldungen im Konsolenfenster.)
+
+Testversionen zu einer Meldung liegen in build\issue-<Nummer>\ – dort Starten.cmd doppelklicken.
+Sie nutzen das Spiel aus build\main und dieselben Spielstände, Karten und Meldungen.
+
+Problem melden: F8
+------------------
+Im Spiel, im Ladebildschirm und im Menü öffnet F8 eine Meldung (Fehler, Wunsch, Verbesserung).
+Das Spiel macht sofort ein Bild. Du kannst Stellen markieren, weitere Bilder anhängen und Spielstand
+und Protokolle mitschicken. Die Agenten arbeiten die Meldungen ab.
+Rückfragen und "bitte prüfen" erscheinen links an der Fahne (Zahl) und unter "Meldungen".
+
+Neues Spiel
+-----------
+1. "Neue Firma gründen" -> Firmenname, Stadt suchen (z. B. Hamburg), auf der Karte die Zentrale anklicken.
+2. Beim ersten Start holt das Spiel die Kartendaten von OpenStreetMap und bereitet sie auf (einige Minuten).
+   Danach ist die Karte gespeichert und lädt in Sekunden.
+   - Quelle 1: ein fertiger Auszug von Geofabrik (download.geofabrik.de), für Hamburg eine Datei mit ca. 51 MB.
+     Er wird aufbewahrt und für weitere Karten in derselben Gegend wiederverwendet.
+   - Quelle 2, nur wenn kein passender Auszug existiert: die Karte stückweise von den Overpass-Servern
+     (overpass-api.de, overpass.private.coffee), in 1-km-Kacheln.
+   Der Ladebildschirm zeigt live:
+   - den Ablauf mit Zeiten
+   - die Kachelkarte
+   - den Server-Zustand
+   - ein Protokoll
+   Schlägt etwas fehl: "Erneut versuchen" lädt nur, was fehlt.
+3. Ohne Internet oder wenn die Overpass-Server überlastet sind: "Offline-Demokarte (Utrecht)".
+
+Fehlersuche
+-----------
+Im Ladebildschirm kopiert "Kopieren" das komplette Protokoll in die Zwischenablage. "Ordner" öffnet den Ordner mit der Datei laden.log.
+Alle Daten liegen im Ordner userdata neben build (Tiefbau Tycoon\userdata\), siehe portable.txt:
+  maps\<Karte>\laden.log   Protokoll des Kartenladens
+  logs\spiel.log            Protokoll des Spiels (mit Fehlerdetails)
+  extracts\                 heruntergeladene Geofabrik-Auszüge (darf gelöscht werden)
+  issues\                   deine Meldungen samt Bildern und Antworten
+  saves\                    Spielstände
+
+Ablauf eines Auftrags
+---------------------
+Aufträge (links) -> annehmen -> Fahrzeuge per Rechtsklick auf die Baustelle schicken ->
+im Baustellenfenster die Schritte starten (oder "Arbeitsschritte automatisch fortsetzen" einschalten).
+Erkunden, Absperren, Graben, Rohr tauschen, Verfüllen, Asphalt, Maschinen abziehen, Absperrung abbauen, Abnahme.
+
+Steuerung
+---------
+WASD / Pfeile      Kamera bewegen (Shift = schneller)
+Rechte Maus ziehen Karte verschieben       Rechtsklick   Befehl (hinfahren / Baustelle zuweisen)
+Mittlere Maus      drehen und neigen       Linksklick    Fahrzeug oder Baustelle wählen
+Mausrad            zoomen                  F             Auswahl folgen
+Q / E              drehen                  Esc           Auswahl aufheben / Menü
+Leertaste, 1, 2, 3 Pause, 1x, 3x, 10x      F5            speichern
+F8                 Problem melden
+
+Hinweis
+-------
+Enthält Modelle aus Construction Simulator und dem FS25-Mod "Deutsches Verkehrssicherungspaket" (nrxEcki)
+ausschließlich für den privaten Gebrauch. Nicht weitergeben.
+Kartendaten © OpenStreetMap-Mitwirkende (ODbL).

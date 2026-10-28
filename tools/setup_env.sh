@@ -23,12 +23,11 @@ done
 say() { echo "== $*"; }
 
 # --- 1. Godot ---------------------------------------------------------------------------------
-G="${GODOT:-}"
-if [ -z "$G" ]; then
-  for c in /opt/godot/godot "$HOME/.local/bin/godot" "$(command -v godot 2>/dev/null || true)"; do
-    if [ -n "$c" ] && [ -x "$c" ] && "$c" --version 2>/dev/null | grep -q "^$VER.stable"; then G="$c"; break; fi
-  done
-fi
+. "$ROOT/tools/lib.sh"
+G=""
+for c in "${GODOT:-}" /opt/godot/godot "$HOME/.local/bin/godot" "$(command -v godot 2>/dev/null || true)"; do
+  if [ -n "$c" ] && [ -x "$c" ] && "$c" --version 2>/dev/null | grep -q "^$VER.stable"; then G="$c"; break; fi
+done
 if [ -z "$G" ]; then
   say "Godot $VER wird geladen …"
   TMP=$(mktemp -d)
@@ -76,8 +75,14 @@ fi
 
 # --- 5. git -----------------------------------------------------------------------------------
 if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
-  git -C "$ROOT" config user.name >/dev/null || git -C "$ROOT" config user.name "Claude (Tiefbau Tycoon)"
+  # agent commits go to GitHub: never under a private address (a repo-local one can come from a copied .git)
+  LM=$(git -C "$ROOT" config --local user.email 2>/dev/null || true)
+  if [ -n "$LM" ] && ! echo "$LM" | grep -q "noreply"; then
+    git -C "$ROOT" config --local --unset user.email; git -C "$ROOT" config --local --unset user.name || true
+    echo "== private Git-Adresse aus .git/config entfernt"
+  fi
   git -C "$ROOT" config user.email >/dev/null || git -C "$ROOT" config user.email "noreply@anthropic.com"
+  git -C "$ROOT" config user.name >/dev/null || git -C "$ROOT" config user.name "Claude (Tiefbau Tycoon)"
   HOOK="$(git -C "$ROOT" rev-parse --git-path hooks)/pre-commit"
   if [ ! -f "$HOOK" ]; then
     mkdir -p "$(dirname "$HOOK")"

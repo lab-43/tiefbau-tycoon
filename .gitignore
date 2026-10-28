@@ -4,13 +4,13 @@ game/assets/barriers/
 tools/consim_extract/
 tools/fs-i3d/
 docs/consim_assets*.png
-private/
+/private/
 
 # --- generated / local ---
 game/.godot/
 game/build_info.json
-build/
-userdata/
+/build/
+/userdata/
 *.part
 __pycache__/
 *.pyc

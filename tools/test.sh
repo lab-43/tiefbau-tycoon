@@ -5,8 +5,8 @@
 #   env: E2E_SPEED (default 10), E2E_TIMEOUT seconds per scenario (default 1500), E2E_SHOTS=<dir>
 # Logs: /tmp/tt_e2e_<scenario>.log. Exit 1 if any scenario fails.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-G="${GODOT:-}"
-[ -z "$G" ] && { [ -x /opt/godot/godot ] && G=/opt/godot/godot || G=$(command -v godot || true); }
+. "$ROOT/tools/lib.sh"
+find_godot
 [ -z "$G" ] && { echo "Godot nicht gefunden – erst tools/setup_env.sh ausführen"; exit 2; }
 SPEED="${E2E_SPEED:-10}"; TMO="${E2E_TIMEOUT:-1500}"
 SCEN=("$@"); [ ${#SCEN[@]} -eq 0 ] && SCEN=(smoke issue)

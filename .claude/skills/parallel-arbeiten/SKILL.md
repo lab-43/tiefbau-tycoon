@@ -27,13 +27,19 @@ Jonathan lässt mehrere Sessions gleichzeitig laufen, meist in verschiedenen Ber
    - nichts umformatieren, umsortieren oder umbenennen, was nicht zur Aufgabe gehört,
    - neue Funktionen an das Ende ihres Abschnitts setzen,
    - neue Systeme lieber in neue Dateien legen.
-6. **Zusammenführen nur mit `tools/agent/merge.sh`** (Option `--e2e=job` usw. für die passenden Tests). Das Skript macht:
+6. **Zusammenführen nur mit `tools/agent/merge.sh`.** Mit `--e2e=job,lowbed,save+load` laufen die passenden Tests mit. Das Skript macht:
    - fetch,
    - rebase auf origin/main,
-   - lint, check und Tests (smoke + issue + die gewählten Szenarien),
+   - lint und check (importiert neu, wenn der Rebase neue Klassen brachte),
+   - Tests: smoke + issue + die gewählten Szenarien,
    - fast-forward-Push nach main,
-   - wenn main sich inzwischen bewegt hat: alles wiederholen,
-   - wenn der direkte Push hier nicht erlaubt ist: Branch mit `Automerge: ja` pushen. Die CI führt dann nach grünen Tests zusammen.
+   - wenn main sich inzwischen bewegt hat: neue Runde (bis 6). Nach einem erneuten Rebase laufen nur lint, check, smoke und issue.
+   - **Exit 5:** Der direkte Push nach main ist in dieser Umgebung nicht erlaubt. Das Skript hat den Branch mit `Automerge: ja` gepusht.
+     - Die CI führt eine Warteschlange, immer ein Merge nach dem anderen: rebase, Tests, nach main schieben.
+     - Danach `tools/agent/merge.sh --wait` (bis zu 9 min pro Aufruf, beliebig oft), bis main den Branch enthält.
+     - Erst dann gilt die Arbeit als zusammengeführt.
+     - Schlägt die CI fehl (Konflikt oder rote Tests), lokal `tools/agent/merge.sh` erneut ausführen.
+   - **Änderungen an `.github/workflows/`** darf die CI nicht selbst nach main schieben (GitHub-Regel für das CI-Token). Solche Branches führt Jonathan auf GitHub zusammen. In der Meldung Bescheid geben.
 7. **Konflikt beim Rebase:**
    - Die andere Änderung ist schon getestet auf main, also beide Absichten erhalten.
    - Danach müssen die vollen Tests laufen.
@@ -47,8 +53,8 @@ Jonathan lässt mehrere Sessions gleichzeitig laufen, meist in verschiedenen Ber
    - Den eigenen Branch nur mit `--force-with-lease` überschreiben.
 9. **PC-Ordner:**
    - Nur in das eigene `build/issue-<n>/` schreiben.
-   - `build/main` nur nach erfolgreichem Merge und nur mit einem Stand, der neuer ist als der dort liegende (`VERSION.txt`, siehe tycoon-dev/pc-bruecke.md).
-   - `userdata/` nur über `issues.py` (Meldungen) beschreiben, sonst nur lesen.
+   - `build/main` nur nach erfolgreichem Merge, nur unter der Sperre `issues.py lock build-main` und nur mit einem Stand, der neuer ist als der dort liegende (`VERSION.txt`, siehe tycoon-dev/pc-bruecke.md).
+   - `userdata/` nur über `issues.py` beschreiben (Meldungen, Sperren, Agentenkopie `userdata/.agent/issues.py`), sonst nur lesen.
 10. **Gemeinsame Dateien im Repo:** Lektionen sind eine Datei pro Lektion, also gibt es keine Konflikte. Bei `docs/MVP-Umsetzung.md` nur den eigenen Abschnitt anhängen.
 
 ## Wenn etwas schiefgeht

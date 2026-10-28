@@ -2,12 +2,18 @@
 # Compiles every GDScript (src/ + test/) with the autoloads registered and prints each error as
 # "file:line: message". Exit 1 if anything fails. Takes ~2 s.
 # usage: tools/check.sh [res-relative files...]
-# After adding a new class_name run "godot --headless --path game --import" once (class cache),
-# otherwise other scripts report "Identifier not declared" for the new class.
+# If a script is newer than Godot's class cache (new class_name, rebase onto other sessions' work),
+# it re-imports first (~8 s), otherwise new classes would show up as "Identifier not declared".
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-G="${GODOT:-}"
-[ -z "$G" ] && { [ -x /opt/godot/godot ] && G=/opt/godot/godot || G=$(command -v godot || true); }
+. "$ROOT/tools/lib.sh"
+find_godot
 [ -z "$G" ] && { echo "Godot nicht gefunden – erst tools/setup_env.sh ausführen"; exit 2; }
+CACHE="$ROOT/game/.godot/global_script_class_cache.cfg"
+if [ ! -f "$CACHE" ] || [ -n "$(find "$ROOT/game/src" "$ROOT/game/test" -name '*.gd' -newer "$CACHE" -print -quit)" ]; then
+  echo "check: Klassen-Cache veraltet – importiere …"
+  timeout 1800 "$G" --headless --path "$ROOT/game" --import > /tmp/tt_check_import.log 2>&1
+  touch "$CACHE" 2>/dev/null   # Godot leaves it untouched when nothing changed
+fi
 LOG=$(mktemp)
 timeout 300 "$G" --headless --path "$ROOT/game" -s res://test/compile_all.gd -- "$@" > "$LOG" 2>&1
 RC=$?

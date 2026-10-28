@@ -30,11 +30,15 @@ Für jeden Punkt mit einer **allgemeinen Regel**:
    - Ja: diese ergänzen oder präzisieren, kein Duplikat anlegen.
    - Nein: neue Datei `docs/lessons/<kurzer-slug>.md` nach `docs/lessons/README.md`. Darin konkret beschreiben: was passiert ist, mit Datei und Fehlertext, die Ursache und die Regel.
 2. **Prüfbar machen**, wenn es geht:
-   - Ein Muster im Code: Regel in `tools/lint.py` mit `[Lektion: <slug>]` ergänzen und gegen eine absichtliche Verletzung testen. Dann `pruefung: lint:<slug>`.
+   - Ein Muster im Code: Regel in `tools/lint.py` mit `[Lektion: <slug>]` ergänzen. Sie wird gegen eine absichtliche Verletzung getestet, und zwar in einer Wegwerf-Kopie (`git clone . /tmp/x`), nicht mit `git stash` im echten Arbeitsbaum. Dann `pruefung: lint:<slug>`.
    - Spielverhalten: Assertion oder Szenario im e2e-Treiber, dann `pruefung: e2e:<szenario>`.
    - Sonst `pruefung: manuell: <wie man es prüft>`.
 3. **Skill anpassen**, wenn die Lektion einen Ablauf ändert, z. B. einen neuen Schritt in issue-ablauf oder eine neue Falle in godot-fallen. Skills kurz halten; Details gehören in die Lektion.
 4. Mit der eigentlichen Arbeit committen und zusammenführen. Lektionen sind normale Repo-Dateien, so bekommen alle Sessions sie.
+
+## Unabhängige Prüfung
+
+Bei Änderungen an Abläufen, Werkzeugen oder gemeinsam genutzten Daten einen frischen Prüf-Agenten auf den Code ansetzen (Lektion unabhaengige-pruefung). Er bekommt die Dateien und die Fragen, nicht die eigene Einschätzung. Seine Funde werden nachgestellt und behoben.
 
 ## Was keine Lektion ist
 
