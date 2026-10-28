@@ -147,8 +147,11 @@ func _way(el: Dictionary) -> void:
 		return
 	var rw: String = tags.get("railway", "")
 	if rw in ["rail", "light_rail", "subway", "tram"]:
-		if tags.get("tunnel", "") == "" and tags.get("layer", "0").to_int() >= 0:
+		# a track through a building stays on the surface (the building hides it), as building passages of roads
+		if tags.get("tunnel", "") in ["", "building_passage"] and tags.get("layer", "0").to_int() >= 0:
 			_add_clipped_lines(data.rails, id, pts, tags)
+		else:
+			_add_clipped_lines(data.under_rails, id, pts, tags)
 		return
 	var kind := OsmData.area_kind(tags)
 	if kind != "" and pts.size() >= 4 and pts[0].distance_to(pts[pts.size() - 1]) < 0.05:

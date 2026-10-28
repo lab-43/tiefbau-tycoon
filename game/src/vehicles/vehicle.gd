@@ -44,6 +44,7 @@ var slot := -1
 var site = null                # Site this vehicle is assigned to
 var site_spot := ""            # spot id at the site ("van", "machine", "load", "stage", ...)
 var carried_by: Vehicle = null
+var in_tunnel := false         # driving below the surface (#31): not drawn, the underground view shows a box
 var light_mode := {"low": "auto", "beacon": "auto", "hazard": false, "work": false, "flash": "2"}
 var auto_shuttle := true       # tipper: automatic haul trips for its site
 var working := false
@@ -704,9 +705,24 @@ func apply_agent_pose(ag: Agent, alpha: float) -> void:
 	rotation.y = lerp_angle(ag.yaw_prev, ag.yaw_cur, alpha)
 	rotation.x = lerpf(ag.pitch_prev, ag.pitch_cur, alpha)
 	speed = ag.v
+	_set_tunnel(world.traffic.in_tunnel(ag))
+
+
+## Hides the vehicle with its trailer and the machine it carries while it drives through a tunnel (#31).
+func _set_tunnel(v: bool) -> void:
+	if v == in_tunnel:
+		return
+	in_tunnel = v
+	visible = not v
+	if trailer:
+		trailer.visible = not v
+	if cargo.machine != null and is_instance_valid(cargo.machine):
+		(cargo.machine as Node3D).visible = not v
 
 
 func _process(delta: float) -> void:
+	if in_tunnel and agent == null:
+		_set_tunnel(false)   # stopped driving without leaving the tunnel through apply_agent_pose
 	if carried_by == null:
 		var moved := position.distance_to(_last_pos)
 		if moved > 0.0001 and moved < 50.0:
@@ -1068,15 +1084,16 @@ func _start_point() -> Dictionary:
 			path = HQ.join(path, _smooth_join(path[path.size() - 1], gate_dir, lj[0], lj[1]))
 			return {"key": dep.key, "s": join_s, "pre": [Router.poly_piece(path, 4.0)]}
 	_free_slot()
+	# a vehicle that stopped in a tunnel goes on in it, everything else joins a street on the surface (#31)
 	var near := router.nearest_lane(p + fwd * 6.0, 120.0, func(k):
 		if not _lane_ok(k):
 			return false
 		var g: Array = world.net.lane_geo[k]
 		var r := Geo.closest_on_polyline(g[0], g[1], p)
 		var smp := Geo.sample(g[0], g[1], r[1])
-		return (smp[1] as Vector2).dot(fwd) > 0.2)
+		return (smp[1] as Vector2).dot(fwd) > 0.2, in_tunnel)
 	if near.is_empty():
-		near = router.nearest_lane(p, 200.0, func(k): return _lane_ok(k))
+		near = router.nearest_lane(p, 200.0, func(k): return _lane_ok(k), in_tunnel)
 	if near.is_empty():
 		return {}
 	var key: int = near.key

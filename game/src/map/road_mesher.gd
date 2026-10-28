@@ -7,6 +7,7 @@ const Y_MARK := 0.062
 const CURB := 0.12
 const Y_SW := Y_ROAD + CURB
 const MARK_W := 0.12
+const Y_UNDER := 0.1      # roads below the surface: a flat band for the underground view (#31)
 const MARKED_CLASSES := {"primary": 1, "secondary": 1, "tertiary": 1, "trunk": 1, "motorway": 1,
 	"primary_link": 1, "secondary_link": 1, "tertiary_link": 1, "trunk_link": 1, "motorway_link": 1, "busway": 1}
 
@@ -16,6 +17,8 @@ var origin := Vector2.ZERO
 var chunks := {}   # Vector2i -> {"asphalt": MeshLayer, "sidewalk":..., "curb":..., "mark":...}
 var terrain: Terrain = null   # ground heights (#8): layers lift their vertices onto it, bridges onto their deck
 var marks: RoadMarkings   # markings across roads and junctions; marks.stats counts what was painted
+var portals: TunnelPortals = null   # tunnel portals are registered here and built after the city (#31)
+var under_stats := {"edges": 0, "nodes": 0, "portals": 0, "m": 0.0}
 
 
 func _init(n: RoadNet, chunk: float, bounds_origin: Vector2) -> void:
@@ -85,6 +88,9 @@ func _edge(ei: int) -> void:
 	var e: Dictionary = net.edges[ei]
 	var s0: float = e.trim_a
 	var s1: float = e.len - e.trim_b
+	if e.get("under", false):
+		_under_edge(ei, e, s0, s1)
+		return
 	if s1 - s0 < 0.05:
 		return
 	var center := Geo.sub_polyline(e.pts, e.cum, s0, s1)
@@ -112,6 +118,47 @@ func _edge(ei: int) -> void:
 	if e.bridge:
 		_bridge_sides(ck, center, hw + e.sw_r, hw + e.sw_l)
 	_edge_markings(ei, e, ck, s0, s1)
+
+
+## A road below the surface (#31): no asphalt, sidewalks or markings on top, only a flat band for the underground
+## view, and a portal where it meets a road on the surface.
+func _under_edge(ei: int, e: Dictionary, s0: float, s1: float) -> void:
+	under_stats.edges += 1
+	if s1 - s0 >= 0.05:
+		var center := Geo.densify(Geo.sub_polyline(e.pts, e.cum, s0, s1), 12.0)
+		if center.size() >= 2:
+			under_stats.m += s1 - s0
+			var ck := chunk_of(Geo.sample(e.pts, e.cum, (s0 + s1) * 0.5)[0])
+			var hw: float = e.width * 0.5
+			var left := Geo.offset_polyline(center, -hw)
+			var right := Geo.offset_polyline(center, hw)
+			var ul := layer(ck, "under_road")
+			for i in range(center.size() - 1):
+				ul.quad(Geo.v3(left[i], Y_UNDER), Geo.v3(right[i], Y_UNDER), Geo.v3(right[i + 1], Y_UNDER),
+					Geo.v3(left[i + 1], Y_UNDER), Vector3.UP)
+	if portals == null:
+		return
+	for at_b in [false, true]:
+		var ni: int = e.b if at_b else e.a
+		var n: Dictionary = net.nodes[ni]
+		if n.get("under", false):
+			continue
+		var s := clampf(s1 if at_b else s0, 0.0, e.len)
+		var smp := Geo.sample(e.pts, e.cum, s)
+		var d: Vector2 = -(smp[1] as Vector2) if at_b else smp[1]
+		# the opening takes the road with its sidewalks; at a plain transition at least the road leading to it
+		var wr: float = e.width * 0.5 + (e.sw_l if at_b else e.sw_r) + 0.4
+		var wl: float = e.width * 0.5 + (e.sw_r if at_b else e.sw_l) + 0.4
+		var own := [TunnelPortals.node_owner(ni)]
+		for end in n.ends:
+			own.append(end >> 1)
+			var o: Dictionary = net.edges[end >> 1]
+			if n.ends.size() == 2 and not o.get("under", false):
+				var ow: float = o.width * 0.5 + maxf(o.sw_l, o.sw_r) + 0.4
+				wl = maxf(wl, ow)
+				wr = maxf(wr, ow)
+		portals.add(smp[0], d, wl, wr, "road", own)
+		under_stats.portals += 1
 
 
 ## Junction areas a sidewalk must not cover: [polygon, bounding rect] of node n if its area was built
@@ -511,6 +558,15 @@ func _cross_bar(l: MeshLayer, pts: PackedVector2Array, cum: PackedFloat32Array, 
 func _junction(ni: int) -> void:
 	var n: Dictionary = net.nodes[ni]
 	var ck := chunk_of(n.pos)
+	if n.get("under", false):
+		# underground junction (#31): only the band of the underground view
+		under_stats.nodes += 1
+		var up: PackedVector2Array = n.get("polygon", PackedVector2Array())
+		if up.size() >= 3:
+			layer(ck, "under_road").polygon_up(up, Y_UNDER, 1.0, Color.WHITE, n.get("holes", []))
+		for extra in n.get("extra_polys", []):
+			layer(ck, "under_road").polygon_up(extra, Y_UNDER, 1.0)
+		return
 	if n.ends.size() >= 2:
 		var mk0 := layer(ck, "mark")
 		marks.through_lines(mk0, ni)

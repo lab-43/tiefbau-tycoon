@@ -615,7 +615,8 @@ var _pin_i := 0
 var _view_i := 0
 
 
-## Extra pictures for a repro: --views=x,z,dist,yaw,pitch[,ohne]|... ("ohne" hides the buildings).
+## Extra pictures for a repro: --views=x,z,dist,yaw,pitch[,ohne][,unter]|... ("ohne" hides the buildings,
+## "unter" switches the underground view on, #31).
 func _repro_view() -> bool:
 	var spec := ""
 	for a in OS.get_cmdline_user_args():
@@ -626,11 +627,15 @@ func _repro_view() -> bool:
 		var b := holder.get_node_or_null("building")
 		if b:
 			b.visible = true
+	if world.underground and UndergroundView.on:
+		world.underground.set_on(false)
 	if _view_i >= views.size():
 		return false
 	var v := views[_view_i].split(",")
 	_view_i += 1
-	if v.size() > 5 and v[5] == "ohne":
+	if "unter" in v:
+		world.underground.set_on(true)
+	if "ohne" in v:
 		for holder in world.city.get_children():
 			var b2 := holder.get_node_or_null("building")
 			if b2:

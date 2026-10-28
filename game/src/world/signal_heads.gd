@@ -17,7 +17,7 @@ func setup(w: World) -> void:
 	var net := w.net
 	for ni in net.nodes.size():
 		var nd: Dictionary = net.nodes[ni]
-		if nd.ctrl != "signals" or not nd.has("infos"):
+		if nd.ctrl != "signals" or not nd.has("infos") or nd.get("under", false):
 			continue
 		for inf in nd.infos:
 			var e: int = inf.edge

@@ -65,8 +65,9 @@ func lane_len(key: int) -> float:
 	return cum[cum.size() - 1]
 
 
-## Nearest lane to a point. filter(key) -> bool optional.
-func nearest_lane(p: Vector2, max_d := 80.0, filter: Callable = Callable()) -> Dictionary:
+## Nearest lane to a point. filter(key) -> bool optional. Lanes in tunnels only with under = true (#31): a click
+## on the surface means the street there, not the tunnel below it.
+func nearest_lane(p: Vector2, max_d := 80.0, filter: Callable = Callable(), under := false) -> Dictionary:
 	var best := {}
 	var best_d := max_d
 	var c := Vector2i(int(floor(p.x / CELL)), int(floor(p.y / CELL)))
@@ -78,6 +79,8 @@ func nearest_lane(p: Vector2, max_d := 80.0, filter: Callable = Callable()) -> D
 				if checked.has(key):
 					continue
 				checked[key] = true
+				if not under and net.lane_under(key):
+					continue
 				if filter.is_valid() and not filter.call(key):
 					continue
 				var g: Array = net.lane_geo[key]

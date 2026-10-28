@@ -1,13 +1,15 @@
 #!/bin/bash
 # Runs end-to-end scenarios headless on the offline Utrecht map and reports pass/fail.
 # usage: tools/test.sh [scenario ...]            default: smoke issue
-#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren debug leuchten verkehrslichter rig schaufel altstand markierungen absperrung gelaende vollsperrung umbau fahrzeuge baeume  (save+load = save mid-dig,
+#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren tunnel debug leuchten verkehrslichter rig schaufel altstand markierungen absperrung gelaende vollsperrung umbau fahrzeuge baeume  (save+load = save mid-dig,
 #              then load and finish; rig = excavator linkage/cylinders, see game/test/rig_test.gd;
 #              schaufel = soil in the bucket (game/test/bucket_test.gd, stand-in model always, real model if present);
 #              ebenen = height order of flat map layers, see game/test/layer_test.gd – also part of pbf;
 #              sichtweite = city meshes sit at their chunk (visibility ranges), game/test/range_test.gd – also part of pbf;
 #              baeume = no tree on the asphalt, few real trees dropped (#30), game/test/tree_test.gd – also part of pbf;
-#              fahren = calm driving: no twitching cars, no racing through bends, game/test/drive_test.gd on testdata/kreuzungen)
+#              fahren = calm driving: no twitching cars, no racing through bends, game/test/drive_test.gd on testdata/kreuzungen;
+#              tunnel = roads below the surface hidden, portals, underground layers, traffic hidden inside (#31),
+#                       game/test/tunnel_test.gd on the Deichtorplatz fixture)
 #   env: E2E_SPEED (default 10), E2E_TIMEOUT seconds per scenario (default 1500), E2E_SHOTS=<dir>
 # Logs: /tmp/tt_e2e_<scenario>.log. Exit 1 if any scenario fails.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -54,6 +56,11 @@ fahren() {  # traffic on the junction fixtures: twitches and too fast bends per 
   if timeout 600 "$G" --headless --path "$ROOT/game" res://test/drive_test.tscn -- --fixtures="$ROOT/testdata/kreuzungen" > "$log" 2>&1 \
      && grep -q "FAHREN OK" "$log"; then echo "OK    fahren $(grep -o 'FAHREN OK.*' "$log")"; else FAIL=1; echo "FAIL  fahren – $log"; grep -E "FAHREN|SCRIPT ERROR|^  " "$log" | tail -10 | sed 's/^/      /'; fi
 }
+tunnel() {  # tunnels below the surface (#31): no asphalt on top, portals, underground view layers, hidden traffic
+  local log=/tmp/tt_e2e_tunnel.log
+  if timeout 600 "$G" --headless --path "$ROOT/game" res://test/tunnel_test.tscn -- --fixtures="$ROOT/testdata/kreuzungen" > "$log" 2>&1 \
+     && grep -q "TUNNEL OK" "$log"; then echo "OK    tunnel $(grep -o 'TUNNEL OK.*' "$log")"; else FAIL=1; echo "FAIL  tunnel – $log"; grep -E "TUNNEL|SCRIPT ERROR|^  " "$log" | tail -10 | sed 's/^/      /'; fi
+}
 for s in "${SCEN[@]}"; do
   case "$s" in
     smoke)  run smoke  "E2E OK" --e2e=smoke ;;
@@ -76,6 +83,7 @@ for s in "${SCEN[@]}"; do
     baeume) baeume ;;
     sichtweite) sichtweite ;;
     fahren) fahren ;;
+    tunnel) tunnel ;;
     rig)  # excavator linkage + cylinders over all poses, A 918 and R 938 (needs the private models, skips without)
       for mdl in excavator_a918 excavator_r938; do
         log=/tmp/tt_e2e_rig_$mdl.log

@@ -92,6 +92,20 @@ static func get_mat(name: String) -> Material:
 			var f := _std(Color(0.36, 0.48, 0.27), 0.95)
 			f.vertex_color_use_as_albedo = false
 			m = f
+		"portal":
+			m = _std(Color(0.66, 0.65, 0.62), 0.9)
+		"portal_green":
+			m = _std(Color(0.40, 0.51, 0.31), 0.97)
+		"portal_dark":
+			var pd := _std(Color(0.025, 0.025, 0.03), 1.0)
+			pd.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			m = pd
+		"under_road":
+			m = _overlay(UndergroundView.ROAD, 12)
+		"under_rail":
+			m = _overlay(UndergroundView.RAIL, 11)
+		"under_subway":
+			m = _overlay(UndergroundView.SUBWAY, 10)
 		"lamp_pole":
 			m = _std(Color(0.32, 0.33, 0.34), 0.5, 0.6)
 		"lamp_head":
@@ -103,6 +117,18 @@ static func get_mat(name: String) -> Material:
 		_:
 			m = _std(Color(1, 0, 1))
 	_cache[name] = m
+	return m
+
+
+## Underground view (#31): flat colour drawn over everything (no depth test), above the dimmed city.
+static func _overlay(col: Color, priority: int) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = col
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.no_depth_test = true
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.render_priority = priority
 	return m
 
 

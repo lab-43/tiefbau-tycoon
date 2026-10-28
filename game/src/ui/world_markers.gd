@@ -5,7 +5,8 @@ extends Control
 ## edge of the free screen area with an arrow and the distance. Click = select + fly there, right
 ## click = send the selected vehicle there (via World.marker_command, so a right-drag that starts on a
 ## marker still pans the map). Vehicles parked at the HQ or at their site are counted on that marker
-## instead of stacking up. Also owns the view bar (marker groups, city buildings on/off, keys H and B).
+## instead of stacking up. Also owns the view bar (marker groups, city buildings on/off, underground view,
+## keys H, B and U).
 ## Created by the HUD as its first child so all HUD panels stay on top.
 ## The view settings are stored in <data>/ansicht.json (not read or written in e2e runs).
 
@@ -22,7 +23,9 @@ const SETTINGS_FILE := "ansicht.json"
 const GROUPS := [["vehicles", "truck", "Fahrzeuge"], ["sites", "construction", "Baustellen"],
 	["offers", "clipboard-list", "Ausschreibungen"], ["hq", "house", "Zentrale"]]
 
-static var view := {"markers": true, "vehicles": true, "sites": true, "offers": true, "hq": true, "buildings": true}
+static var view := {"markers": true, "vehicles": true, "sites": true, "offers": true, "hq": true, "buildings": true,
+	"underground": false}
+const NOT_SAVED := ["underground"]   # the underground view (#31) always starts off
 static var _view_loaded := false
 static var persist := true        # tests switch this off so they never leave settings behind
 
@@ -47,6 +50,7 @@ func _ready() -> void:
 	add_child(_layer)
 	_build_bar()
 	apply_buildings()
+	apply_underground()
 	if Game.world:
 		(Game.world as World).marker_command = command_at
 
@@ -67,7 +71,7 @@ static func load_view() -> void:
 	var d = JSON.parse_string(FileAccess.get_file_as_string(path))
 	if d is Dictionary:
 		for k in view:
-			if d.has(k):
+			if d.has(k) and not k in NOT_SAVED:
 				view[k] = bool(d[k])
 
 
@@ -76,10 +80,13 @@ static func save_view() -> void:
 		return
 	var f := FileAccess.open(Game.data_path(SETTINGS_FILE), FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify(view, "\t"))
+		var keep := view.duplicate()
+		for k in NOT_SAVED:
+			keep.erase(k)
+		f.store_string(JSON.stringify(keep, "\t"))
 
 
-## Switch one view setting (markers, vehicles, sites, offers, hq, buildings) and remember it.
+## Switch one view setting (markers, vehicles, sites, offers, hq, buildings, underground) and remember it.
 func set_view(key: String, on: bool) -> void:
 	if not view.has(key):
 		return
@@ -87,6 +94,8 @@ func set_view(key: String, on: bool) -> void:
 	save_view()
 	if key == "buildings":
 		apply_buildings()
+	if key == "underground":
+		apply_underground()
 	_sync_bar()
 
 
@@ -99,6 +108,12 @@ func apply_buildings() -> void:
 		var b := c.get_node_or_null("building") as Node3D
 		if b:
 			b.visible = on
+
+
+## Underground view (#31): tunnels, U-Bahn and S-Bahn over the dimmed city.
+func apply_underground() -> void:
+	if Game.world and (Game.world as World).underground:
+		(Game.world as World).underground.set_on(view.underground)
 
 
 func _build_bar() -> void:
@@ -125,6 +140,7 @@ func _build_bar() -> void:
 		_bar_button(h, g[0], g[1], "%s markieren" % g[2])
 	h.add_child(_bar_sep())
 	_bar_button(h, "buildings", "building-2", "Gebäude ein/aus (B)")
+	_bar_button(h, "underground", "layers", "Untergrund-Ansicht ein/aus (U): Tunnel, U-Bahn, S-Bahn")
 	_sync_bar()
 
 
@@ -169,6 +185,10 @@ func _unhandled_key_input(ev: InputEvent) -> void:
 		KEY_B:
 			set_view("buildings", not view.buildings)
 			Events.info("Gebäude " + ("eingeblendet" if view.buildings else "ausgeblendet"))
+			get_viewport().set_input_as_handled()
+		KEY_U:
+			set_view("underground", not view.underground)
+			Events.info("Untergrund-Ansicht " + ("an" if view.underground else "aus"))
 			get_viewport().set_input_as_handled()
 		KEY_H:
 			set_view("markers", not view.markers)

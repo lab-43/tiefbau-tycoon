@@ -4,7 +4,7 @@ extends RefCounted
 ## The scene-tree part (creating MeshInstances) happens on the main thread in build_scene().
 
 const CHUNK := 500.0
-const BAKE_VERSION := 10  # 4: water on top of the base ground, no bank walls (#4); 5: merged junctions (#5); 6: smooth transitions (#5); 7: arc turn paths, islands (#5); 8: ground heights (#8); 9: markings after RMS (#5); 10: trees off the road (#30)
+const BAKE_VERSION := 11  # 4: water on top of the base ground, no bank walls (#4); 5: merged junctions (#5); 6: smooth transitions (#5); 7: arc turn paths, islands (#5); 8: ground heights (#8); 9: markings after RMS (#5); 10: trees off the road (#30); 11: tunnels below the surface, portals, underground layers (#31)
 const GROUND_Y := 0.0     # opaque base ground plane; flat map layers below it are invisible (test/layer_test.gd)
 
 var progress := 0.0
@@ -89,8 +89,10 @@ func bake(meta: Dictionary, osm_dir: String, pbf := "") -> Dictionary:
 	if terrain:
 		TerrainBake.add_decks(terrain, net)
 	set_step("Straßen modellieren", _p(0.55))
+	var portals := TunnelPortals.new()
 	var rm := RoadMesher.new(net, CHUNK, data.bounds.position)
 	rm.terrain = terrain
+	rm.portals = portals
 	rm.progress_cb = func(f: float): set_step("Straßen modellieren (%d %%)" % int(f * 100.0), _p(0.55 + 0.15 * f))
 	rm.build_all()
 	note("Straßen modelliert: %d Kacheln" % rm.chunks.size())
@@ -100,7 +102,13 @@ func bake(meta: Dictionary, osm_dir: String, pbf := "") -> Dictionary:
 	if not hq.is_empty():
 		cm.hq_rect = hq.lot
 	cm.progress_cb = func(f: float, part: String): set_step("Stadt modellieren: %s" % part, _p(0.70 + 0.2 * f))
+	cm.portals = portals
 	cm.build_all()
+	portals.build(net, data.rails, cm)
+	portals.clear_xforms(cm.trees)
+	portals.clear_xforms(cm.lamps)
+	note("Untergrund: %d Tunnelabschnitte (%.1f km), %d Gleise im Tunnel, %d Tunnelportale" % [rm.under_stats.edges,
+		rm.under_stats.m / 1000.0, data.under_rails.size(), portals.built])
 	note("Stadt modelliert: %d Kacheln" % cm.chunks.size())
 	if int(cm.tree_stats.get("osm", 0)) > 0:
 		note("Bäume: %d aus OpenStreetMap, %d von der Fahrbahn an den Rand gerückt, %d mitten auf der Straße weggelassen" % [cm.tree_stats.osm, cm.tree_stats.moved, cm.tree_stats.dropped])
@@ -124,7 +132,7 @@ static func plan_hq(data: OsmData, click: Vector2) -> Dictionary:
 		var cls: String = w.tags.get("highway", "")
 		if not (cls in ["residential", "unclassified", "tertiary", "secondary", "service", "primary"]):
 			continue
-		if w.tags.get("service", "") in ["parking_aisle", "driveway"]:
+		if w.tags.get("service", "") in ["parking_aisle", "driveway"] or RoadNet.is_under(w.tags):
 			continue
 		var pts: PackedVector2Array = w.pts
 		for i in range(pts.size() - 1):
@@ -164,10 +172,11 @@ static func plan_hq(data: OsmData, click: Vector2) -> Dictionary:
 # ------------------------------------------------------------------------------------------
 
 const RANGE := {"mark": 900.0, "curb": 1300.0, "sidewalk": 2200.0, "rail": 1200.0, "path": 2200.0, "cycleway": 2200.0,
-	"bridge": 2500.0}
+	"bridge": 2500.0, "portal": 2500.0, "portal_dark": 2500.0, "portal_green": 2500.0}
 const NO_SHADOW := {"ground": 1, "asphalt": 1, "mark": 1, "sidewalk": 1, "path": 1, "cycleway": 1, "water": 1, "ballast": 1, "rail": 1,
 	"area_grass": 1, "area_park": 1, "area_forest": 1, "area_pitch": 1, "area_cemetery": 1, "area_farmland": 1,
-	"area_industrial": 1, "area_commercial": 1, "area_residential": 1, "area_paved": 1, "area_sand": 1, "track": 1}
+	"area_industrial": 1, "area_commercial": 1, "area_residential": 1, "area_paved": 1, "area_sand": 1, "track": 1,
+	"under_road": 1, "under_rail": 1, "under_subway": 1, "portal_dark": 1}
 
 
 ## Creates the static city node tree. Call repeatedly (it yields work in batches) until it returns true.
@@ -232,6 +241,8 @@ static func add_chunk_layers(root: Node3D, ck: Vector2i, layers: Dictionary) -> 
 			mi.visibility_range_end = RANGE[base]
 			mi.visibility_range_end_margin = 60.0
 			mi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+		if UndergroundView.is_layer(lname):
+			mi.visible = UndergroundView.on   # roads and railways below the surface: underground view only (#31)
 		holder.add_child(mi)
 
 

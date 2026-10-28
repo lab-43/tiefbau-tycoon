@@ -30,6 +30,7 @@ const REAL_TREE_CELL := 8.0
 const STREET_TREE_GAP := 6.0   # made-up street trees keep this far from real ones
 var _asphalt: AsphaltIndex
 var _real_trees := {}         # Vector2i (REAL_TREE_CELL cells) -> Array[Vector2]
+var portals: TunnelPortals = null   # railway tunnels register their portals here (#31)
 
 
 func _init(d: OsmData, n: RoadNet, chunk: float) -> void:
@@ -69,6 +70,7 @@ func build_all() -> void:
 	_paths()
 	_report(0.85, "Gleise")
 	_rails()
+	_under_rails()
 	_report(0.9, "Bäume")
 	_trees()
 	_report(0.95, "Laternen")
@@ -260,6 +262,40 @@ func _rails() -> void:
 		terrain.mode_deck = []
 
 
+## Railways below the surface (#31): a band per track for the underground view (U-Bahn blue, other trains
+## green) and a portal where a track comes up to a railway on the surface.
+func _under_rails() -> void:
+	var ends := {}    # rounded end point of a surface railway -> its indices
+	for ri in data.rails.size():
+		var pts: PackedVector2Array = data.rails[ri].pts
+		for p in [pts[0], pts[pts.size() - 1]]:
+			var k := Vector2i(roundi(p.x * 2.0), roundi(p.y * 2.0))
+			if not ends.has(k):
+				ends[k] = []
+			ends[k].append(ri)
+	for r in data.under_rails:
+		var raw: PackedVector2Array = r.pts
+		if raw.size() < 2:
+			continue
+		var pts := Geo.chaikin(raw, 2, 3.0)
+		var lname := "under_subway" if r.tags.get("railway", "") == "subway" else "under_rail"
+		_flat_strip(layer(chunk_of(pts[pts.size() >> 1]), lname), pts, 3.0, 0.1)
+		if portals == null:
+			continue
+		var cum := Geo.cumulative(raw)
+		var total: float = cum[cum.size() - 1]
+		for at_end in [false, true]:
+			var p: Vector2 = raw[raw.size() - 1] if at_end else raw[0]
+			var k := Vector2i(roundi(p.x * 2.0), roundi(p.y * 2.0))
+			if not ends.has(k) or total < 4.0:
+				continue
+			var q: Vector2 = Geo.sample(raw, cum, total - 3.0 if at_end else 3.0)[0]
+			var own: Array = []
+			for ri in ends[k]:
+				own.append(TunnelPortals.rail_owner(ri))
+			portals.add(p, q - p, 2.2, 2.2, "rail", own)
+
+
 # ------------------------------------------------------------------------------------------
 # Vegetation and lamps
 # ------------------------------------------------------------------------------------------
@@ -323,7 +359,7 @@ func _trees() -> void:
 				placed += 1
 	# street trees along residential streets with sidewalks
 	for e in net.edges:
-		if not (e.cls in ["residential", "living_street", "tertiary", "secondary"]) or e.bridge:
+		if not (e.cls in ["residential", "living_street", "tertiary", "secondary"]) or e.bridge or e.get("under", false):
 			continue
 		if e.sw_r <= 0.0 and e.sw_l <= 0.0:
 			continue
@@ -356,7 +392,7 @@ func _near_real_tree(p: Vector2) -> bool:
 func _lamps() -> void:
 	for ei in net.edges.size():
 		var e: Dictionary = net.edges[ei]
-		if e.cls in ["motorway", "service", "track"] or e.tunnel:
+		if e.cls in ["motorway", "service", "track"] or e.tunnel or e.get("under", false):
 			continue
 		var spacing := 32.0 if e.cls in ["primary", "secondary", "trunk"] else 38.0
 		var both: bool = e.width > 11.0

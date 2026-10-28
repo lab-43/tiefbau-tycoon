@@ -40,6 +40,9 @@ var _pool := {}           # model idx -> Array[Node3D]
 var _cam: Camera3D
 var _total_signals := 0
 var _hq_edge := -1
+var alpha := 0.0          # interpolation between the last two steps (for drawing)
+var under_lanes := {}     # lane key in a tunnel (#31) -> [portal at the lane start, portal at its end]
+var under_nodes := {}     # junctions below the surface
 
 
 func setup(n: RoadNet, bus_stops: Array) -> void:
@@ -64,7 +67,44 @@ func setup(n: RoadNet, bus_stops: Array) -> void:
 	if net.hq_node >= 0:
 		for er in net.nodes[net.hq_node].ends:
 			_hq_edge = er >> 1
+	_index_tunnels()
 	TrafficModels.prepare()
+
+
+func _index_tunnels() -> void:
+	for ni in net.nodes.size():
+		if net.nodes[ni].get("under", false):
+			under_nodes[ni] = true
+	for key in net.lane_geo:
+		var e: Dictionary = net.edges[key >> 4]
+		if not e.get("under", false):
+			continue
+		var fwd: bool = ((key >> 3) & 1) == 0
+		var start: int = e.a if fwd else e.b
+		var end: int = e.b if fwd else e.a
+		under_lanes[key] = [not under_nodes.has(start), not under_nodes.has(end)]
+
+
+## True while the agent is inside a tunnel (#31): on a tunnel lane with its body past the portal, or at a
+## junction below the surface. Such vehicles are not drawn (only as boxes in the underground view).
+func in_tunnel(ag: Agent) -> bool:
+	if ag.route.is_empty():
+		return false
+	var pc: Dictionary = ag.route[clampi(ag.pi, 0, ag.route.size() - 1)]
+	if pc.t == Agent.CONN:
+		return under_nodes.has(int(pc.node))
+	if pc.t != Agent.LANE and pc.t != Router.BLEND:
+		return false
+	var u = under_lanes.get(int(pc.key))
+	if u == null:
+		return false
+	if pc.t == Agent.LANE:
+		var half := ag.length * 0.5 + 0.3
+		if u[0] and ag.s < half:
+			return false
+		if u[1] and router.lane_len(int(pc.key)) - ag.s < half:
+			return false
+	return true
 
 
 func _compute_right_of(nd: Dictionary) -> Dictionary:
@@ -198,7 +238,7 @@ func _process(delta: float) -> void:
 		_step(STEP)
 	if steps == MAX_STEPS_PER_FRAME:
 		_acc = 0.0
-	var alpha := clampf(_acc / STEP, 0.0, 1.0)
+	alpha = clampf(_acc / STEP, 0.0, 1.0)
 	for ag in agents:
 		if ag.player != null:
 			ag.player.apply_agent_pose(ag, alpha)
@@ -206,11 +246,16 @@ func _process(delta: float) -> void:
 			_place_visual(ag, alpha)
 
 
-func _place_visual(ag: Agent, alpha: float) -> void:
-	var p: Vector3 = ag.p_prev.lerp(ag.p_cur, alpha)
+func _place_visual(ag: Agent, f: float) -> void:
+	var hide := in_tunnel(ag)
+	if ag.visual.visible == hide:
+		ag.visual.visible = not hide
+	if hide:
+		return
+	var p: Vector3 = ag.p_prev.lerp(ag.p_cur, f)
 	ag.visual.position = p
-	ag.visual.rotation.y = lerp_angle(ag.yaw_prev, ag.yaw_cur, alpha)
-	ag.visual.rotation.x = lerpf(ag.pitch_prev, ag.pitch_cur, alpha)
+	ag.visual.rotation.y = lerp_angle(ag.yaw_prev, ag.yaw_cur, f)
+	ag.visual.rotation.x = lerpf(ag.pitch_prev, ag.pitch_cur, f)
 	if ag.visual.has_meta("lights"):
 		TrafficModels.set_lights(ag.visual, ag.braking, ag.turn_signal, sim_time)
 

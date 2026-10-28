@@ -17,6 +17,7 @@ var fleet: Fleet
 var jobs: JobManager
 var light_pool: LightPool
 var signals_view: SignalHeads
+var underground: UndergroundView
 var bounds := Rect2()
 var hq_info := {}
 var tool: Object = null          # active placement tool (receives input first)
@@ -88,6 +89,10 @@ func setup(ms: MapService) -> void:
 	signals_view.name = "Signals"
 	add_child(signals_view)
 	signals_view.setup(self)
+	underground = UndergroundView.new()
+	underground.name = "Underground"
+	add_child(underground)
+	underground.setup(self)
 	for n in [traffic, fleet, jobs, light_pool, signals_view, day_night, city, hq]:
 		n.process_mode = Node.PROCESS_MODE_PAUSABLE
 	# camera

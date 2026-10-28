@@ -23,13 +23,14 @@ const CORNER_REACH := 35.0    # curb corners further out than this along a road 
 const PATH_HALF_W := 1.3      # junction asphalt reaches at least this far to each side of a turn path
 const CLOSE_R := 2.0          # junction areas built by union are closed by this radius (no notches, slivers)
 const ISLAND_OPEN := 0.75     # islands in a group area narrower than 1.5 m are filled, slivers removed
+const MIN_TUNNEL := 25.0      # underground chains shorter than this stay on the surface (an underpass, not two portals)
 const DEFAULT_SPEED_KMH := {
 	"motorway": 100, "trunk": 70, "primary": 50, "secondary": 50, "tertiary": 50, "busway": 50,
 	"unclassified": 50, "residential": 30, "road": 30, "living_street": 10, "service": 20,
 	"motorway_link": 60, "trunk_link": 50, "primary_link": 40, "secondary_link": 40, "tertiary_link": 40,
 }
 
-var nodes: Array = []        # {pos, ends: Array[int] (edge*2+end), ctrl, osm_id, polygon, phases}
+var nodes: Array = []        # {pos, ends: Array[int] (edge*2+end), ctrl, osm_id, polygon, phases, under}
 var edges: Array = []        # see _make_edge
 var connectors: Array = []   # see _build_connectors
 var lane_out: Dictionary = {}  # lane key -> Array[int] connector ids leaving the end of that lane
@@ -99,11 +100,13 @@ func build(data: OsmData, hq: Dictionary = {}) -> void:
 		e.pts = Geo.chaikin(e.pts, 3, 0.75)
 		e.cum = Geo.cumulative(e.pts)
 		e.len = e.cum[e.cum.size() - 1]
+	_short_tunnels()
 	var t := Time.get_ticks_msec()
 	if merge_junctions:
 		group_count = JunctionMerge.run(self)
 		if group_count > 0:
 			_compact()
+	_mark_under_nodes()
 	timings["merge"] = Time.get_ticks_msec() - t
 	_smooth_continuations()
 	_mark_crossings(data)
@@ -151,8 +154,6 @@ static func parse_width(v: String) -> float:
 func _make_edge(r: Dictionary, a: int, b: int, data: OsmData) -> Dictionary:
 	var tags: Dictionary = r.way.tags
 	var cls: String = tags.get("highway", "residential")
-	if tags.get("tunnel", "") in ["yes", "building_passage"] and cls in ["motorway", "trunk", "motorway_link", "trunk_link"]:
-		return {}
 	var pts: PackedVector2Array = r.pts
 	# remove duplicate consecutive points
 	var clean := PackedVector2Array()
@@ -298,7 +299,7 @@ func _make_edge(r: Dictionary, a: int, b: int, data: OsmData) -> Dictionary:
 		"park_l": park_l, "park_r": park_r, "cyc_l": cyc_l, "cyc_r": cyc_r,
 		"width": carriage, "sw_l": sw_l, "sw_r": sw_r,
 		"speed": kmh / 3.6, "bridge": tags.get("bridge", "") in ["yes", "viaduct"], "layer": layer,
-		"tunnel": tags.get("tunnel", "") == "yes",
+		"tunnel": tags.get("tunnel", "") == "yes", "under": is_under(tags),
 		"bus": data.bus_way_ids.has(int(r.way.id)) or cls == "busway",
 		"turn_f": str(tags.get("turn:lanes", tags.get("turn:lanes:forward", ""))) if true else "",
 		"turn_b": str(tags.get("turn:lanes:backward", "")),
@@ -307,9 +308,73 @@ func _make_edge(r: Dictionary, a: int, b: int, data: OsmData) -> Dictionary:
 	}
 
 
+## Roads below the surface (#31): tunnels, indoor ways, and garage aisles or covered driveways below ground
+## level. They get no surface mesh (the underground view draws them) and vehicles in them are hidden.
+## Building passages and covered roads at ground level stay on the surface: the building hides them.
+## Underpasses without a tunnel tag (layer < 0 on a street) are open to the sky and stay as well.
+static func is_under(tags: Dictionary) -> bool:
+	if str(tags.get("tunnel", "")) == "yes" or str(tags.get("indoor", "")) == "yes":
+		return true
+	var ls := str(tags.get("layer", "0"))
+	if not ls.is_valid_int() or ls.to_int() >= 0 or str(tags.get("highway", "")) != "service":
+		return false
+	var lv := str(tags.get("level", "0")).split(";")[0]
+	return str(tags.get("covered", "")) == "yes" or str(tags.get("service", "")) == "parking_aisle" \
+		or (lv.is_valid_float() and lv.to_float() < 0.0)
+
+
+## Underground chains (edges joined at nodes where only underground edges meet) shorter than MIN_TUNNEL go
+## back to the surface: two portals and a hidden car for a few metres look worse than an underpass.
+func _short_tunnels() -> void:
+	var seen := {}
+	for ei in edges.size():
+		if not edges[ei].under or seen.has(ei):
+			continue
+		var chain := [ei]
+		seen[ei] = true
+		var total := 0.0
+		var i := 0
+		while i < chain.size():
+			var e: Dictionary = edges[chain[i]]
+			total += float(e.len)
+			for ni in [e.a, e.b]:
+				if not _all_under(ni):
+					continue
+				for end in nodes[ni].ends:
+					var oj: int = end >> 1
+					if not seen.has(oj):
+						seen[oj] = true
+						chain.append(oj)
+			i += 1
+		if total < MIN_TUNNEL:
+			for ej in chain:
+				edges[ej].under = false
+
+
+func _all_under(ni: int) -> bool:
+	var ends: Array = nodes[ni].ends
+	if ends.is_empty():
+		return false
+	for end in ends:
+		if not edges[end >> 1].under:
+			return false
+	return true
+
+
+## Junctions where only underground roads meet are underground themselves (no surface area, hidden traffic).
+func _mark_under_nodes() -> void:
+	for ni in nodes.size():
+		nodes[ni]["under"] = _all_under(ni)
+
+
+## True if lane `key` belongs to a road below the surface.
+func lane_under(key: int) -> bool:
+	return edges[key >> 4].get("under", false)
+
+
 func _signature(e: Dictionary) -> String:
-	return "%s|%s|%d|%d|%.2f|%.1f|%.1f|%.1f|%.1f|%s|%d|%s|%s" % [e.cls, e.oneway, e.lf, e.lb, e.lw, e.sw_l, e.sw_r,
-		e.park_l + e.cyc_l, e.park_r + e.cyc_r, e.bridge, e.layer, e.bus, e.turn_f + e.turn_b]
+	return "%s|%s|%d|%d|%.2f|%.1f|%.1f|%.1f|%.1f|%s|%d|%s|%s|%s" % [e.cls, e.oneway, e.lf, e.lb, e.lw, e.sw_l, e.sw_r,
+		e.park_l + e.cyc_l, e.park_r + e.cyc_r, e.bridge, e.layer, e.bus, e.turn_f + e.turn_b, e.under]
 
 
 ## Merge chains through nodes of degree 2 when both edges have the same cross section.
@@ -1529,7 +1594,7 @@ func nearest_lane(p: Vector2, max_dist: float = 60.0, exclude_classes: Array = [
 	var best_d := max_dist
 	for key in lane_geo:
 		var e: Dictionary = edges[key >> 4]
-		if e.cls in exclude_classes:
+		if e.cls in exclude_classes or e.get("under", false):
 			continue
 		var g: Array = lane_geo[key]
 		var pts: PackedVector2Array = g[0]

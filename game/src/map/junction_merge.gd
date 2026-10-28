@@ -39,8 +39,8 @@ static func run(net: RoadNet) -> int:
 		var e: Dictionary = net.edges[ei]
 		var a: int = e.a
 		var b: int = e.b
-		if a == b or int(e.rank) >= 20:
-			continue   # self loops; roundabout rings keep their nodes
+		if a == b or int(e.rank) >= 20 or e.get("under", false):
+			continue   # self loops; roundabout rings keep their nodes; tunnels keep theirs (#31, no surface area)
 		var da: int = net.nodes[a].ends.size()
 		var db: int = net.nodes[b].ends.size()
 		if da < 2 or db < 2 or (da < 3 and db < 3):

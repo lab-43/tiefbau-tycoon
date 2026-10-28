@@ -451,6 +451,7 @@ func _left_help() -> void:
 
 	left_body.add_child(UI.kv("H", "Markierungen ein/aus"))
 	left_body.add_child(UI.kv("B", "Gebäude ein/aus"))
+	left_body.add_child(UI.kv("U", "Untergrund-Ansicht: Tunnel, U-Bahn, S-Bahn"))
 	left_body.add_child(UI.kv("Klick auf Markierung", "Hinfliegen / auswählen"))
 	left_body.add_child(UI.kv("Rechtsklick auf Markierung", "Gewähltes Fahrzeug hinschicken"))
 

@@ -44,7 +44,7 @@ func _build_candidates() -> void:
 	for key in net.lane_geo:
 		var ei: int = key >> 4
 		var e: Dictionary = net.edges[ei]
-		if not (e.cls in STREET_CLASSES) or e.bridge or e.get("tunnel", false) or ei == world.traffic._hq_edge:
+		if not (e.cls in STREET_CLASSES) or e.bridge or e.get("tunnel", false) or e.get("under", false) or ei == world.traffic._hq_edge:
 			continue
 		var dir: int = (key >> 3) & 1
 		if (key & 7) != net.lane_count(ei, dir) - 1:
@@ -132,7 +132,7 @@ func offer_at(p: Vector2) -> Dictionary:
 		return {"error": "Keine passende Straße in der Nähe"}
 	var ei: int = int(near.key) >> 4
 	var e: Dictionary = net.edges[ei]
-	if e.bridge or e.get("tunnel", false):
+	if e.bridge or e.get("tunnel", false) or e.get("under", false):
 		return {"error": "Auf Brücken und in Tunneln geht keine Baustelle"}
 	var dir: int = (int(near.key) >> 3) & 1
 	var key := RoadNet.lane_key(ei, dir, net.lane_count(ei, dir) - 1)
