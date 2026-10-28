@@ -43,6 +43,19 @@ func _ready() -> void:
 	cm.portals = portals
 	cm.build_all()
 	portals.build(net, data.rails, cm)
+	var trees_before := 0
+	for ck in cm.trees:
+		trees_before += cm.trees[ck].size()
+	var cleared := portals.clear_xforms(cm.trees) + portals.clear_xforms(cm.lamps)
+	var on_portal := 0
+	for by in [cm.trees, cm.lamps]:
+		for ck in by:
+			for x: Transform3D in by[ck]:
+				if portals.covers(Vector2(x.origin.x, x.origin.z)):
+					on_portal += 1
+	print("  Bäume %d, auf Portalen entfernt %d, noch auf Portalen %d" % [trees_before, cleared, on_portal])
+	if on_portal > 0:
+		fails.append("%d Bäume oder Laternen auf Portalen" % on_portal)
 	var under := 0
 	for e in net.edges:
 		if e.under:
