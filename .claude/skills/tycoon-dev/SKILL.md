@@ -33,6 +33,7 @@ description: Use this skill to set up, check, test, build or deliver the Tiefbau
 | `tools/test.sh job` | ~7 min | ein kompletter Auftrag mit Startfuhrpark |
 | `tools/test.sh lowbed save+load pbf` | 4 min · ~8 min · 35 s | Tieflader, Speichern/Laden mitten im Graben, PBF-Leser (`pbf` prüft auch die Ebenen, siehe nächste Zeile) |
 | `tools/test.sh ebenen` | 12 s | Höhen der flachen Kartenebenen: Wasser und Flächen über dem Boden, Wasser über allen Flächen und unter Wegen, Gleisbett und Straßen |
+| `tools/kreuzungen.sh [out]` | 25 s | Kreuzungs-Prüfstand: 8 feste Hamburger Kreuzungen (`testdata/kreuzungen`) aufbereiten, Lücken/Knicke/Versatz/Markierung messen, Bilder nach `<out>/bilder`. Pflicht bei Änderungen an `road_net.gd`/`road_mesher.gd`: Messwerte vorher/nachher vergleichen (`--compare=<export-dir>,label`) |
 | `tools/test.sh rig` | 5 s | Bagger-Gestänge und Zylinder in allen Stellungen (braucht private Assets). Seitenansichten: `xvfb-run -a godot --path game --rendering-driver vulkan -s res://test/rig_test.gd -- --shots=<dir>` |
 
 - **Wann welcher Test:**

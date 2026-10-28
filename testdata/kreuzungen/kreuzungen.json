@@ -1,0 +1,70 @@
+{
+ "quelle": "OpenStreetMap-Mitwirkende (ODbL), Geofabrik-Auszug Hamburg vom 27.10.2026",
+ "ausschnitt_halbe_kante_m": 300.0,
+ "kreuzungen": [
+  {
+   "id": "meldung5_billhorn",
+   "name": "Billhorner Brückenstraße (Meldung #5)",
+   "art": "komplex: getrennte Richtungsfahrbahnen, Abbiegestreifen, Wendeschleife, 7 Ampeln",
+   "lat": 53.5381496,
+   "lon": 10.0230723,
+   "radius_m": 150
+  },
+  {
+   "id": "willy_brandt",
+   "name": "Willy-Brandt-Straße",
+   "art": "Ampelkreuzung mit getrennten Richtungsfahrbahnen (Hauptstraße)",
+   "lat": 53.5475909,
+   "lon": 9.9972373,
+   "radius_m": 150
+  },
+  {
+   "id": "deichtorplatz",
+   "name": "Deichtorplatz",
+   "art": "großer Platz, mehrere Ampelknoten",
+   "lat": 53.548085,
+   "lon": 10.0053551,
+   "radius_m": 150
+  },
+  {
+   "id": "versmann_y",
+   "name": "Versmannstraße",
+   "art": "Straße teilt sich in zwei Richtungsfahrbahnen (Y)",
+   "lat": 53.5402607,
+   "lon": 10.0111601,
+   "radius_m": 150
+  },
+  {
+   "id": "hafencity_wohn",
+   "name": "Hübenerstraße / San-Francisco-Straße",
+   "art": "einfache Wohnstraßen-Kreuzung (rechts vor links)",
+   "lat": 53.5402876,
+   "lon": 9.9972826,
+   "radius_m": 150
+  },
+  {
+   "id": "lange_reihe_t",
+   "name": "Lange Reihe / Gurlittstraße",
+   "art": "Einmündung Wohnstraße in Hauptstraße",
+   "lat": 53.5573646,
+   "lon": 10.0111903,
+   "radius_m": 150
+  },
+  {
+   "id": "burchardplatz_kreisel",
+   "name": "Burchardplatz",
+   "art": "Kreisverkehr",
+   "lat": 53.5486419,
+   "lon": 10.001727,
+   "radius_m": 150
+  },
+  {
+   "id": "georg_wilhelm_ampel",
+   "name": "Georg-Wilhelm-Straße",
+   "art": "Ampelkreuzung mit Abbiegespuren (ein Knoten)",
+   "lat": 53.516087,
+   "lon": 9.9933976,
+   "radius_m": 150
+  }
+ ]
+}
