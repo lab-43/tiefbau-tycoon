@@ -7,6 +7,7 @@ const Y := {"farmland": 0.010, "residential": 0.012, "industrial": 0.014, "comme
 # Water lies on top of all landuse areas (harbour landuse often overlaps the basins) and below ballast,
 # paths and roads. It must stay above the opaque base ground plane at y = 0, which hides anything below it.
 const WATER_Y := 0.031
+const BALLAST_Y := 0.032
 const PATH_Y := 0.04
 
 var data: OsmData
@@ -208,7 +209,7 @@ func _rails() -> void:
 		var ck := chunk_of(pts[pts.size() >> 1])
 		var is_tram: bool = r.tags.get("railway", "") == "tram"
 		if not is_tram:
-			_flat_strip(layer(ck, "ballast"), pts, 3.4, 0.032)
+			_flat_strip(layer(ck, "ballast"), pts, 3.4, BALLAST_Y)
 		var rl := layer(ck, "rail")
 		for off in [-0.72, 0.72]:
 			var line := Geo.offset_polyline(pts, off)

@@ -7,6 +7,8 @@ uniform vec3 shallow : source_color = vec3(0.45, 0.74, 0.94);
 varying vec3 wpos;
 void vertex() { wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
 void fragment() {
+	// water now lies above the ground, so it must open for construction pits like every other flat surface
+	if (in_pit(wpos.xz)) { discard; }
 	float t = TIME * 0.05;
 	vec2 uv = wpos.xz * 0.15;
 	float n1 = vnoise(uv + vec2(t, t * 0.7));
