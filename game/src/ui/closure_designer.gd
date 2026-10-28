@@ -114,8 +114,16 @@ func open(s: Site) -> void:
 ## Camera over the whole closure, traffic of the closed lane running from left to right.
 func frame_view() -> void:
 	var ext: Dictionary = lay.extent_for(plan.items) if plan.custom else lay.default_extent()
-	var a: float = minf(float(ext.det0), lay.s0) - 12.0
-	var b: float = maxf(float(ext.det1), lay.s_taper1) + 8.0
+	var a: float = minf(float(ext.det0), float(ext.van) - 4.0)
+	var b: float = maxf(float(ext.det1), lay.s_taper1)
+	# include the planned items (signs far ahead), but not items far away on other streets
+	for it in plan.items:
+		var sx := lay.lane_coords(ClosurePlan.item_center(it)).x
+		if sx > lay.s0 - 90.0 and sx < lay.s_taper1 + 90.0:
+			a = minf(a, sx)
+			b = maxf(b, sx)
+	a -= 8.0
+	b += 6.0
 	var mid := (a + b) * 0.5
 	var vp := get_viewport_rect().size
 	var usable := maxf(300.0, vp.x - LEFT_W - RIGHT_W - 60.0)
