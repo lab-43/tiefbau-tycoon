@@ -27,8 +27,25 @@ for a in "$@"; do
 done
 BR=$(git rev-parse --abbrev-ref HEAD)
 
+# Session clones are shallow single-branch clones (git clone --depth 1): name the refs explicitly,
+# otherwise "git fetch origin <branch>" only fills FETCH_HEAD and --force-with-lease says "stale info".
+fetch_refs() {
+  git fetch -q origin "+refs/heads/main:refs/remotes/origin/main" 2>/dev/null
+  git fetch -q origin "+refs/heads/$BR:refs/remotes/origin/$BR" 2>/dev/null || true
+}
+
+push_branch() {  # own branch only; explicit lease expectation (works in shallow single-branch clones)
+  local old
+  old=$(git ls-remote origin "refs/heads/$BR" 2>/dev/null | cut -f1)
+  if [ -n "$old" ]; then
+    git push -q --force-with-lease="refs/heads/$BR:$old" origin "HEAD:refs/heads/$BR"
+  else
+    git push -q origin "HEAD:refs/heads/$BR"
+  fi
+}
+
 merged_by_ci() {  # CI pushes the (rebased) branch tip to main and then sets the branch to it
-  git fetch -q origin main "$BR" 2>/dev/null
+  fetch_refs
   git merge-base --is-ancestor "origin/$BR" origin/main 2>/dev/null
 }
 
@@ -54,7 +71,7 @@ fi
 
 for attempt in 1 2 3 4 5 6; do
   echo "== Runde $attempt: hole origin/main …"
-  git fetch -q origin main || { echo "fetch fehlgeschlagen"; exit 3; }
+  git fetch -q origin "+refs/heads/main:refs/remotes/origin/main" || { echo "fetch fehlgeschlagen"; exit 3; }
   REBASED=0
   if ! git merge-base --is-ancestor origin/main HEAD; then
     echo "== rebase $BR auf origin/main …"
@@ -79,7 +96,7 @@ for attempt in 1 2 3 4 5 6; do
   OUT=$(git push origin HEAD:main 2>&1); RC=$?
   if [ $RC = 0 ]; then
     echo "== zusammengeführt: main = $(git rev-parse --short HEAD) ($(git log -1 --format=%s))"
-    git push -q --force-with-lease origin "HEAD:$BR" 2>/dev/null || true   # keep the own branch in sync
+    push_branch 2>/dev/null || true   # keep the own branch in sync
     exit 0
   fi
   if echo "$OUT" | grep -qE "\((fetch first|non-fast-forward)\)"; then
@@ -93,7 +110,7 @@ for attempt in 1 2 3 4 5 6; do
     echo "   Jonathan muss diesen Branch auf GitHub zusammenführen. In der Meldung Bescheid geben."
   fi
   git commit -q --allow-empty -m "Automerge: $BR" -m "Automerge: ja" || exit 3
-  git push -q --force-with-lease origin "HEAD:$BR" || { echo "Branch-Push ging auch nicht – Jonathan Bescheid geben"; exit 3; }
+  push_branch || { echo "Branch-Push ging auch nicht – Jonathan Bescheid geben"; exit 3; }
   echo "== Branch $BR gepusht. Die CI testet, rebased bei Bedarf und schiebt nach main."
   echo "   Warten: tools/agent/merge.sh --wait   (prüft alle 30 s, bis zu 9 min pro Aufruf)"
   exit 5
