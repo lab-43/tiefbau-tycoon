@@ -9,6 +9,7 @@ var map_service: MapService
 var _screen: Control
 var _reporter: IssueReporter
 var _issues: IssueBrowser
+var _debug: DebugPanel
 
 
 func _ready() -> void:
@@ -30,6 +31,7 @@ func _ready() -> void:
 			add_child(drv)
 	Events.open_issues.connect(open_issue_browser)
 	Events.report_issue.connect(open_reporter)
+	Events.toggle_debug.connect(toggle_debug)
 	if "--autostart" in args:
 		_autostart.call_deferred()
 	else:
@@ -57,6 +59,20 @@ func _input(ev: InputEvent) -> void:
 	if ev is InputEventKey and ev.pressed and not ev.echo and ev.keycode == KEY_F8:
 		get_viewport().set_input_as_handled()
 		open_reporter()
+	elif ev is InputEventKey and ev.pressed and not ev.echo and ev.keycode == KEY_F3 and Game.world:
+		get_viewport().set_input_as_handled()
+		toggle_debug()
+
+
+## F3 / wrench in the left rail: debug menu (time, contracts, instant steps …), see src/debug/.
+func toggle_debug() -> void:
+	if Game.world == null:
+		return
+	if _debug == null or not is_instance_valid(_debug):
+		_debug = DebugPanel.new()
+		ui_root.add_child(_debug)
+		return
+	_debug.toggle()
 
 
 ## F8 anywhere (menu, loading screen, game): report a bug or wish with screenshot and context.

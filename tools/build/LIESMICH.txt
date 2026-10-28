@@ -59,6 +59,7 @@ Mausrad            zoomen                  F             Auswahl folgen
 Q / E              drehen                  Esc           Auswahl aufheben / Menü
 Leertaste, 1, 2, 3 Pause, 1x, 3x, 10x      F5            speichern
 F8                 Problem melden
+F3                 Debug-Menü (Uhrzeit, Licht, Aufträge platzieren, Arbeitsschritte überspringen …)
 
 Hinweis
 -------

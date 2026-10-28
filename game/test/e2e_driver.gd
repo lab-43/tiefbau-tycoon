@@ -114,6 +114,8 @@ func _process(delta: float) -> void:
 			_leuchten()
 		"verkehrslichter":
 			_verkehrslichter()
+		"debug":
+			_debug_test(delta)
 
 
 func _smoke() -> void:
@@ -783,3 +785,12 @@ func _vl_check(i: int, car: Node3D) -> void:
 		print("VLICHT %-4s %s Kasten bei (%.2f, %.2f, %.2f) Abstand zur Karosserie %.3f m" % ["ok" if ok else "FAIL", nm, c.x, c.y, c.z, gap if best < INF else INF])
 		if not ok:
 			_vl_fail += 1
+
+
+## Debug menu actions (test/e2e_debug.gd).
+var _dbg: RefCounted
+func _debug_test(delta: float) -> void:
+	if _dbg == null:
+		_dbg = load("res://test/e2e_debug.gd").new()
+		_dbg.drv = self
+	_dbg.tick(delta)

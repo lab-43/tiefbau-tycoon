@@ -167,6 +167,9 @@ func _build_rail() -> void:
 	_issue_badge.position = Vector2(24, -2)
 	_issue_badge.visible = false
 	iss.add_child(_issue_badge)
+	var dbg := UI.icon_button("wrench", "Debug-Menü (F3)")
+	dbg.pressed.connect(func(): Events.toggle_debug.emit())
+	v.add_child(dbg)
 	v.add_child(UI.spacer(false))
 	var hq_b := UI.icon_button("house", "Zur Zentrale springen")
 	hq_b.pressed.connect(func():
@@ -429,7 +432,8 @@ func _left_help() -> void:
 	left_body.add_child(UI.caps("Steuerung"))
 	for kvp in [["WASD / Pfeile", "Kamera bewegen (Shift schneller)"], ["Rechte Maus ziehen", "Karte verschieben"], ["Mittlere Maus ziehen", "Drehen und neigen"],
 			["Mausrad", "Zoomen"], ["Q / E", "Drehen"], ["Linksklick", "Fahrzeug oder Baustelle wählen"], ["Rechtsklick", "Befehl: hinfahren / zuweisen"],
-			["F", "Auswahl folgen"], ["Leertaste, 1, 2, 3", "Pause und Geschwindigkeit"], ["F5", "Speichern"]]:
+			["F", "Auswahl folgen"], ["Leertaste, 1, 2, 3", "Pause und Geschwindigkeit"], ["F5", "Speichern"],
+			["F8", "Problem melden"], ["F3", "Debug-Menü"]]:
 		left_body.add_child(UI.kv(kvp[0], kvp[1]))
 
 

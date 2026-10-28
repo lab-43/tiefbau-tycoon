@@ -452,3 +452,41 @@ func load_state(d: Dictionary) -> void:
 		compacted = d.compacted
 		fresh = d.fresh
 		_dirty = true
+
+
+# ------------------------------------------------------------------------------------------
+# Debug (instant steps, see src/debug/debug_tools.gd)
+# ------------------------------------------------------------------------------------------
+
+## Excavates the whole trench at once. Returns the removed bank volume (m³).
+func dig_all() -> float:
+	var a := cell_area()
+	var v := 0.0
+	for j in nv:
+		for i in nu:
+			if inner(i, j):
+				var k := idx(i, j)
+				v += maxf(0.0, h[k] + depth) * a
+				h[k] = minf(h[k], -depth)
+				refill[k] = 0
+				compacted[k] = 0
+				fresh[k] = 0
+	_dirty = true
+	return v
+
+
+## Fills every trench cell up to top (relative to the road) and compacts it. Returns the volume.
+func fill_all(top: float) -> float:
+	var a := cell_area()
+	var v := 0.0
+	for j in nv:
+		for i in nu:
+			if inner(i, j):
+				var k := idx(i, j)
+				if h[k] < top:
+					v += (top - h[k]) * a
+					h[k] = top
+					refill[k] = 1
+				compacted[k] = 1
+	_dirty = true
+	return v

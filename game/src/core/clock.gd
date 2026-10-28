@@ -101,10 +101,15 @@ func date_string() -> String:
 ## Solar position (elevation, azimuth in radians) for latitude/longitude at current game time.
 ## Azimuth: 0 = north, PI/2 = east. Uses a compact NOAA-style approximation (local solar time ~ clock).
 func sun_position(lat_deg: float) -> Vector2:
+	return sun_position_at(lat_deg, hour())
+
+
+## Solar position for an explicit clock hour (DayNight uses it for the debug light override).
+func sun_position_at(lat_deg: float, clock_hour: float) -> Vector2:
 	var decl := deg_to_rad(23.44) * sin(TAU * (284.0 + day_of_year) / 365.0)
 	var lat := deg_to_rad(lat_deg)
 	# treat clock as local solar time shifted by +1h (CET-ish summer offset) for nicer evenings
-	var solar_hour := hour() - 1.0
+	var solar_hour := clock_hour - 1.0
 	var ha := deg_to_rad(15.0 * (solar_hour - 12.0))
 	var sin_el := sin(lat) * sin(decl) + cos(lat) * cos(decl) * cos(ha)
 	var el := asin(clampf(sin_el, -1.0, 1.0))

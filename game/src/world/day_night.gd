@@ -8,6 +8,7 @@ var moon: DirectionalLight3D
 var sky_mat: ProceduralSkyMaterial
 var night := 0.0          # 0 = day, 1 = full night
 var latitude := 53.55
+var override_hour := -1.0  # debug: light as at this hour (>= 0), the clock keeps running
 var _acc := 10.0
 
 
@@ -66,7 +67,7 @@ func _process(delta: float) -> void:
 func update_now() -> void:
 	if env == null:
 		return
-	var sp := Clock.sun_position(latitude)
+	var sp := Clock.sun_position(latitude) if override_hour < 0.0 else Clock.sun_position_at(latitude, override_hour)
 	var el := sp.x
 	var az := sp.y
 	# sun direction: light travels from the sun towards the ground

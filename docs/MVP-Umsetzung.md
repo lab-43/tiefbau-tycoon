@@ -179,3 +179,27 @@ Fahrzeuge (Kolonnenbus, Pritsche, Kipper, Sattelzug mit Tieflader, Mobilbagger):
     - `save` + `load` bis zur Abnahme bestanden.
     - Der Windows-Export bootet die Demokarte samt Fuhrpark, Ausschreibungen und Verkehr.
 - Assets (nur privat): Construction-Simulator-Modelle in `assets/consim/` (40 GLBs mit JSON zu Gelenken und Lichtern), FS25-Absperrset in `assets/barriers/`.
+
+## Debug-Menü (F3, Meldung #6)
+- **Öffnen:** mit **F3** oder dem Schraubenschlüssel in der linken Leiste. Das Menü steht rechts, neben dem Baustellen- oder Fahrzeugfenster.
+- **Zeit und Licht:**
+  - Zur nächsten Uhrzeit vorspulen (06–23 Uhr), +1 h, +6 h, +1 Tag. Die Zeit läuft nur vorwärts, damit Fristen und Ausschreibungen stimmig bleiben.
+  - Licht festhalten (Tag, Abend, Nacht), während die Uhr weiterläuft.
+  - Jahreszeit wählen.
+  - Tempo 30× und 60×. Mit 1, 2, 3 oder der Leertaste geht es zurück auf normales Tempo.
+- **Aufträge:**
+  - Neue Ausschreibung sofort.
+  - „Auftrag platzieren“: Ein Linksklick auf eine Straße setzt den Graben dorthin, auf Wunsch gleich angenommen. Ist die Stelle ungeeignet, bleibt der Modus an. Rechtsklick oder Esc bricht ab.
+- **Baustelle:**
+  - „Schritt sofort erledigen“ hinterlässt den Endzustand der echten Arbeit: Absperrung steht, Graben ausgehoben, Rohr getauscht, verfüllt, Asphalt usw. Das klappt auch mitten in einem laufenden Schritt.
+  - „Bis zur Abnahme“ erledigt alle restlichen Schritte samt Bezahlung.
+  - Außerdem: Fahrzeuge hinschicken und Automatik ein- und ausschalten.
+- **Fahrzeug:** das gewählte Fahrzeug sofort auf einen Stellplatz der Zentrale setzen, z. B. wenn es feststeckt.
+- **Sonstiges:**
+  - Geld +10.000 € oder +100.000 €.
+  - Verkehrsdichte 0–200 % und Verkehr leeren.
+  - Leistungsanzeige mit FPS, Draw-Calls, Objekten und Verkehr.
+- **Technik:**
+  - Die Logik steckt in `src/debug/debug_tools.gd`, die Oberfläche in `debug_panel.gd`.
+  - Getestet mit dem e2e-Szenario `debug` (`tools/test.sh debug`, 32 Prüfungen).
+  - Neue Arbeitsschritte brauchen einen Eintrag in `DebugTools.finish_step`.

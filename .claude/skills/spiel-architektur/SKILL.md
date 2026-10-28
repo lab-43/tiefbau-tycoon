@@ -63,6 +63,7 @@ Autoloads (`project.godot`):
   - `phase`, `running`, `status`, `progress`, `sub`.
   - Fahrzeuge melden sich an (`spot_of`, `in_place`), Material über `needs` (inklusive unterwegs befindlicher Ladungen).
   - Am Ende wird die Baustelle mit `retired` stillgelegt, nicht gelöscht (Lektion baustelle-stilllegen).
+- **Debug-Menü (F3):** `src/debug/`. Wer einen Arbeitsschritt ändert oder neu baut, passt `DebugTools.finish_step` an, damit er sich sofort erledigen lässt, und prüft das mit `tools/test.sh debug`.
 - **`SiteTerrain`:** Höhenraster (10 cm) mit Schichten Asphalt, Tragschicht und Boden. Die Grube wird gegraben und verfüllt.
 - **`SiteProps`:** Absperrteile (FS25-Set, privat) und Schilder. **`Worker`:** Kolonne mit einfachen Animationen.
 

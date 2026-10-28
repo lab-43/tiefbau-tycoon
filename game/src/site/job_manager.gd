@@ -88,31 +88,88 @@ func _make_offer() -> Job:
 			continue
 		if not _location_free(lay):
 			continue
-		var j := Job.new()
-		j.id = _next_id
-		_next_id += 1
-		j.key = c.key
-		j.s0 = s0
-		j.length = L
-		j.width = W
-		j.depth = D
-		j.pipe_d = pipe.d
-		j.pipe_name = pipe.name
-		var city: String = Game.map_meta.get("name", "")
-		j.client = "%s %s" % [CLIENTS[pipe.client], city] if city != "" else CLIENTS[pipe.client]
-		var e: Dictionary = world.net.edges[c.key >> 4]
-		j.street = e.name
-		j.center = lay.trench_center()
-		j.distance_m = c.dist
-		j.duration_days = 3 if rng.randf() < 0.6 else 4
-		var base: float = 9000.0 + 1250.0 * L + 3400.0 * maxf(0.0, D - 1.2) + 5000.0 * pipe.d + c.dist * 0.6
-		if e.cls in ["secondary", "secondary_link"]:
-			base *= 1.12
-		j.pay = snappedf(base * rng.randf_range(0.92, 1.12), 50.0)
-		j.offered_at = Clock.total_minutes()
-		j.expires_at = j.offered_at + 22.0 * 60.0
-		return j
+		return _build_job(c, pipe, L, W, D, s0)
 	return null
+
+
+## Job for lane candidate c ({key, dist}) with the trench starting at s0 (layout already validated).
+func _build_job(c: Dictionary, pipe: Dictionary, L: float, W: float, D: float, s0: float) -> Job:
+	var lay := SiteLayout.new()
+	lay.setup(world.net, c.key, s0, L, W, D, pipe.d)
+	var j := Job.new()
+	j.id = _next_id
+	_next_id += 1
+	j.key = c.key
+	j.s0 = s0
+	j.length = L
+	j.width = W
+	j.depth = D
+	j.pipe_d = pipe.d
+	j.pipe_name = pipe.name
+	var city: String = Game.map_meta.get("name", "")
+	j.client = "%s %s" % [CLIENTS[pipe.client], city] if city != "" else CLIENTS[pipe.client]
+	var e: Dictionary = world.net.edges[c.key >> 4]
+	j.street = e.name
+	j.center = lay.trench_center()
+	j.distance_m = c.dist
+	j.duration_days = 3 if rng.randf() < 0.6 else 4
+	var base: float = 9000.0 + 1250.0 * L + 3400.0 * maxf(0.0, D - 1.2) + 5000.0 * pipe.d + c.dist * 0.6
+	if e.cls in ["secondary", "secondary_link"]:
+		base *= 1.12
+	j.pay = snappedf(base * rng.randf_range(0.92, 1.12), 50.0)
+	j.offered_at = Clock.total_minutes()
+	j.expires_at = j.offered_at + 22.0 * 60.0
+	return j
+
+
+## Debug: an offer whose trench lies at point p, on the right lane of the nearest street (any class
+## except motorways and service roads). Searches up to 40 m along the street for a valid spot.
+## Returns {"job": Job} or {"error": String}. The job is added to the offers.
+func offer_at(p: Vector2) -> Dictionary:
+	var net: RoadNet = world.net
+	var near := net.nearest_lane(p, 40.0, ["motorway", "motorway_link", "trunk", "trunk_link", "service"])
+	if near.is_empty():
+		return {"error": "Keine passende Straße in der Nähe"}
+	var ei: int = int(near.key) >> 4
+	var e: Dictionary = net.edges[ei]
+	if e.bridge or e.get("tunnel", false):
+		return {"error": "Auf Brücken und in Tunneln geht keine Baustelle"}
+	var dir: int = (int(near.key) >> 3) & 1
+	var key := RoadNet.lane_key(ei, dir, net.lane_count(ei, dir) - 1)
+	var g: Array = net.lane_geo[key]
+	var s_click: float = Geo.closest_on_polyline(g[0], g[1], p)[1]
+	var pipe: Dictionary = PIPES[rng.randi() % PIPES.size()]
+	var L := 4.0
+	var D := 1.8
+	var err := ""
+	for k in 41:
+		# 0, +2, -2, +4, -4 … metres around the clicked point
+		var shift_m := float((k + 1) / 2) * 2.0 * (1.0 if k % 2 == 1 else -1.0)
+		var s0 := s_click + shift_m - SiteLayout.TAPER - SiteLayout.HEAD_GAP - L * 0.5
+		var lay := SiteLayout.new()
+		if not lay.setup(net, key, s0, L, pipe.width, D, pipe.d):
+			if err == "":
+				err = lay.error
+			continue
+		if not _location_free(lay):
+			if err == "":
+				err = "zu nah an einem anderen Auftrag, Zebrastreifen, Haltestelle oder der Zentrale"
+			continue
+		var hq := world.hq_info.get("lot_center", Vector2.ZERO) as Vector2
+		var j := _build_job({"key": key, "dist": lay.trench_center().distance_to(hq)}, pipe, L, pipe.width, D, s0)
+		offers.append(j)
+		Events.job_offers_changed.emit()
+		return {"job": j}
+	return {"error": "Hier geht keine Baustelle: " + err}
+
+
+## Debug: one more random offer right now (ignores the offer interval and the maximum).
+func debug_new_offer() -> Job:
+	var j := _make_offer()
+	if j:
+		offers.append(j)
+		Events.job_offers_changed.emit()
+	return j
 
 
 func _location_free(lay: SiteLayout) -> bool:

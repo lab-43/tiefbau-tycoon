@@ -18,6 +18,7 @@ signal tool_changed(tool_name: String)
 signal context_command(world_pos: Vector3, target: Object)
 signal open_issues()                                 # show the "Meldungen" window
 signal report_issue()                                # open the F8 report dialog
+signal toggle_debug()                                # show/hide the debug menu (F3)
 
 
 ## Last notifications [time, kind, text] (attached to issue reports).
