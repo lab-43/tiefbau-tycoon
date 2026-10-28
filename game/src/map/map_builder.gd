@@ -192,7 +192,13 @@ static func add_chunk_layers(root: Node3D, ck: Vector2i, layers: Dictionary) -> 
 		var mesh := ArrayMesh.new()
 		var arr := []
 		arr.resize(Mesh.ARRAY_MAX)
-		arr[Mesh.ARRAY_VERTEX] = l.verts
+		# Visibility ranges count from the node's origin, not from the mesh: the node goes into its
+		# chunk and the vertices become relative to it. At the map origin, markings vanished 900 m
+		# from the map centre and curbs 1300 m from it (#5).
+		var verts: PackedVector3Array = l.verts
+		var c: Vector3 = (verts[0] + verts[verts.size() / 2] + verts[verts.size() - 1]) / 3.0
+		c.y = 0.0
+		arr[Mesh.ARRAY_VERTEX] = Transform3D(Basis(), -c) * verts
 		arr[Mesh.ARRAY_NORMAL] = l.normals
 		if l.use_uvs and l.uvs.size() == l.verts.size():
 			arr[Mesh.ARRAY_TEX_UV] = l.uvs
@@ -203,6 +209,7 @@ static func add_chunk_layers(root: Node3D, ck: Vector2i, layers: Dictionary) -> 
 		var mi := MeshInstance3D.new()
 		mi.name = lname
 		mi.mesh = mesh
+		mi.position = c
 		mi.material_override = Mats.get_mat(lname)
 		if NO_SHADOW.has(lname):
 			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

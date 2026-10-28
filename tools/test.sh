@@ -1,9 +1,10 @@
 #!/bin/bash
 # Runs end-to-end scenarios headless on the offline Utrecht map and reports pass/fail.
 # usage: tools/test.sh [scenario ...]            default: smoke issue
-#   scenarios: smoke issue job lowbed save+load pbf ebenen debug leuchten verkehrslichter rig markierungen absperrung  (save+load = save mid-dig,
+#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite debug leuchten verkehrslichter rig markierungen absperrung  (save+load = save mid-dig,
 #              then load and finish; rig = excavator linkage/cylinders, see game/test/rig_test.gd;
-#              ebenen = height order of flat map layers, see game/test/layer_test.gd – also part of pbf)
+#              ebenen = height order of flat map layers, see game/test/layer_test.gd – also part of pbf;
+#              sichtweite = city meshes sit at their chunk (visibility ranges), game/test/range_test.gd – also part of pbf)
 #   env: E2E_SPEED (default 10), E2E_TIMEOUT seconds per scenario (default 1500), E2E_SHOTS=<dir>
 # Logs: /tmp/tt_e2e_<scenario>.log. Exit 1 if any scenario fails.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -35,6 +36,11 @@ ebenen() {  # flat map layers: water above the base ground and the landuse areas
   if timeout 300 "$G" --headless --path "$ROOT/game" -s res://test/layer_test.gd -- "$ROOT/testdata/utrecht.osm.pbf" > "$log" 2>&1 \
      && grep -q "EBENEN OK" "$log"; then echo "OK    ebenen $(grep -o 'EBENEN OK.*' "$log")"; else FAIL=1; echo "FAIL  ebenen – $log"; grep -E "EBENEN|SCRIPT ERROR" "$log" | tail -8 | sed 's/^/      /'; fi
 }
+sichtweite() {  # city meshes sit where their geometry is (visibility ranges count from the node origin, #5)
+  local log=/tmp/tt_e2e_sichtweite.log
+  if timeout 300 "$G" --headless --path "$ROOT/game" -s res://test/range_test.gd -- "$ROOT/testdata/utrecht.osm.pbf" > "$log" 2>&1 \
+     && grep -q "RANGE OK" "$log"; then echo "OK    sichtweite $(grep -o 'RANGE OK.*' "$log")"; else FAIL=1; echo "FAIL  sichtweite – $log"; grep -E "RANGE|SCRIPT ERROR" "$log" | tail -8 | sed 's/^/      /'; fi
+}
 for s in "${SCEN[@]}"; do
   case "$s" in
     smoke)  run smoke  "E2E OK" --e2e=smoke ;;
@@ -49,8 +55,9 @@ for s in "${SCEN[@]}"; do
       log=/tmp/tt_e2e_pbf.log
       if timeout 300 "$G" --headless --path "$ROOT/game" -s res://test/pbf_test.gd -- "$ROOT/testdata/utrecht.osm.pbf" > "$log" 2>&1 \
          && grep -q "PBF OK" "$log"; then echo "OK    pbf $(grep -o 'PBF OK.*' "$log")"; else FAIL=1; echo "FAIL  pbf – $log"; tail -8 "$log" | sed 's/^/      /'; fi
-      ebenen ;;
+      ebenen; sichtweite ;;
     ebenen) ebenen ;;
+    sichtweite) sichtweite ;;
     rig)  # excavator linkage + cylinders over all poses (needs the private model, skips without it)
       log=/tmp/tt_e2e_rig.log
       if timeout 300 "$G" --headless --path "$ROOT/game" -s res://test/rig_test.gd > "$log" 2>&1 \

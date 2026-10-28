@@ -30,6 +30,7 @@ Alle Punkte stammen aus echten Fehlern. Die Details und Belege stehen in `docs/l
 - **Namen wiederverwenden:** vor `queue_free()` erst `remove_child()` (queue-free-namen).
 - **Anker:** `set_anchors_preset()` setzt keine Offsets. `set_anchors_and_offsets_preset()` verwenden oder die Offsets direkt danach setzen (ui-anker).
 - **Pause:** Simulation-Nodes pausieren mit dem Baum. UI, Welt-Input und der e2e-Treiber laufen mit `PROCESS_MODE_ALWAYS`.
+- **Sichtweite:** `visibility_range_*` misst vom Ursprung des Knotens, nicht von der Geometrie. Meshes mit Weltkoordinaten an ihre Stelle setzen (sichtweite-ursprung, Test `sichtweite`).
 - **Headless** (`--headless`) rendert nicht. Screenshots gehen nur mit `tools/gd.sh run` (xvfb + Vulkan). Viewport-Texturen sind headless leer.
 - **Editor-Binary vs. Export:** Das Linux-Binary hat das Feature „editor“. Export-Verhalten (portable.txt, Daten-pck) über Schalter testbar machen, nicht über `OS.has_feature` (editor-binary).
 - **Kein override.cfg** (kein-override-cfg). Logs schreibt `GameLogger`.
