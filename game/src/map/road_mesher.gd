@@ -205,6 +205,11 @@ func _dashed(l: MeshLayer, center: PackedVector2Array, cum: PackedFloat32Array, 
 
 
 func _edge_markings(ei: int, e: Dictionary, ck: Vector2i, s0: float, s1: float) -> void:
+	# at a transition between two roads (no junction) the lines run on to the node
+	if net.nodes[e.a].get("cont", false):
+		s0 = 0.0
+	if net.nodes[e.b].get("cont", false):
+		s1 = e.len
 	var mk := layer(ck, "mark")
 	var pts: PackedVector2Array = e.pts
 	var cum: PackedFloat32Array = e.cum
@@ -348,6 +353,9 @@ func _junction(ni: int) -> void:
 		asp.polygon_up(extra, Y_ROAD, 1.0)
 	for c in n.get("crossings", []):
 		_crossing_at(layer(ck, "mark"), c.p, c.d, c.hw, c.kind)
+	# transitions between two roads (RoadNet._continuation_geometry): sidewalks along the joint line
+	for sw_strip in n.get("cont_sw", []):
+		_sidewalk_strip(ck, sw_strip[0], sw_strip[1], sw_strip[2], sw_strip[3], _area_clips(n))
 	# corner sidewalks
 	for corner in n.get("corners", []):
 		var sw: float = corner.sw

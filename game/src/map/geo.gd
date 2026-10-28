@@ -219,3 +219,32 @@ static func closest_on_polyline(pts: PackedVector2Array, cum: PackedFloat32Array
 			best_i = i
 			best_s = cum[i] + a.distance_to(q)
 	return [sqrt(best_d), best_s, best_p, best_i]
+
+
+## Like offset_polyline, but with an own offset for every point (variable road width, tapers).
+static func offset_polyline_var(pts: PackedVector2Array, offs: PackedFloat32Array, miter_limit: float = 3.0) -> PackedVector2Array:
+	var n := pts.size()
+	var out := PackedVector2Array()
+	out.resize(n)
+	for i in n:
+		var d_in := Vector2.ZERO
+		var d_out := Vector2.ZERO
+		if i > 0:
+			d_in = (pts[i] - pts[i - 1]).normalized()
+		if i < n - 1:
+			d_out = (pts[i + 1] - pts[i]).normalized()
+		if i == 0:
+			d_in = d_out
+		if i == n - 1:
+			d_out = d_in
+		var r_in := right_of(d_in)
+		var r_out := right_of(d_out)
+		var m := r_in + r_out
+		var ml := m.length()
+		if ml < 0.0001:
+			out[i] = pts[i] + r_out * offs[i]
+			continue
+		m /= ml
+		var cos_half := m.dot(r_out)
+		out[i] = pts[i] + m * offs[i] / maxf(cos_half, 1.0 / miter_limit)
+	return out

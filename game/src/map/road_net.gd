@@ -21,6 +21,7 @@ const CORNER_RADIUS := {9: 14.0, 8: 12.0, 7: 10.0, 6: 9.0, 5: 8.0, 4: 7.0, 3: 6.
 const SHARP_MIN := 0.35       # below this angle (rad) between two roads their curbs meet in a point (a Y)
 const CORNER_REACH := 35.0    # curb corners further out than this along a road are not built (near-parallel roads)
 const PATH_HALF_W := 1.3      # junction asphalt reaches at least this far to each side of a turn path
+const CLOSE_R := 2.0          # junction areas built by union are closed by this radius (no notches, slivers)
 const DEFAULT_SPEED_KMH := {
 	"motorway": 100, "trunk": 70, "primary": 50, "secondary": 50, "tertiary": 50, "busway": 50,
 	"unclassified": 50, "residential": 30, "road": 30, "living_street": 10, "service": 20,
@@ -103,6 +104,7 @@ func build(data: OsmData, hq: Dictionary = {}) -> void:
 		if group_count > 0:
 			_compact()
 	timings["merge"] = Time.get_ticks_msec() - t
+	_smooth_continuations()
 	_mark_crossings(data)
 	t = Time.get_ticks_msec()
 	_junction_geometry()
@@ -565,6 +567,9 @@ func _junction_geometry() -> void:
 		var k: int = n.ends.size()
 		if k < 2:
 			continue
+		if n.get("cont", false):
+			_continuation_geometry(n)
+			continue
 		var st := star(ni)
 		var infos: Array = st.infos
 		var corners: Array = st.corners
@@ -579,6 +584,11 @@ func _junction_geometry() -> void:
 				e.trim_a = inf.s
 			else:
 				e.trim_b = inf.s
+			# the cut as the road mesh has it: point and direction on the real centre line, so that
+			# the junction area meets the road surface exactly (no step on curved roads)
+			var smp := Geo.sample(e.pts, e.cum, inf.s if inf.start else e.len - inf.s)
+			inf["q"] = smp[0]
+			inf["qd"] = smp[1] if inf.start else -(smp[1] as Vector2)
 		# polygon
 		var poly := PackedVector2Array()
 		var corner_curves: Array = []
@@ -588,9 +598,9 @@ func _junction_geometry() -> void:
 			var B: Dictionary = infos[(i + 1) % k]
 			var nA := Geo.right_of(A.d)
 			var nB := Geo.right_of(B.d)
-			var a_left: Vector2 = A.p + A.d * A.s - nA * A.hw
-			var a_right: Vector2 = A.p + A.d * A.s + nA * A.hw
-			var b_left: Vector2 = B.p + B.d * B.s - nB * B.hw
+			var a_left: Vector2 = A.q - Geo.right_of(A.qd) * A.hw
+			var a_right: Vector2 = A.q + Geo.right_of(A.qd) * A.hw
+			var b_left: Vector2 = B.q - Geo.right_of(B.qd) * B.hw
 			poly.append(a_left)
 			poly.append(a_right)
 			var curve := PackedVector2Array([a_right])
@@ -657,6 +667,136 @@ func _clear_inner_pieces(n: Dictionary, infos: Array) -> void:
 			s += 0.5
 
 
+## A node with only two roads is no junction: the road just changes its cross section (lanes,
+## sidewalks, name) or is split there. Its corner is rounded off here (quadratic curve through the
+## node), and _continuation_geometry builds a smooth transition instead of a junction area.
+func _smooth_continuations() -> void:
+	for ni in nodes.size():
+		var n: Dictionary = nodes[ni]
+		if n.ends.size() != 2 or n.has("group"):
+			continue
+		var ra: int = n.ends[0]
+		var rb: int = n.ends[1]
+		if (ra >> 1) == (rb >> 1):
+			continue
+		var pa := _pts_from_node(ra)
+		var pb := _pts_from_node(rb)
+		var cuma := Geo.cumulative(pa)
+		var cumb := Geo.cumulative(pb)
+		var la: float = cuma[cuma.size() - 1]
+		var lb: float = cumb[cumb.size() - 1]
+		if la < 0.5 or lb < 0.5:
+			continue
+		var da: Vector2 = (Geo.sample(pa, cuma, minf(6.0, la * 0.3))[0] - pa[0]).normalized()
+		var db: Vector2 = (Geo.sample(pb, cumb, minf(6.0, lb * 0.3))[0] - pb[0]).normalized()
+		var turn := absf((-da).angle_to(db))   # 0 = straight on
+		if turn > deg_to_rad(100.0):
+			continue   # hairpin: keep the plain junction corner
+		n["cont"] = true
+		if turn < deg_to_rad(3.0):
+			continue
+		var c: float = minf(minf(la, lb) * 0.3, clampf(turn * 12.0, 2.0, 10.0))
+		var qa: Vector2 = Geo.sample(pa, cuma, c)[0]
+		var qb: Vector2 = Geo.sample(pb, cumb, c)[0]
+		var J: Vector2 = pa[0]
+		var curve := PackedVector2Array()
+		for i in 9:
+			var t := i / 8.0
+			curve.append(qa * (1.0 - t) * (1.0 - t) + J * 2.0 * (1.0 - t) * t + qb * t * t)
+		var new_a := PackedVector2Array([curve[4], curve[3], curve[2], curve[1]])
+		new_a.append_array(Geo.sub_polyline(pa, cuma, c, la))
+		var new_b := PackedVector2Array([curve[4], curve[5], curve[6], curve[7]])
+		new_b.append_array(Geo.sub_polyline(pb, cumb, c, lb))
+		_set_pts_from_node(ra, new_a)
+		_set_pts_from_node(rb, new_b)
+		n.pos = curve[4]
+
+
+## Centre line of the road at end `er`, starting at its node.
+func _pts_from_node(er: int) -> PackedVector2Array:
+	var e: Dictionary = edges[er >> 1]
+	var pts: PackedVector2Array = e.pts.duplicate()
+	if (er & 1) == 1:
+		pts.reverse()
+	return pts
+
+
+func _set_pts_from_node(er: int, pts: PackedVector2Array) -> void:
+	var e: Dictionary = edges[er >> 1]
+	var p := pts.duplicate()
+	if (er & 1) == 1:
+		p.reverse()
+	e.pts = p
+	e.cum = Geo.cumulative(p)
+	e.len = e.cum[e.cum.size() - 1]
+
+
+## Transition at a node with two roads: both are cut back a little (more if the width changes, so
+## that it changes gradually: 2.5 m per metre of width, at most 12 m each), and the piece between
+## them follows the joint centre line with width and sidewalks running from one road's to the other's.
+func _continuation_geometry(n: Dictionary) -> void:
+	var ra: int = n.ends[0]
+	var rb: int = n.ends[1]
+	var A: Dictionary = edges[ra >> 1]
+	var B: Dictionary = edges[rb >> 1]
+	var a_start := (ra & 1) == 0
+	var b_start := (rb & 1) == 0
+	var cut := clampf(2.5 * absf(A.width - B.width) + 1.5, 1.5, 12.0)
+	var sa: float = minf(cut, A.len * 0.45)
+	var sb: float = minf(cut, B.len * 0.45)
+	if a_start:
+		A.trim_a = sa
+	else:
+		A.trim_b = sa
+	if b_start:
+		B.trim_a = sb
+	else:
+		B.trim_b = sb
+	# joint centre line from the cut on A through the node to the cut on B
+	var pa := _pts_from_node(ra)
+	var pb := _pts_from_node(rb)
+	var P := Geo.sub_polyline(pa, Geo.cumulative(pa), 0.0, sa)
+	P.reverse()
+	var tail := Geo.sub_polyline(pb, Geo.cumulative(pb), 0.0, sb)
+	for i in range(1, tail.size()):
+		P.append(tail[i])
+	P = Geo.densify(P, 1.0)
+	var cum := Geo.cumulative(P)
+	var L: float = cum[cum.size() - 1]
+	# P runs from A towards B: A's right side is P's right side if the node is A's b end
+	var a_r: float = A.sw_r if not a_start else A.sw_l
+	var a_l: float = A.sw_l if not a_start else A.sw_r
+	var b_r: float = B.sw_r if b_start else B.sw_l
+	var b_l: float = B.sw_l if b_start else B.sw_r
+	var hw := PackedFloat32Array()
+	var out_r := PackedFloat32Array()
+	var out_l := PackedFloat32Array()
+	for i in P.size():
+		var f := smoothstep(0.0, maxf(L, 0.01), cum[i])
+		var h: float = lerpf(A.width, B.width, f) * 0.5
+		hw.append(h)
+		out_r.append(h + lerpf(a_r, b_r, f))
+		out_l.append(-(h + lerpf(a_l, b_l, f)))
+	var neg := PackedFloat32Array()
+	for h in hw:
+		neg.append(-h)
+	var right := Geo.offset_polyline_var(P, hw)
+	var left := Geo.offset_polyline_var(P, neg)
+	var poly := left.duplicate()
+	var rr := right.duplicate()
+	rr.reverse()
+	poly.append_array(rr)
+	n.polygon = poly
+	n.corners = []
+	n.infos = []
+	var sws: Array = []
+	if a_r > 0.0 or b_r > 0.0:
+		sws.append([right, Geo.offset_polyline_var(P, out_r), P, true])
+	if a_l > 0.0 or b_l > 0.0:
+		sws.append([left, Geo.offset_polyline_var(P, out_l), P, false])
+	n["cont_sw"] = sws
+
+
 ## On the outer side of a bend (more than 180° between two neighbouring roads) the two curbs meet in
 ## a point behind the cuts. A straight line between the cuts would cut into the carriageway, so the
 ## polygon and the corner sidewalk go through that point. Returns null if there is no such point.
@@ -706,7 +846,7 @@ func _group_pieces(n: Dictionary, star_poly: PackedVector2Array, infos: Array, w
 
 
 ## After the turn paths exist: the area of each merged junction group is the union of its pieces and
-## of every turn path widened to a lane, closed by 1 m so that slivers between the pieces disappear.
+## of every turn path widened to a lane, closed by CLOSE_R so that slivers and notches disappear.
 ## Holes larger than 20 m² (islands) stay. A plain junction keeps its star polygon unless a turn path
 ## leaves it (odd angles, different road widths); then it is built the same way.
 func _finish_groups() -> void:
@@ -760,9 +900,9 @@ func _group_polygon(n: Dictionary, pieces: Array) -> void:
 	for o in outers:
 		if absf(Geo.polygon_area(o)) > absf(Geo.polygon_area(best)):
 			best = o
-	var grown := Geometry2D.offset_polygon(best, 1.0, Geometry2D.JOIN_ROUND)
+	var grown := Geometry2D.offset_polygon(best, CLOSE_R, Geometry2D.JOIN_ROUND)
 	if grown.size() >= 1:
-		var shrunk := Geometry2D.offset_polygon(grown[0], -1.0, Geometry2D.JOIN_ROUND)
+		var shrunk := Geometry2D.offset_polygon(grown[0], -CLOSE_R, Geometry2D.JOIN_ROUND)
 		if shrunk.size() >= 1 and not Geometry2D.is_polygon_clockwise(shrunk[0]):
 			best = shrunk[0]
 	var holes: Array = []
