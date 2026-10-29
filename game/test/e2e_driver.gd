@@ -135,6 +135,8 @@ func _process(delta: float) -> void:
 			_absperrung_test(delta)
 		"gelaende":
 			_gelaende_test(delta)
+		"ansichten":
+			_ansichten()
 		"vollsperrung":
 			_vollsperrung_test(delta)
 		"umbau":
@@ -621,6 +623,16 @@ func _repro(_delta: float) -> void:
 				get_tree().quit(0)
 var _pin_i := 0
 var _view_i := 0
+
+
+## Pictures of any places on any map, e.g. a fixture with ground heights:
+## --autostart --fixture=utrecht --terrain=synthetic --e2e=ansichten --shots=<dir> --views=… (as for repro).
+func _ansichten() -> void:
+	if t < 2.0 or not shot_queue.is_empty():
+		return
+	if not _repro_view():
+		print("E2E OK ansichten")
+		get_tree().quit(0)
 
 
 ## Extra pictures for a repro: --views=x,z,dist,yaw,pitch[,ohne][,unter]|... ("ohne" hides the buildings,
