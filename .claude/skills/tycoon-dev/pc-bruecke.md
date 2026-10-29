@@ -34,7 +34,7 @@ Der PC-Ordner ist ein Git-Klon (Branch main). Dort wird **nicht** entwickelt und
    - Die Sperre verfällt nach 30 min ohne Lebenszeichen.
 2. Prüfen, was auf dem PC liegt: `cat "$HOME/mnt/Tiefbau Tycoon/build/main/VERSION.txt"`. Liegt dort schon ein Stand, der den eigenen enthält, nichts tun. Prüfen mit `git merge-base --is-ancestor <eigener-commit> <pc-commit>`.
 3. Mit `tools/build.sh build/main` aus dem aktuellen `origin/main` bauen, nicht aus dem eigenen Branch.
-4. `BaustellenManager.pck`, `LIESMICH.txt` und `portable.txt` übertragen. Das Daten-pck nur, wenn `daten.hash` sich unterscheidet. `VERSION.txt` zuletzt, denn sie markiert den vollständigen Stand.
+4. `BaustellenManager.pck`, `LIESMICH.txt` und `portable.txt` übertragen. Das Daten-pck nur, wenn `daten.hash` sich unterscheidet **und** die Assets im Container nicht älter sind als auf dem PC (Lektion daten-pck-aelter: `ls game/assets/consim` vergleichen). `VERSION.txt` zuletzt, denn sie markiert den vollständigen Stand.
 5. `python3 $I unlock build-main --session S`.
 
 ## Lesen (PC → Container)

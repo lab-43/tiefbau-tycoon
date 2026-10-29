@@ -87,7 +87,7 @@ description: Use this skill to set up, check, test, build or deliver the Tiefbau
 Details und Stolperfallen stehen in [pc-bruecke.md](pc-bruecke.md). Kurz:
 - **Testversion:** nach `build/issue-<n>/` auf dem PC (`BaustellenManager.pck`, `Starten.cmd`, `LIESMICH.txt`, `portable.txt`).
 - **Stand von main:** nach `build/main/`, nur aus main und nur nach erfolgreichem Zusammenführen.
-  - Das Daten-pck nur übertragen, wenn sich `daten.hash` unterscheidet.
+  - Das Daten-pck nur übertragen, wenn sich `daten.hash` unterscheidet und die eigenen Assets nicht älter sind (Lektion daten-pck-aelter).
 - Spielstände, Karten, Meldungen und Logs liegen in `Tiefbau Tycoon/userdata/` und werden nie überschrieben.
 
 ## 7. Abschluss
