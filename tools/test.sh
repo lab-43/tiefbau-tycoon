@@ -1,11 +1,12 @@
 #!/bin/bash
 # Runs end-to-end scenarios headless on the offline Utrecht map and reports pass/fail.
 # usage: tools/test.sh [scenario ...]            default: smoke issue
-#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren debug leuchten verkehrslichter rig schaufel altstand markierungen absperrung gelaende vollsperrung umbau fahrzeuge  (save+load = save mid-dig,
+#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren debug leuchten verkehrslichter rig schaufel altstand markierungen absperrung gelaende vollsperrung umbau fahrzeuge baeume  (save+load = save mid-dig,
 #              then load and finish; rig = excavator linkage/cylinders, see game/test/rig_test.gd;
 #              schaufel = soil in the bucket (game/test/bucket_test.gd, stand-in model always, real model if present);
 #              ebenen = height order of flat map layers, see game/test/layer_test.gd – also part of pbf;
 #              sichtweite = city meshes sit at their chunk (visibility ranges), game/test/range_test.gd – also part of pbf;
+#              baeume = no tree on the asphalt, few real trees dropped (#30), game/test/tree_test.gd – also part of pbf;
 #              fahren = calm driving: no twitching cars, no racing through bends, game/test/drive_test.gd on testdata/kreuzungen)
 #   env: E2E_SPEED (default 10), E2E_TIMEOUT seconds per scenario (default 1500), E2E_SHOTS=<dir>
 # Logs: /tmp/tt_e2e_<scenario>.log. Exit 1 if any scenario fails.
@@ -43,6 +44,11 @@ sichtweite() {  # city meshes sit where their geometry is (visibility ranges cou
   if timeout 300 "$G" --headless --path "$ROOT/game" -s res://test/range_test.gd -- "$ROOT/testdata/utrecht.osm.pbf" > "$log" 2>&1 \
      && grep -q "RANGE OK" "$log"; then echo "OK    sichtweite $(grep -o 'RANGE OK.*' "$log")"; else FAIL=1; echo "FAIL  sichtweite – $log"; grep -E "RANGE|SCRIPT ERROR" "$log" | tail -8 | sed 's/^/      /'; fi
 }
+baeume() {  # trees stand beside the road, not on the asphalt (#30)
+  local log=/tmp/tt_e2e_baeume.log
+  if timeout 400 "$G" --headless --path "$ROOT/game" -s res://test/tree_test.gd -- "$ROOT/testdata/utrecht.osm.pbf" > "$log" 2>&1 \
+     && grep -q "BAEUME OK" "$log"; then echo "OK    baeume $(grep -o 'BAEUME OK.*' "$log") – $(grep -o 'BAEUME [0-9].*' "$log" | cut -c8-110)"; else FAIL=1; echo "FAIL  baeume – $log"; grep -E "BAEUME|SCRIPT ERROR" "$log" | tail -8 | sed 's/^/      /'; fi
+}
 fahren() {  # traffic on the junction fixtures: twitches and too fast bends per km (#5)
   local log=/tmp/tt_e2e_fahren.log
   if timeout 600 "$G" --headless --path "$ROOT/game" res://test/drive_test.tscn -- --fixtures="$ROOT/testdata/kreuzungen" > "$log" 2>&1 \
@@ -65,8 +71,9 @@ for s in "${SCEN[@]}"; do
       log=/tmp/tt_e2e_pbf.log
       if timeout 300 "$G" --headless --path "$ROOT/game" -s res://test/pbf_test.gd -- "$ROOT/testdata/utrecht.osm.pbf" > "$log" 2>&1 \
          && grep -q "PBF OK" "$log"; then echo "OK    pbf $(grep -o 'PBF OK.*' "$log")"; else FAIL=1; echo "FAIL  pbf – $log"; tail -8 "$log" | sed 's/^/      /'; fi
-      ebenen; sichtweite ;;
+      ebenen; sichtweite; baeume ;;
     ebenen) ebenen ;;
+    baeume) baeume ;;
     sichtweite) sichtweite ;;
     fahren) fahren ;;
     rig)  # excavator linkage + cylinders over all poses, A 918 and R 938 (needs the private models, skips without)

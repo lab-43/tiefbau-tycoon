@@ -270,3 +270,10 @@ Fahrzeuge (Kolonnenbus, Pritsche, Kipper, Sattelzug mit Tieflader, Mobilbagger):
 - **Ersatzmodelle** ohne private Assets (CI): Raupenbagger mit zwei Kettenblöcken, Kompaktlader, Semi-Tieflader, Kipper mit Kranblock, schwerer Sattelschlepper.
 - **Test:** `tools/test.sh fahrzeuge` (kaufen, Räder/Ketten am Boden, Lichtmarker an der Oberfläche, Gelenkgrenzen, R 938 und S550 auf den Nooteboom und zurück, 32-t-Tieflader lehnt ab, R 938 wird per Tieflader zur Baustelle gebracht und hebt den Graben aus, Bilder bei Tag und Nacht). `rig` und `schaufel` prüfen auch den R 938.
 - **Bewusst noch nicht:** Ketten ohne Animation, Rohrtausch mit dem Kran (Meldung #16), Kompaktlader beim Verfüllen, neue Auftragsarten (eigene Meldungen).
+
+## Bäume und Laternen neben der Fahrbahn (#30)
+
+- Echte Bäume (Hamburg: Straßenbaumkataster in OSM) standen oft auf der gezeichneten Fahrbahn, weil das Spiel Parkstreifen als Asphalt zeichnet und Breiten schätzt. Beim Aufbereiten rückt `CityMesher` jeden echten Baum, der auf Fahrbahn oder Kreuzungsfläche steht, auf kürzestem Weg 1 m hinter die Bordsteinkante (höchstens 5 m weit), sonst fällt er weg. Zufällige Park-, Wald- und Straßenbäume und die Laternen landen gar nicht erst auf Asphalt; erfundene Straßenbäume halten 6 m Abstand zu echten. Grundlage ist `AsphaltIndex` (`src/map/asphalt_index.gd`).
+- Hamburg (6 × 6 km um die Zentrale): 18 309 echte Bäume, 1664 an den Rand gerückt, 125 weggelassen (meist in großen zusammengefassten Kreuzungen oder zwischen zwei parallelen Straßen, deren gezeichnete Fahrbahnen den Grünstreifen überdecken). Danach steht kein Baum mehr auf Asphalt. Das Ladeprotokoll zeigt die Zahlen.
+- Kartenversion 10 (`BAKE_VERSION`): Gespeicherte Karten werden einmal neu aufbereitet.
+- Test: `tools/test.sh baeume` (auch bei `pbf`).

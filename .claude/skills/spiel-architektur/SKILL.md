@@ -32,7 +32,7 @@ Autoloads (`project.godot`):
     - Abbiegewege: Gerade–Bogen–Gerade mit größtem Radius (`turn_path`), gerade Fahrt zur seitlich nächsten Spur (`_nearest_out_lane`),
     - Prüfstand für alles hier: `tools/kreuzungen.sh` (Skill tycoon-dev),
   - `RoadMesher` (Fahrbahn, Gehweg, Bordstein, Markierung entlang der Straßen, Halt-/Wartelinien) mit `RoadMarkings` (Linien durch Übergänge und Gruppen, Knotenpunkt-Leitlinien, Richtungspfeile, Sperrflächen; Maße nach RMS als Konstanten, Lektion markierungen-rms),
-  - `CityMesher` (Gebäude, Flächen, Wasser, Bäume, Laternen),
+  - `CityMesher` (Gebäude, Flächen, Wasser, Bäume, Laternen); Bäume und Laternen nie auf die Fahrbahn: `AsphaltIndex` (`on_asphalt`, `clear_spot` rückt echte Bäume an den Rand, Lektion objekte-neben-der-fahrbahn),
   - je Chunk ein `MeshLayer` pro Material aus `Mats`.
 - **Koordinaten:** `Geo.to_local(lat, lon)` → `Vector2(x, z)`, x = Ost, z = Süd.
 - **Geländehöhen (#8):** `TerrainSource` lädt Höhenkacheln (Mapterhorn), `TerrainBake` macht daraus im Bake das 5-m-Raster `Terrain` (Wasser flach, Hof eben, Brückendecks). Höhe holen: `Terrain.at(p)` (Boden), `Terrain.near(p, y)` (Boden oder Brücke, je nachdem was näher an y liegt), `Terrain.piece_y(piece, p)` (Routenstück), in Baustellen `Site.gw(p, y)`. Kartenebenen-Shader rechnen die Höhe pro Pixel aus (`terrain_depth`); Fahrbahn, Gehweg und Markierung auf Brücken liegen in eigenen Ebenen `*_deck`, die nur angehoben werden (`terrain_depth_deck`). Mausklicks treffen mit `Terrain.top(p)` auch Brücken. Ohne Höhen (offline, Testkarte) ist alles 0. Neue Weltpunkte nie mit fester Höhe bauen (Lint-Regel gelaende-hoehen).

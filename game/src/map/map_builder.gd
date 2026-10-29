@@ -4,7 +4,7 @@ extends RefCounted
 ## The scene-tree part (creating MeshInstances) happens on the main thread in build_scene().
 
 const CHUNK := 500.0
-const BAKE_VERSION := 9   # 4: water on top of the base ground, no bank walls (#4); 5: merged junctions (#5); 6: smooth transitions (#5); 7: arc turn paths, islands (#5); 8: ground heights (#8); 9: markings after RMS (#5)
+const BAKE_VERSION := 10  # 4: water on top of the base ground, no bank walls (#4); 5: merged junctions (#5); 6: smooth transitions (#5); 7: arc turn paths, islands (#5); 8: ground heights (#8); 9: markings after RMS (#5); 10: trees off the road (#30)
 const GROUND_Y := 0.0     # opaque base ground plane; flat map layers below it are invisible (test/layer_test.gd)
 
 var progress := 0.0
@@ -102,12 +102,15 @@ func bake(meta: Dictionary, osm_dir: String, pbf := "") -> Dictionary:
 	cm.progress_cb = func(f: float, part: String): set_step("Stadt modellieren: %s" % part, _p(0.70 + 0.2 * f))
 	cm.build_all()
 	note("Stadt modelliert: %d Kacheln" % cm.chunks.size())
+	if int(cm.tree_stats.get("osm", 0)) > 0:
+		note("Bäume: %d aus OpenStreetMap, %d von der Fahrbahn an den Rand gerückt, %d mitten auf der Straße weggelassen" % [cm.tree_stats.osm, cm.tree_stats.moved, cm.tree_stats.dropped])
 	if terrain:
 		set_step("Boden modellieren", _p(0.88))
 		TerrainBake.ground_layers(terrain, cm.chunks, CHUNK, data.bounds.position, float(meta.size_m))
 	set_step("Fertigstellen", _p(0.90))
 	result = {"net": net, "roads": rm.chunks, "city": cm.chunks, "trees": cm.trees, "lamps": cm.lamps,
-		"bounds": data.bounds, "hq": hq, "stats": data.stats, "bus_stops": data.bus_stops, "terrain": terrain}
+		"bounds": data.bounds, "hq": hq, "stats": data.stats, "bus_stops": data.bus_stops, "terrain": terrain,
+		"tree_stats": cm.tree_stats}
 	set_step("Fertig", 1.0)
 	return result
 

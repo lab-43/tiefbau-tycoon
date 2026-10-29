@@ -20,6 +20,16 @@ var lamps := {}          # Vector2i -> Array[Transform3D]
 var hq_rect := PackedVector2Array()
 var rng := RandomNumberGenerator.new()
 var terrain: Terrain = null   # ground heights (#8); null = flat map
+var tree_stats := {}          # real (OSM) trees: count, moved off the road, dropped (#30, loading log)
+
+# Trees off the road (#30): a real tree on the carriageway moves out to this far beside the curb, unless
+# that is further than TREE_MAX_SHIFT away (then it is a mapping error far inside the road and is dropped).
+const TREE_CURB_MARGIN := 1.0
+const TREE_MAX_SHIFT := 5.0
+const REAL_TREE_CELL := 8.0
+const STREET_TREE_GAP := 6.0   # made-up street trees keep this far from real ones
+var _asphalt: AsphaltIndex
+var _real_trees := {}         # Vector2i (REAL_TREE_CELL cells) -> Array[Vector2]
 
 
 func _init(d: OsmData, n: RoadNet, chunk: float) -> void:
@@ -267,8 +277,25 @@ func _add_tree(p: Vector2, scale: float) -> void:
 
 
 func _trees() -> void:
+	# Real trees (Hamburg maps every street tree, often in the parking strip between the bays) stand where
+	# the game draws a wider carriageway: move them out to the sidewalk, drop the few deep in the road (#30).
+	_asphalt = AsphaltIndex.new(net, terrain)
+	var moved := 0
+	var dropped := 0
 	for t in data.trees:
-		_add_tree(t, rng.randf_range(0.8, 1.25))
+		var sc := rng.randf_range(0.8, 1.25)
+		var spot = _asphalt.clear_spot(t, TREE_CURB_MARGIN, TREE_MAX_SHIFT)
+		if spot == null:
+			dropped += 1
+			continue
+		if spot != t:
+			moved += 1
+		_add_tree(spot, sc)
+		var rc := Vector2i(int(floor(spot.x / REAL_TREE_CELL)), int(floor(spot.y / REAL_TREE_CELL)))
+		if not _real_trees.has(rc):
+			_real_trees[rc] = []
+		_real_trees[rc].append(spot)
+	tree_stats = {"osm": data.trees.size(), "moved": moved, "dropped": dropped}
 	for a in data.areas:
 		var density := 0.0
 		match a.kind:
@@ -291,7 +318,7 @@ func _trees() -> void:
 		while placed < count and tries < count * 4:
 			tries += 1
 			var p := Vector2(rng.randf_range(r.position.x, r.end.x), rng.randf_range(r.position.y, r.end.y))
-			if Geometry2D.is_point_in_polygon(p, outer):
+			if Geometry2D.is_point_in_polygon(p, outer) and not _asphalt.on_asphalt(p):
 				_add_tree(p, rng.randf_range(0.75, 1.3))
 				placed += 1
 	# street trees along residential streets with sidewalks
@@ -307,10 +334,23 @@ func _trees() -> void:
 				var smp := Geo.sample(e.pts, e.cum, s)
 				var r := Geo.right_of(smp[1])
 				var off: float = e.width * 0.5 + (e.sw_r if side > 0 else e.sw_l) * 0.5
-				if (side > 0 and e.sw_r > 0) or (side < 0 and e.sw_l > 0):
-					_add_tree(smp[0] + r * off * side, rng.randf_range(0.7, 1.05))
+				var p: Vector2 = smp[0] + r * off * side
+				if ((side > 0 and e.sw_r > 0) or (side < 0 and e.sw_l > 0)) and not _asphalt.on_asphalt(p) \
+						and not _near_real_tree(p):
+					_add_tree(p, rng.randf_range(0.7, 1.05))
 			s += rng.randf_range(10.0, 16.0)
 			side = -side
+
+
+## True if a real (OSM) tree stands within STREET_TREE_GAP of p.
+func _near_real_tree(p: Vector2) -> bool:
+	var c := Vector2i(int(floor(p.x / REAL_TREE_CELL)), int(floor(p.y / REAL_TREE_CELL)))
+	for dx in range(-1, 2):
+		for dz in range(-1, 2):
+			for q in _real_trees.get(c + Vector2i(dx, dz), []):
+				if (q as Vector2).distance_to(p) < STREET_TREE_GAP:
+					return true
+	return false
 
 
 func _lamps() -> void:
@@ -330,6 +370,9 @@ func _lamps() -> void:
 				var sw: float = e.sw_r if sd > 0 else e.sw_l
 				var off: float = e.width * 0.5 + (sw - 0.45 if sw > 0.0 else 0.6)
 				var p: Vector2 = smp[0] + r * off * sd
+				# not on a neighbouring road or junction area (#30); lamps on a bridge deck may stand above one
+				if _asphalt != null and not (terrain != null and terrain.decks.has(ei)) and _asphalt.on_asphalt(p):
+					continue
 				var ck := chunk_of(p)
 				if not lamps.has(ck):
 					lamps[ck] = []
