@@ -88,16 +88,16 @@ static func new_offer() -> String:
 
 
 ## Places a contract with its trench at world point p (x, z). accept: take it on immediately.
-static func place_job_at(p: Vector2, accept := true) -> String:
-	return try_place_job_at(p, accept).msg
+static func place_job_at(p: Vector2, accept := true, pipe_i := -1) -> String:
+	return try_place_job_at(p, accept, pipe_i).msg
 
 
-## Like place_job_at, returns {ok: bool, msg: String}.
-static func try_place_job_at(p: Vector2, accept := true) -> Dictionary:
+## Like place_job_at, returns {ok: bool, msg: String}. pipe_i: JobManager.PIPES index (-1: random).
+static func try_place_job_at(p: Vector2, accept := true, pipe_i := -1) -> Dictionary:
 	var w := _world()
 	if w == null:
 		return {"ok": false, "msg": "Keine Welt"}
-	var r: Dictionary = w.jobs.offer_at(p)
+	var r: Dictionary = w.jobs.offer_at(p, pipe_i)
 	if r.has("error"):
 		return {"ok": false, "msg": _say(r.error, false)}
 	var j: Job = r.job

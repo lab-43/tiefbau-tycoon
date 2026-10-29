@@ -6,6 +6,7 @@ extends Control
 const W := 318
 const LIGHT := [["Uhr", -1.0], ["Tag", 12.0], ["Abend", 20.6], ["Nacht", 23.5]]
 const TRAFFIC := [["Aus", 0.0], ["50 %", 0.5], ["100 %", 1.0], ["200 %", 2.0]]
+const PLACE_HINT := "Die Grube hängt am Mauszeiger: orange = passt, rot = passt nicht. Linksklick setzt den Auftrag, Rechtsklick bricht ab."
 
 var panel: PanelContainer
 var _time_lbl: Label
@@ -114,7 +115,7 @@ func _build_panel() -> void:
 	_accept_chk.focus_mode = Control.FOCUS_NONE
 	pr.add_child(_accept_chk)
 	v.add_child(pr)
-	_place_hint = UI.label("Linksklick auf eine Straße setzt den Graben dorthin. Rechtsklick bricht ab.", 12, UI.ACCENT)
+	_place_hint = UI.label(PLACE_HINT, 12, UI.ACCENT)
 	_place_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_place_hint.visible = false
 	v.add_child(_place_hint)
@@ -198,13 +199,17 @@ func _start_place() -> void:
 		return
 	_tool = PlaceJobTool.new()
 	_tool.done.connect(_on_place_done)
+	_tool.preview_changed.connect(_on_preview_changed)
 	Game.world.tool = _tool
+	_place_hint.text = PLACE_HINT
 	_place_hint.visible = true
 
 
 func _cancel_place() -> void:
 	if Game.world and Game.world.tool == _tool and _tool != null:
 		Game.world.tool = null
+	if _tool != null:
+		_tool.dispose()
 	_tool = null
 	if _place_btn:
 		_place_btn.set_pressed_no_signal(false)
@@ -214,7 +219,7 @@ func _cancel_place() -> void:
 
 func _on_place_done(p: Variant) -> void:
 	# a click on an unsuitable spot keeps the mode on, so the next click can try elsewhere
-	if p is Vector2 and not DebugTools.try_place_job_at(p, _accept_chk.button_pressed).ok:
+	if p is Vector2 and not DebugTools.try_place_job_at(p, _accept_chk.button_pressed, _tool.pipe_i if _tool else -1).ok:
 		return
 	_cancel_place()
 	_refresh()
@@ -231,6 +236,8 @@ func _process(delta: float) -> void:
 		_cancel_place()
 		return
 	_t += delta / maxf(Engine.time_scale, 0.001)   # real time, independent of game speed
+	if _tool != null:
+		_tool.update_preview()
 	if _t >= 0.25:
 		_t = 0.0
 		_refresh()
@@ -292,3 +299,10 @@ func _unhandled_key_input(ev: InputEvent) -> void:
 	if _tool and ev is InputEventKey and ev.pressed and ev.keycode == KEY_ESCAPE:
 		_cancel_place()
 		get_viewport().set_input_as_handled()
+
+
+func _on_preview_changed(text: String, ok: bool) -> void:
+	if _place_hint == null:
+		return
+	_place_hint.text = PLACE_HINT if text == "" else text
+	_place_hint.add_theme_color_override("font_color", UI.ACCENT if ok or text == "" else UI.ERROR)

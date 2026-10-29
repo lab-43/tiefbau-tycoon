@@ -127,6 +127,12 @@ func _autostart() -> void:
 		if a.begins_with("--hq="):
 			var p := a.substr(5).split(",")
 			hq = Vector2(float(p[0]), float(p[1]))
+		elif a.begins_with("--map="):
+			# a map that is already in the maps folder (e.g. copied from Jonathan's PC), with its own HQ
+			var mj = JSON.parse_string(FileAccess.get_file_as_string(Game.MAPS_DIR.path_join(a.substr(6)).path_join("map.json")))
+			if mj is Dictionary:
+				start_new("Muster Tiefbau GmbH", mj)
+				return
 	meta["hq"] = {"x": hq.x, "z": hq.y}
 	start_new("Muster Tiefbau GmbH", meta)
 

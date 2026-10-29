@@ -16,6 +16,16 @@ const TWO_WAY_GAP := 2.5       # m between the two traffic paths for both direct
 const EXC_REACH_DIG := 7.4     # m from the turret axis to the trench floor at its far end (measured with the rig, #22)
 const EXC_REACH := 8.2         # m from the turret axis to a tipper body or the top of the pile
 const EXC_REAR := 2.0          # m from the turret axis back to the excavator's rear (keep it off the trench)
+# placing anywhere (#33): only the pit itself has to fit; the closure template squeezes to the lane
+const PIT_GAP := 1.5           # m between the pit and either end of the lane (the junction area)
+const HEAD_MIN := 0.5          # nothing of the closure on K before this s (the lane starts at the junction)
+const REV_ROOM := 8.0          # m on K after the detour where tippers and the excavator stop to reverse in
+const TAPER_OUT_MIN := 2.0
+const DET_OUT_MIN := 1.0
+const TRENCH_BEND := 12.0      # degrees the lane may turn along the trench (it is dug as a straight box)
+const VAN_APPR_MIN := 6.0      # shortest pull-over of the crew van to its kerb spot
+const VAN_EXIT_GAP := 4.5      # m between a van in front of the closure and the start of the detour
+const VAN_EXIT_MIN := 3.0      # m a van behind the site needs to pull out into the lane
 
 var net: RoadNet
 var key := -1
@@ -63,6 +73,11 @@ var pile_lat := 0.0
 var stage0 := -1.0             # first waiting spot behind the site (-1: automatic, 10 m after the detour)
 var _def_tc := 0.0
 var error := ""
+var taper_out := TAPER_OUT     # length of the tail taper (shorter near the end of the lane, #33)
+var det_out := 5.0             # m from the tail taper to the end of the detour
+var squeezed := false          # the template is shorter than the standard one (close to a junction)
+var anchor_s := 0.0            # the s0 the job was made with (trench at anchor_s + TAPER + HEAD_GAP)
+var _def := {}                 # traffic geometry of the template (setup), the base of every player plan
 
 # machine geometry (from the extracted assets; fallbacks if missing)
 var exc_turret_z := 0.17
@@ -112,30 +127,49 @@ func setup(n: RoadNet, k: int, start_s: float, length: float, width: float, dep:
 	if meta.has("bbox_max"):
 		tip_rear = float(meta.bbox_max[2])
 		tip_front = -float(meta.bbox_min[2])
-	# positions
-	s_c0 = s0 + TAPER
-	s_t0 = s_c0 + HEAD_GAP
+	# positions: the pit stays where the job put it, the template around it squeezes to the lane (#33)
+	anchor_s = start_s
+	squeezed = false
+	s_t0 = start_s + TAPER + HEAD_GAP
 	s_t1 = s_t0 + L
+	if s_t0 < PIT_GAP or s_t1 > len_k - PIT_GAP:
+		error = "Grube ragt in die Kreuzung"
+		return false
+	if absf(lane_dir(s_t0).angle_to(lane_dir(s_t1))) > deg_to_rad(TRENCH_BEND):
+		error = "Graben in einer engen Kurve"
+		return false
+	s_c0 = maxf(s_t0 - HEAD_GAP, minf(HEAD_MIN + 0.3, s_t0 - 0.6))
+	s0 = clampf(start_s, HEAD_MIN, s_c0)
+	if s0 > start_s + 0.01:
+		squeezed = true
 	s_tc = s_t1 + 2.9
 	s_exc = s_tc + exc_turret_z
 	_def_tc = s_tc
 	load_rear = s_exc + exc_front + 0.75
 	pile_s = load_rear + 1.6
 	s_c1 = dump_s(tip_rear) + tip_front + 1.0
-	s_taper1 = s_c1 + TAPER_OUT
-	s_det0 = s0 - 8.0
-	s_det1 = s_taper1 + 5.0
-	s_van = s0 - 20.0
-	p_full0 = s_c0 - 1.0
+	# behind the work area: tail taper, end of the detour, then room to stop and reverse in
+	var room := len_k - 0.5 - REV_ROOM - s_c1
+	var need := TAPER_OUT_MIN + DET_OUT_MIN
+	if room < need:
+		error = "Hinter der Grube fehlen %d m: Bagger und Kipper stehen dort und fahren von hinten rückwärts hinein" % int(ceil(need - room))
+		return false
+	var extra := room - need
+	taper_out = TAPER_OUT_MIN + clampf(extra, 0.0, TAPER_OUT - TAPER_OUT_MIN)
+	det_out = DET_OUT_MIN + clampf(extra - (TAPER_OUT - TAPER_OUT_MIN), 0.0, 5.0 - DET_OUT_MIN)
+	if extra < (TAPER_OUT - TAPER_OUT_MIN) + (5.0 - DET_OUT_MIN):
+		squeezed = true
+	s_taper1 = s_c1 + taper_out
+	s_det1 = s_taper1 + det_out
+	s_det0 = maxf(HEAD_MIN, s0 - 8.0)
+	s_van = van_default()
+	if s_van < 0.0:
+		error = "kein Platz für den Kolonnenbus vor oder hinter der Baustelle"
+		return false
+	p_full0 = maxf(s_c0 - 1.0, s_det0 + 1.0)
 	p_full1 = s_c1
-	obst0 = s0 + 1.0
+	obst0 = maxf(s0 + 1.0, s_det0 + 0.5)
 	obst1 = s_taper1 - 1.0
-	if s0 < 34.0:
-		error = "zu nah an der Kreuzung (Anfang)"
-		return false
-	if s_det1 + 32.0 > len_k:
-		error = "zu nah an der Kreuzung (Ende)"
-		return false
 	# K2 range of the zone
 	var k2 := _k2_for(s_det0, s_det1)
 	if k2.error != "":
@@ -146,15 +180,8 @@ func setup(n: RoadNet, k: int, start_s: float, length: float, width: float, dep:
 	shift = k2.shift
 	k_ctrl = auto_k_ctrl(current_extent())
 	k2_ctrl = [Vector2(s2_a, 0.0), Vector2(s2_b, 0.0)]
-	# curvature limits
-	var d0 := lane_dir(s_det0)
-	var d1 := lane_dir(s_det1)
-	if absf(d0.angle_to(d1)) > deg_to_rad(35.0):
-		error = "zu kurvig"
-		return false
-	if absf(lane_dir(s_t0).angle_to(lane_dir(s_t1))) > deg_to_rad(6.0):
-		error = "Graben in der Kurve"
-		return false
+	_def = {"det0": s_det0, "det1": s_det1, "full0": p_full0, "full1": p_full1, "obst0": obst0, "obst1": obst1,
+		"van": s_van, "s2_a": s2_a, "s2_b": s2_b, "shift": shift}
 	return true
 
 
@@ -228,6 +255,25 @@ func van_pose() -> Dictionary:
 	return pose(s_van, CURB)
 
 
+## Kerb spot of the crew van on K (#33): 20 m in front of the taper where there is room, closer to
+## the closure on short lanes, otherwise behind the site after the reversing room. -1: no room on K.
+func van_default() -> float:
+	var up := minf(s0 - 20.0, s_det0 - VAN_EXIT_GAP)
+	if up >= HEAD_MIN + VAN_APPR_MIN:
+		return up
+	var down := s_det1 + REV_ROOM + 3.0
+	if down + 3.0 + VAN_EXIT_MIN <= len_k - 0.5:
+		return down
+	return -1.0
+
+
+## Metres the crew van pulls over before its spot (at most 12, never from inside the detour).
+func van_approach() -> float:
+	if s_van > s_det1:
+		return clampf(s_van - s_det1 - 0.5, VAN_APPR_MIN, 12.0)
+	return clampf(s_van - HEAD_MIN, VAN_APPR_MIN, 12.0)
+
+
 func crew_point() -> Vector2:
 	return lane_pt(s_van, CURB + 1.6)
 
@@ -298,7 +344,10 @@ func _k2_for(d0: float, d1: float) -> Dictionary:
 		out.s2_b = ca[1]
 	if ca[0] > lw * 2.2 or cb[0] > lw * 2.2:
 		out.error = "Gegenfahrstreifen zu weit entfernt"
-	elif out.s2_a < 3.0 or out.s2_b > len_k2 - 3.0 or out.s2_b - out.s2_a < 20.0:
+	# near a junction the zone simply ends with K2 (#33)
+	out.s2_a = maxf(out.s2_a, HEAD_MIN)
+	out.s2_b = minf(out.s2_b, len_k2 - HEAD_MIN)
+	if out.error == "" and out.s2_b - out.s2_a < 2.0:
 		out.error = "Gegenfahrstreifen zu kurz"
 	out.shift = (pa.distance_to(Vector2(ca[2])) + pb.distance_to(Vector2(cb[2]))) * 0.5
 	return out
@@ -336,9 +385,7 @@ func current_extent() -> Dictionary:
 
 
 func default_extent() -> Dictionary:
-	var k2 := _k2_for(s0 - 8.0, s_taper1 + 5.0)
-	var ext := {"det0": s0 - 8.0, "det1": s_taper1 + 5.0, "full0": s_c0 - 1.0, "full1": s_c1, "obst0": s0 + 1.0,
-		"obst1": s_taper1 - 1.0, "van": s0 - 20.0, "s2_a": k2.s2_a, "s2_b": k2.s2_b, "shift": k2.shift}
+	var ext := _def.duplicate()
 	_finish_extent(ext, {})
 	_finish_slots(ext, {})
 	return ext
@@ -409,8 +456,8 @@ func _finish_extent(ext: Dictionary, traffic: Dictionary) -> void:
 	var kc: Array = traffic.get("k", [])
 	if kc.size() >= 2:
 		var lim := extent_limits()
-		var lo := maxf(3.0, lim.x - 8.0)
-		var hi := minf(len_k - 3.0, lim.y + 5.0)
+		var lo := lim.x
+		var hi := lim.y
 		var c := _clean_ctrl(kc, lo, hi, -(lw + 4.0), lw * 0.5 + 3.0)
 		# the path must leave K before the blocked range and come back after it
 		var first: Vector2 = c[0]
@@ -422,7 +469,7 @@ func _finish_extent(ext: Dictionary, traffic: Dictionary) -> void:
 		ext["k_ctrl"] = c
 		ext.det0 = first.x
 		ext.det1 = last.x
-		ext.van = minf(s0 - 20.0, ext.det0 - 12.0)
+		ext.van = _van_for(ext.det0, ext.det1, float(ext.van))
 		var k2 := _k2_for(ext.det0, ext.det1)
 		if k2.error == "":
 			ext.s2_a = k2.s2_a
@@ -430,7 +477,7 @@ func _finish_extent(ext: Dictionary, traffic: Dictionary) -> void:
 		ext["k2_ctrl"] = [Vector2(ext.s2_a, 0.0), Vector2(ext.s2_b, 0.0)]
 	var k2c: Array = traffic.get("k2", [])
 	if k2c.size() >= 2:
-		var c2 := _clean_ctrl(k2c, 3.0, len_k2 - 3.0, -(lw2 * 0.5 + 3.0), lw2 * 0.5 + 4.0)
+		var c2 := _clean_ctrl(k2c, HEAD_MIN, len_k2 - HEAD_MIN, -(lw2 * 0.5 + 3.0), lw2 * 0.5 + 4.0)
 		ext["k2_ctrl"] = c2
 		ext.s2_a = c2[0].x
 		ext.s2_b = c2[c2.size() - 1].x
@@ -506,7 +553,7 @@ func _finish_slots(ext: Dictionary, slots: Dictionary) -> void:
 	if slots.has("stage"):
 		st = clampf((slots.stage as Vector2).x, float(ext.det1) + 6.0, maxf(float(ext.det1) + 6.0, len_k - 14.0))
 	if slots.has("van"):
-		ext.van = clampf((slots.van as Vector2).x, 15.0, maxf(15.0, float(ext.det0) - 8.0))
+		ext.van = _van_for(float(ext.det0), float(ext.det1), (slots.van as Vector2).x)
 	ext["slots"] = {"tc": tc, "exc_lat": el, "load_rear": lr, "load_lat": ll, "pile_s": ps, "pile_lat": pl, "stage": st}
 
 
@@ -524,9 +571,7 @@ func road_span(s: float) -> Vector2:
 
 
 func _extent_items(items: Array) -> Dictionary:
-	var k2d := _k2_for(s0 - 8.0, s_taper1 + 5.0)
-	var ext := {"det0": s0 - 8.0, "det1": s_taper1 + 5.0, "full0": s_c0 - 1.0, "full1": s_c1, "obst0": s0 + 1.0,
-		"obst1": s_taper1 - 1.0, "van": s0 - 20.0, "s2_a": k2d.s2_a, "s2_b": k2d.s2_b, "shift": k2d.shift}
+	var ext := _def.duplicate()
 	var a := INF
 	var b := -INF
 	var e0 := INF
@@ -542,23 +587,51 @@ func _extent_items(items: Array) -> Dictionary:
 			e1 = maxf(e1, lc.x)
 	if a == INF:
 		return ext
-	var a_eff := clampf(a, maxf(s0 - 15.0, 35.0), s_c0 - 4.0)
-	var d0 := a_eff - 8.0
-	var d1 := minf(clampf(b, s_c1 + 2.0, s_taper1 + 15.0) + 5.0, maxf(s_taper1 + 5.0, len_k - 32.0))
-	var b_eff := minf(clampf(b, s_c1 + 2.0, s_taper1 + 15.0), d1 - 5.0)
-	var f0 := clampf(e0 if e0 < INF else s_c0 - 1.0, a_eff + 3.0, s_c0 - 1.0)
+	# the detour starts 8 m before the first item in K and ends 5 m after the last, anywhere on the lane
+	# between the junctions (#33); it always covers the pit and the machine spots
+	var lim := extent_limits()
+	var a_eff := clampf(a, lim.x, maxf(lim.x, minf(s_c0 - 4.0, float(_def.obst0) - 1.0)))
+	var d0 := maxf(lim.x, a_eff - 8.0)
+	var b_eff := clampf(b, minf(s_c1 + 2.0, lim.y - DET_OUT_MIN), lim.y - DET_OUT_MIN)
+	var d1 := minf(b_eff + 5.0, lim.y)
+	var f0 := _clamp_ordered(e0 if e0 < INF else s_c0 - 1.0, minf(a_eff + 3.0, s_c0 - 1.0), s_c0 - 1.0)
+	f0 = maxf(f0, d0 + 1.0)
 	var f1 := clampf(e1 if e1 > -INF else s_c1, s_c1, maxf(s_c1, minf(b_eff - 2.0, d1 - 6.0)))
 	var k2 := _k2_for(d0, d1)
 	if k2.error != "":
 		return ext
-	return {"det0": d0, "det1": d1, "full0": f0, "full1": f1, "obst0": a_eff + 1.0, "obst1": b_eff - 1.0,
-		"van": minf(s0 - 20.0, d0 - 12.0), "s2_a": k2.s2_a, "s2_b": k2.s2_b, "shift": k2.shift}
+	return {"det0": d0, "det1": d1, "full0": f0, "full1": f1, "obst0": maxf(a_eff + 1.0, d0 + 0.5), "obst1": b_eff - 1.0,
+		"van": _van_for(d0, d1, float(_def.van)), "s2_a": k2.s2_a, "s2_b": k2.s2_b, "shift": k2.shift}
 
 
-## How far a player plan may extend the closure on K: Vector2(earliest start, latest end).
+static func _clamp_ordered(x: float, lo: float, hi: float) -> float:
+	return clampf(x, minf(lo, hi), maxf(lo, hi))
+
+
+## How far a player plan may extend the closure on K: Vector2(earliest start, latest end) of the
+## detour – the whole lane between the junctions, minus the room behind it to stop and reverse in (#33).
 func extent_limits() -> Vector2:
-	var b_max := minf(s_taper1 + 15.0, maxf(s_taper1 + 5.0, len_k - 32.0) - 5.0)
-	return Vector2(maxf(s0 - 15.0, 35.0), b_max)
+	return Vector2(HEAD_MIN, maxf(HEAD_MIN + 1.0, len_k - 0.5 - REV_ROOM))
+
+
+## Crew van spot for a detour from d0 to d1: the wanted s if it is outside the detour with room to pull
+## in and out, otherwise the nearest such spot in front of or behind the closure (#33).
+func _van_for(d0: float, d1: float, want: float) -> float:
+	var up_hi := d0 - VAN_EXIT_GAP
+	var up_lo := HEAD_MIN + VAN_APPR_MIN
+	var dn_lo := d1 + REV_ROOM + 3.0
+	var dn_hi := len_k - 0.5 - 3.0 - VAN_EXIT_MIN
+	var best := -1.0
+	var best_d := INF
+	if up_hi >= up_lo:
+		var u := clampf(want, up_lo, up_hi)
+		best = u
+		best_d = absf(u - want)
+	if dn_hi >= dn_lo:
+		var dn := clampf(want, dn_lo, dn_hi)
+		if absf(dn - want) < best_d:
+			best = dn
+	return best if best >= 0.0 else float(_def.get("van", s_van))
 
 
 func apply_extent(ext: Dictionary) -> void:
@@ -604,18 +677,22 @@ func items() -> Array:
 	var out: Array = []
 	var d0 := lane_dir(s0)
 	var side := lw * 0.5 + 0.7
-	out.append(_item("z123", lane_pt(maxf(3.0, s0 - 48.0), side), yaw_of(lane_dir(maxf(3.0, s0 - 48.0))), "signs"))
-	out.append(_item("z208", lane_pt(maxf(3.0, s0 - 30.0), side), yaw_of(lane_dir(maxf(3.0, s0 - 30.0))), "signs"))
+	# close to a junction the signs stand at the start of the lane, one behind the other (#33)
+	var s123 := maxf(1.0, s0 - 48.0)
+	var s208 := maxf(s123 + 3.0, s0 - 30.0)
+	out.append(_item("z123", lane_pt(s123, side), yaw_of(lane_dir(s123)), "signs"))
+	out.append(_item("z208", lane_pt(s208, side), yaw_of(lane_dir(s208)), "signs"))
 	var k2_sign_kind := "z308" if oncoming else ""
 	# standard positions: from the default K2 range (a player plan may have moved s2_a)
-	var s2a_def: float = _k2_for(s0 - 8.0, s_taper1 + 5.0).s2_a
-	var s2_123 := maxf(3.0, s2a_def - 45.0)
+	var s2a_def: float = _def.get("s2_a", s2_a)
+	var s2_123 := maxf(1.0, s2a_def - 45.0)
 	out.append({"kind": "z123", "pos": lane2_pt(s2_123, lw2 * 0.5 + 0.7), "yaw": yaw_of(lane2_dir(s2_123)), "phase": 0.0, "group": "signs"})
 	if k2_sign_kind != "":
-		var s2_308 := maxf(3.0, s2a_def - 24.0)
+		var s2_308 := maxf(s2_123 + 3.0, s2a_def - 24.0)
 		out.append({"kind": "z308", "pos": lane2_pt(s2_308, lw2 * 0.5 + 0.7), "yaw": yaw_of(lane2_dir(s2_308)), "phase": 0.0, "group": "signs"})
 	# taper (Verschwenkung) with running warning lights
-	var n_taper := 5
+	# a short taper near a junction gets fewer Leitbaken; none if the head barrier stands at the lane start (#33)
+	var n_taper := clampi(int((s_c0 - s0) / 3.0) + 1, 0 if s_c0 - s0 < 0.5 else 2, 5)
 	for i in n_taper:
 		var t := float(i) / (n_taper - 1)
 		var s := lerpf(s0, s_c0, t)
@@ -664,7 +741,7 @@ func yellow_line() -> PackedVector2Array:
 	var curb := lw * 0.5 - 0.1
 	return lane_poly(s0, s_taper1, func(s):
 		if s < s_c0:
-			return lerpf(curb, edge, (s - s0) / (s_c0 - s0))
+			return lerpf(curb, edge, clampf((s - s0) / maxf(0.1, s_c0 - s0), 0.0, 1.0))
 		if s > s_c1:
 			return lerpf(edge, curb, (s - s_c1) / (s_taper1 - s_c1))
 		return edge, 1.0)

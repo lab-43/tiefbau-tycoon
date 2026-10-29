@@ -145,6 +145,8 @@ func _process(delta: float) -> void:
 			_fahrzeuge_test(delta)
 		"stellplaetze":
 			_stellplaetze_test(delta)
+		"platzieren":
+			_platzieren_test(delta)
 
 
 func _smoke() -> void:
@@ -841,3 +843,12 @@ func _fahrzeuge_test(delta: float) -> void:
 		_fz = load("res://test/e2e_fahrzeuge.gd").new()
 		_fz.drv = self
 	_fz.tick(delta)
+
+
+## Placing contracts anywhere on a street (test/e2e_platzieren.gd, #33).
+var _platz: RefCounted
+func _platzieren_test(delta: float) -> void:
+	if _platz == null:
+		_platz = load("res://test/e2e_platzieren.gd").new()
+		_platz.drv = self
+	_platz.tick(delta)

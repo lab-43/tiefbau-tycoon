@@ -532,7 +532,8 @@ func _flatbed_next(v: Vehicle) -> void:
 func _go_van_spot(v: Vehicle) -> void:
 	var vp := lay.van_pose()
 	crew_van = v
-	v.drive_plan({"key": lay.key, "s": lay.s_van - 12.0}, job.short_title(), [v.pull_over_piece(lay.key, lay.s_van - 12.0, SiteLayout.CURB, 12.0)], func(veh):
+	var appr := lay.van_approach()
+	v.drive_plan({"key": lay.key, "s": lay.s_van - appr}, job.short_title(), [v.pull_over_piece(lay.key, lay.s_van - appr, SiteLayout.CURB, appr)], func(veh):
 		veh.place(gw(vp.pos, 0.0), vp.yaw)
 		_arrived(veh, "van"))
 	_reserve(v, "van")
@@ -604,7 +605,7 @@ func _behind_site(v: Vehicle) -> bool:
 	var r: Array = Geo.closest_on_polyline(lay._g[0], lay._g[1], v.pos2())
 	# a machine backed off the low-loader stands with its rear in the tail taper (#24): past the work
 	# zone is enough, otherwise it drives around the block (1.2 km at walking pace for the R 938)
-	return r[1] > lay.tail_s() - SiteLayout.TAPER_OUT and r[0] < 6.0
+	return r[1] > lay.tail_s() - lay.taper_out and r[0] < 6.0
 
 
 func _slot_arrived(v: Vehicle, spot: String, slot_s: float, slot_lat := 0.0) -> void:
@@ -674,8 +675,10 @@ func _arrived(v: Vehicle, spot: String) -> void:
 func exit_plan(v: Vehicle) -> Dictionary:
 	var spot: String = spot_of.get(v, "")
 	if spot == "van" and v.pos2().distance_to(lay.lane_pt(lay.s_van, SiteLayout.CURB)) < 6.0:
-		# pull out into the lane before the detour starts
+		# pull out into the lane before the detour starts (or, behind the site, before the lane ends, #33)
 		var sj := minf(lay.s_van + 9.0, lay.s_det0 - 1.5)
+		if lay.s_van > lay.s_det1:
+			sj = minf(lay.s_van + 9.0, lay.len_k - 0.5)
 		var a := v.pos2()
 		var join := HQ.bezier(a, a + v.forward2() * 3.0, lay.lane_pt(sj - 3.0), lay.lane_pt(sj))
 		in_place.erase(v)

@@ -52,7 +52,7 @@ func _build_candidates() -> void:
 		var g: Array = net.lane_geo[key]
 		var cum: PackedFloat32Array = g[1]
 		var ln: float = cum[cum.size() - 1]
-		if ln < 135.0:
+		if ln < 60.0:
 			continue
 		var mid: Vector2 = Geo.sample(g[0], cum, ln * 0.5)[0]
 		var dist := mid.distance_to(hq)
@@ -80,10 +80,11 @@ func _make_offer() -> Job:
 		var W: float = pipe.width
 		var D := snappedf(rng.randf_range(1.5, 2.1), 0.05)
 		var lay := SiteLayout.new()
-		var max_s0: float = c.len - 95.0
-		if max_s0 < 36.0:
+		# anywhere the pit and the room behind it fit (#33); setup() checks the rest
+		var max_s0: float = c.len - 50.0
+		if max_s0 < 0.0:
 			continue
-		var s0 := rng.randf_range(36.0, max_s0)
+		var s0 := rng.randf_range(0.0, max_s0)
 		if not lay.setup(world.net, c.key, s0, L, W, D, pipe.d):
 			continue
 		if not _location_free(lay):
@@ -122,45 +123,148 @@ func _build_job(c: Dictionary, pipe: Dictionary, L: float, W: float, D: float, s
 	return j
 
 
-## Debug: an offer whose trench lies at point p, on the right lane of the nearest street (any class
-## except motorways and service roads). Searches up to 40 m along the street for a valid spot.
-## Returns {"job": Job} or {"error": String}. The job is added to the offers.
-func offer_at(p: Vector2) -> Dictionary:
+## Debug: an offer whose trench lies at point p, on the right lane of the nearest street (#33: only the
+## pit has to fit, the player plans the rest). Returns {"job": Job} or {"error": String}. The job is
+## added to the offers. pipe_i: index into PIPES (-1: random).
+func offer_at(p: Vector2, pipe_i := -1) -> Dictionary:
+	var pipe: Dictionary = PIPES[pipe_i if pipe_i >= 0 and pipe_i < PIPES.size() else rng.randi() % PIPES.size()]
+	var r := check_spot(p, pipe)
+	if not r.ok:
+		return {"error": "Hier geht keine Baustelle: " + str(r.error) if r.get("near_road", false) else str(r.error)}
+	var lay: SiteLayout = r.lay
+	var hq := world.hq_info.get("lot_center", Vector2.ZERO) as Vector2
+	var j := _build_job({"key": r.key, "dist": lay.trench_center().distance_to(hq)}, pipe, r.L, pipe.width, r.D, r.s0)
+	offers.append(j)
+	Events.job_offers_changed.emit()
+	return {"job": j, "hints": r.hints}
+
+
+const PLACE_EXCLUDE := ["motorway", "motorway_link", "service"]
+const PLACE_SEARCH := 25.0     # m the pit may move along the street from the click to fit (#33)
+const PIT_GAP_OTHER := 4.0     # m between two pits on different streets
+
+
+## Where a contract for a click at p would go, without side effects (placing and its preview, #33).
+## Rules for the pit only: on the right lane of the clicked direction of a street, not on a bridge, in a
+## tunnel or in a junction area, room behind it for excavator and tipper, not inside another site.
+## Returns {ok, error, near_road, lay, key, s0, L, D, shift, hints: Array[String]}.
+func check_spot(p: Vector2, pipe: Dictionary, L := 4.0, D := 1.8) -> Dictionary:
+	var out := {"ok": false, "error": "", "near_road": false, "lay": null, "key": -1, "s0": 0.0, "L": L, "D": D, "shift": 0.0, "hints": []}
 	var net: RoadNet = world.net
-	var near := net.nearest_lane(p, 40.0, ["motorway", "motorway_link", "trunk", "trunk_link", "service"])
+	var near := net.nearest_lane(p, 25.0)
 	if near.is_empty():
-		return {"error": "Keine passende Straße in der Nähe"}
+		out.error = "Keine Straße in der Nähe"
+		return out
 	var ei: int = int(near.key) >> 4
 	var e: Dictionary = net.edges[ei]
-	if e.bridge or e.get("tunnel", false) or e.get("under", false):
-		return {"error": "Auf Brücken und in Tunneln geht keine Baustelle"}
+	out.near_road = true
+	if e.cls in PLACE_EXCLUDE:
+		out.error = "Autobahnen und Zufahrten (service) gehen noch nicht" if e.cls != "service" else "Zufahrten und Parkplatzwege gehen noch nicht"
+		return out
+	if e.bridge:
+		out.error = "auf einer Brücke wird nicht gegraben"
+		return out
+	if e.get("tunnel", false) or e.get("under", false):
+		out.error = "im Tunnel wird nicht gegraben"
+		return out
+	if ei == world.traffic._hq_edge:
+		out.error = "das ist die Zufahrt der Zentrale"
+		return out
 	var dir: int = (int(near.key) >> 3) & 1
 	var key := RoadNet.lane_key(ei, dir, net.lane_count(ei, dir) - 1)
+	if not net.lane_geo.has(key):
+		out.error = "Fahrstreifen fehlt"
+		return out
 	var g: Array = net.lane_geo[key]
 	var s_click: float = Geo.closest_on_polyline(g[0], g[1], p)[1]
-	var pipe: Dictionary = PIPES[rng.randi() % PIPES.size()]
-	var L := 4.0
-	var D := 1.8
+	out["probe"] = {"key": key, "s": s_click}
+	var others := _other_layouts()
 	var err := ""
-	for k in 41:
-		# 0, +2, -2, +4, -4 … metres around the clicked point
-		var shift_m := float((k + 1) / 2) * 2.0 * (1.0 if k % 2 == 1 else -1.0)
+	var steps := int(PLACE_SEARCH)
+	for k in 2 * steps + 1:
+		# 0, -1, +1, -2, +2 … metres around the clicked point (upstream first: the room behind it is the limit)
+		var shift_m := float((k + 1) / 2) * (-1.0 if k % 2 == 1 else 1.0)
 		var s0 := s_click + shift_m - SiteLayout.TAPER - SiteLayout.HEAD_GAP - L * 0.5
 		var lay := SiteLayout.new()
 		if not lay.setup(net, key, s0, L, pipe.width, D, pipe.d):
 			if err == "":
 				err = lay.error
 			continue
-		if not _location_free(lay):
+		var clash := _clash(lay, others)
+		if clash != "":
 			if err == "":
-				err = "zu nah an einem anderen Auftrag, Zebrastreifen, Haltestelle oder der Zentrale"
+				err = clash
 			continue
-		var hq := world.hq_info.get("lot_center", Vector2.ZERO) as Vector2
-		var j := _build_job({"key": key, "dist": lay.trench_center().distance_to(hq)}, pipe, L, pipe.width, D, s0)
-		offers.append(j)
-		Events.job_offers_changed.emit()
-		return {"job": j}
-	return {"error": "Hier geht keine Baustelle: " + err}
+		out.ok = true
+		out.lay = lay
+		out.key = key
+		out.s0 = s0
+		out.shift = shift_m
+		out.hints = _spot_hints(lay, shift_m)
+		return out
+	out.error = err
+	return out
+
+
+## Layouts of all offers and running sites, for the overlap check.
+func _other_layouts() -> Array:
+	var out: Array = []
+	for j in offers + active:
+		var s := site_of(j)
+		if s and s.lay:
+			out.append({"job": j, "lay": s.lay})
+			continue
+		var l := SiteLayout.new()
+		if l.setup(world.net, j.key, j.s0, j.length, j.width, j.depth, j.pipe_d):
+			out.append({"job": j, "lay": l})
+	return out
+
+
+## Why lay cannot go next to the other sites ("" = it can): two closures on one road must not overlap,
+## pits on other roads keep a few metres apart.
+func _clash(lay: SiteLayout, others: Array) -> String:
+	var c := lay.trench_center()
+	for o in others:
+		var ol: SiteLayout = o.lay
+		var j: Job = o.job
+		var roads := [ol.key >> 4, ol.key2 >> 4]
+		if (lay.key >> 4) in roads or (lay.key2 >> 4) in roads:
+			var a: float = lay.lane_coords(ol.lane_pt(ol.s_det0)).x
+			var b: float = lay.lane_coords(ol.lane_pt(ol.s_det1)).x
+			if maxf(a, b) > lay.s_det0 - 5.0 and minf(a, b) < lay.s_det1 + 5.0:
+				return "überschneidet sich mit %s" % j.short_title()
+		if ol.trench_center().distance_to(c) < PIT_GAP_OTHER + (lay.L + ol.L) * 0.5:
+			return "zu nah an %s" % j.short_title()
+	return ""
+
+
+## Things the player should know about a spot (none of them blocks it).
+func _spot_hints(lay: SiteLayout, shift_m: float) -> Array:
+	var h: Array = []
+	if absf(shift_m) > 0.5:
+		h.append("Grube um %d m verschoben, damit Bagger und Kipper dahinter Platz haben" % int(round(absf(shift_m))))
+	if lay.squeezed:
+		h.append("Kurze Straße: Absperrung reicht bis an die Kreuzung – im Planer anpassen")
+	var e: Dictionary = world.net.edges[lay.key >> 4]
+	for cr in e.get("crossings", []):
+		var cp: Vector2 = Geo.sample(e.pts, e.cum, cr.s)[0]
+		var cs: float = lay.lane_coords(cp).x
+		if cs > lay.s_det0 - 15.0 and cs < lay.s_det1 + 15.0:
+			h.append("Fußgängerüberweg im Baustellenbereich")
+			break
+	var bus := false
+	for k in [lay.key, lay.key2]:
+		var lg: Array = world.net.lane_geo.get(k, [])
+		if lg.is_empty():
+			continue
+		for st in world.traffic.stops_by_lane.get(k, PackedFloat32Array()):
+			var ss: float = lay.lane_coords(Geo.sample(lg[0], lg[1], st)[0]).x
+			if ss > lay.s_det0 - 20.0 and ss < lay.s_det1 + 20.0:
+				bus = true
+	if bus:
+		h.append("Bushaltestelle im Baustellenbereich")
+	h.append("Engstelle mit Gegenverkehr" if lay.oncoming else "Fahrstreifensperrung (Nachbarstreifen frei)")
+	return h
 
 
 ## Debug: one more random offer right now (ignores the offer interval and the maximum).
@@ -173,28 +277,14 @@ func debug_new_offer() -> Job:
 
 
 func _location_free(lay: SiteLayout) -> bool:
+	# random offers keep a wider spacing and stay away from the HQ (the player can place anywhere, #33)
 	var c := lay.trench_center()
 	for j in offers + active:
 		if (j as Job).center.distance_to(c) < 160.0:
 			return false
-	# no pedestrian crossing or bus stop inside the closure
-	var e: Dictionary = world.net.edges[lay.key >> 4]
-	for cr in e.get("crossings", []):
-		var p: Vector2 = Geo.sample(e.pts, e.cum, cr.s)[0]
-		var r: Array = Geo.closest_on_polyline(lay._g[0], lay._g[1], p)
-		if r[1] > lay.s_det0 - 15.0 and r[1] < lay.s_det1 + 15.0:
-			return false
-	for k in [lay.key, lay.key2]:
-		for s in world.traffic.stops_by_lane.get(k, PackedFloat32Array()):
-			var sp := lay.lane_pt(0.0)
-			if k == lay.key and s > lay.s_det0 - 20.0 and s < lay.s_det1 + 20.0:
-				return false
-			if k == lay.key2 and s > lay.s2_a - 20.0 and s < lay.s2_b + 20.0:
-				return false
-	# keep away from the HQ driveway
 	if c.distance_to(world.hq_info.get("lot_center", Vector2(1e9, 1e9))) < 120.0:
 		return false
-	return true
+	return _clash(lay, _other_layouts()) == ""
 
 
 func accept(j: Job) -> bool:
