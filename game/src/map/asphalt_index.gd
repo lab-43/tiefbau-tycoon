@@ -1,7 +1,7 @@
 class_name AsphaltIndex
 extends RefCounted
 ## Spatial index of the ground road surface as RoadMesher draws it: carriageways between their junction cuts
-## and junction areas (with their islands as holes), without bridge decks. Answers whether a map point lies
+## and junction areas (with their islands as holes), without bridge decks and tunnels (#31). Answers whether a map point lies
 ## on asphalt and finds the nearest spot beside the road. CityMesher uses it to keep trees off the roads (#30).
 
 const CELL := 25.0
@@ -17,6 +17,8 @@ func _init(n: RoadNet, terrain: Terrain = null) -> void:
 		var e: Dictionary = net.edges[ei]
 		if terrain != null and terrain.decks.has(ei):
 			continue   # bridge deck: the ground below it is free
+		if e.get("under", false):
+			continue   # tunnel (#31): the ground above it is free
 		if float(e.len) - float(e.trim_a) - float(e.trim_b) < 0.05:
 			continue
 		var pts: PackedVector2Array = e.pts
@@ -28,6 +30,8 @@ func _init(n: RoadNet, terrain: Terrain = null) -> void:
 		if terrain != null and terrain.node_decks.has(ni):
 			continue
 		var nd: Dictionary = net.nodes[ni]
+		if nd.get("under", false):
+			continue
 		var polys: Array = [nd.get("polygon", PackedVector2Array())] + nd.get("extra_polys", [])
 		for i in polys.size():
 			var poly: PackedVector2Array = polys[i]
