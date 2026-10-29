@@ -15,6 +15,13 @@ var van: Vehicle
 var _t0 := -1.0
 
 
+class ClickTool:
+	var clicks := 0
+	func on_left_click(_screen: Vector2) -> bool:
+		clicks += 1
+		return true
+
+
 func _init(driver) -> void:
 	d = driver
 
@@ -179,10 +186,15 @@ func tick(_delta: float) -> void:
 			var sm4 = find(wm, "site", site)
 			if sm4:
 				Game.select(null)
-				w.tool = RefCounted.new()
+				# a stand-in tool that takes every left click, as real tools do (with a bare object the world would
+				# fall back to selecting whatever is under the cursor, and the random site may be right there)
+				var tool := ClickTool.new()
+				w.tool = tool
 				var tgt0: Vector3 = w.camera_rig._t_target
 				click(sm4, MOUSE_BUTTON_LEFT)
-				check(Game.selected != site and w.camera_rig._t_target.distance_to(tgt0) < 0.01, "Mit aktivem Werkzeug nimmt die Markierung keinen Klick")
+				check(tool.clicks == 1 and Game.selected != site and w.camera_rig._t_target.distance_to(tgt0) < 0.01,
+					"Mit aktivem Werkzeug nimmt die Markierung keinen Klick, das Werkzeug bekommt ihn (Werkzeug %d Klick(s), gewählt: %s, Kamera %.2f m)" % [
+					tool.clicks, str(Game.selected.get("name") if Game.selected else "nichts"), w.camera_rig._t_target.distance_to(tgt0)])
 				w.tool = null
 			step = 62
 		62:
