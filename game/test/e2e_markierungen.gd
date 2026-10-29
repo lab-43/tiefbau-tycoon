@@ -210,6 +210,19 @@ func tick(_delta: float) -> void:
 				if b and not b.visible:
 					hidden += 1
 			check(hidden == 0, "Gebäude wieder an")
+			# underground view (#31): the under_* layers of the chunks (Utrecht has road and rail tunnels)
+			for on in [true, false]:
+				wm.set_view("underground", on)
+				var un := 0
+				var ushown := 0
+				for c in w.city.get_children():
+					for l in c.get_children():
+						if UndergroundView.is_layer(String(l.name)):
+							un += 1
+							if (l as Node3D).visible:
+								ushown += 1
+				check(un > 0 and ushown == (un if on else 0) and UndergroundView.on == on,
+					"Untergrund %s: %d von %d Ebenen sichtbar" % ["an" if on else "aus", ushown, un])
 			wm.set_view("markers", false)
 			_wait(0.3)
 			step = 9
