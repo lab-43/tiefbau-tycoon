@@ -82,6 +82,7 @@ func tick(_delta: float) -> void:
 			ok(Vector2(lt.x, lt.y).distance_to(Vector2(lay2.load_s(tip.rear_ext), lay2.load_lat)) < 0.15 and absf(lt.y - 0.3) < 0.05, "Kipper steht auf seinem Stellplatz (seitlich %.2f)" % lt.y)
 			dug0 = site.terrain.remaining_dig()
 			bulk0 = tip.bulk_m3()
+			_shot_from_above("stell_02_plaetze")
 			site.do_action("dig")
 			ok(site.running, "Bagger gräbt")
 			t_mark = drv.t
@@ -149,13 +150,23 @@ func tick(_delta: float) -> void:
 				var lt4 := lay4.lane_coords(tp.pos2())
 				ok(Vector2(lt4.x, lt4.y).distance_to(Vector2(lay4.dump_s(tp.rear_ext), lay4.pile_lat)) < 0.15, "Kipper steht zum Abkippen hinter dem Haufen (seitlich %.2f)" % lt4.y)
 			DebugTools.turbo(1.0)
-			drv.shot("stell_02_haufen", site.center3(), 40.0, -30.0, 55.0)
+			_shot_from_above("stell_03_haufen")
 			t_mark = drv.t
 			step = 7
 		7:
 			if not drv.shot_queue.is_empty():
 				return
+			DebugTools.light_override(-1.0)
 			_end()
+
+
+## Picture of the machine spots from above, across the road, at noon.
+func _shot_from_above(name: String) -> void:
+	DebugTools.light_override(12.0)
+	var lay := site.lay
+	var dl := lay.lane_dir(lay.s_tc)
+	var vw := Geo.left_of(dl)
+	drv.shot(name, Site.gw(lay.lane_pt(lay.s_tc + 3.0, 0.0), 0.0), 30.0, rad_to_deg(atan2(vw.x, vw.y)), 72.0)
 
 
 ## Spots laid with real mouse drags in the tool "Stellplätze".
