@@ -34,6 +34,7 @@ Autoloads (`project.godot`):
   - `RoadMesher` (Fahrbahn, Gehweg, Bordstein, Markierung entlang der Straßen, Halt-/Wartelinien) mit `RoadMarkings` (Linien durch Übergänge und Gruppen, Knotenpunkt-Leitlinien, Richtungspfeile, Sperrflächen; Maße nach RMS als Konstanten, Lektion markierungen-rms),
   - `CityMesher` (Gebäude, Flächen, Wasser, Bäume, Laternen); Bäume und Laternen nie auf die Fahrbahn: `AsphaltIndex` (`on_asphalt`, `clear_spot` rückt echte Bäume an den Rand, Lektion objekte-neben-der-fahrbahn),
   - je Chunk ein `MeshLayer` pro Material aus `Mats`.
+- **Unter der Oberfläche (#31):** `RoadNet.is_under(tags)` – `tunnel=yes`, `indoor=yes`, Garagengassen/überdachte Zufahrten mit `layer<0` – setzt `edge.under`; Ketten unter 25 m bleiben oben (`MIN_TUNNEL`), Knoten nur mit Tunnelstraßen sind `node.under`, `JunctionMerge` fasst entlang Tunneln nicht zusammen. `building_passage` und Unterführungen ohne Tunnel-Tag bleiben oben. Gleise mit Tunnel-Tag oder `layer<0` stehen in `OsmData.under_rails`. Statt Fahrbahn entstehen die Ebenen `under_road`, `under_subway`, `under_rail` (nur Untergrund-Ansicht, `UndergroundView.is_layer`). Wo ein Tunnel auf die Oberfläche trifft, meldet der Mesher ein Portal bei `TunnelPortals` an; `MapBuilder` baut alle nach beiden Meshern (parallele Röhren als ein Bauwerk, Tiefe endet vor kreuzenden Straßen/Gleisen, Bäume und Laternen darauf entfallen). Prüfung: `tools/test.sh tunnel`.
 - **Koordinaten:** `Geo.to_local(lat, lon)` → `Vector2(x, z)`, x = Ost, z = Süd.
 - **Geländehöhen (#8):** `TerrainSource` lädt Höhenkacheln (Mapterhorn), `TerrainBake` macht daraus im Bake das 5-m-Raster `Terrain` (Wasser flach, Hof eben, Brückendecks). Höhe holen: `Terrain.at(p)` (Boden), `Terrain.near(p, y)` (Boden oder Brücke, je nachdem was näher an y liegt), `Terrain.piece_y(piece, p)` (Routenstück), in Baustellen `Site.gw(p, y)`. Kartenebenen-Shader rechnen die Höhe pro Pixel aus (`terrain_depth`); Fahrbahn, Gehweg und Markierung auf Brücken liegen in eigenen Ebenen `*_deck`, die nur angehoben werden (`terrain_depth_deck`). Mausklicks treffen mit `Terrain.top(p)` auch Brücken. Ohne Höhen (offline, Testkarte) ist alles 0. Neue Weltpunkte nie mit fester Höhe bauen (Lint-Regel gelaende-hoehen).
 - **Spurschlüssel:** `edge*16 + dir*8 + lane`. Spur 0 ist die linke Spur in Fahrtrichtung. **Spurkoordinaten:** s = Meter entlang der Spur, seitlich + = rechts (Bordstein).
@@ -86,12 +87,13 @@ Autoloads (`project.godot`):
 - **`World`** besitzt Karte, Umgebung, HQ, Verkehr, Fuhrpark, Aufträge, Lichter und die Kamera (`CameraRig`, Shapez-2-Stil). `CameraRig.enter_topdown()` / `exit_topdown()` schalten auf eine orthografische Draufsicht (Absperrung-Designer).
   - `DayNight`: Sonne nach Breitengrad und Datum.
   - `LightPool`: echte Lichter an den nächsten Laternen.
-  - `SignalHeads`: Ampeln.
+  - `SignalHeads`: Ampeln (nicht in Tunneln).
+  - `UndergroundView` (#31, Taste U): Schleier über der Stadt, Ebenen `under_*` sichtbar, Fahrzeuge in Tunneln als Kästen. `TrafficSim.in_tunnel(ag)` entscheidet, ob ein Fahrzeug im Tunnel ist (Körper hinter dem Portal); dann zeichnen weder `_place_visual` noch `Vehicle.apply_agent_pose` das Modell. `Router.nearest_lane` findet Tunnelspuren nur mit `under = true` (Klick auf die Oberfläche meint die Straße oben).
   - `HQ`: Hof, Halle, Lagerboxen, Parkplätze.
 - **`HUD`:** obere Leiste, linke Leiste (Aufträge, Fuhrpark, Finanzen, Hilfe, **Meldungen** mit Zähler) und Kontextfenster für Fahrzeug und Baustelle.
   - `ClosureDesigner` (#9, „Absperrung planen“): eigenes Vollbild-Control im HUD, blendet die übrigen HUD-Teile (außer Meldungen/Toasts) aus, ist `World.tool` (Rechtsklick), pausiert das Spiel und zeichnet den Plan als Symbole über der Draufsicht. Übernehmen → `Site.set_plan()`.
   - Stil: schwarz/weiß mit orangem Akzent (`UI`-Kit).
-  - **`WorldMarkers`** (erstes Kind des HUD, also unter allen Fenstern): Markierungen für Zentrale, Baustellen, Ausschreibungen und Fahrzeuge, am Bildrand mit Pfeil; Leiste unten rechts mit Ansicht-Schaltern (H Markierungen, B Gebäude = Ebene `building` der Kartenkacheln). Der freie Bildbereich hängt an `HUD.LEFT_W`/`RIGHT_W`; wer dort Fenster ändert, prüft die Markierungen mit `tools/test.sh markierungen`.
+  - **`WorldMarkers`** (erstes Kind des HUD, also unter allen Fenstern): Markierungen für Zentrale, Baustellen, Ausschreibungen und Fahrzeuge, am Bildrand mit Pfeil; Leiste unten rechts mit Ansicht-Schaltern (H Markierungen, B Gebäude = Ebene `building` der Kartenkacheln, U Untergrund – wird nicht gespeichert). Der freie Bildbereich hängt an `HUD.LEFT_W`/`RIGHT_W`; wer dort Fenster ändert, prüft die Markierungen mit `tools/test.sh markierungen`.
 
 ## Speichern
 

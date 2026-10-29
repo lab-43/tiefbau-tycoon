@@ -553,8 +553,16 @@ func _repro_start() -> void:
 		shots_dir = _out
 	var mid: String = _iss.get("map", {}).get("id", "")
 	var mdir := Game.MAPS_DIR.path_join(mid)
-	if not FileAccess.file_exists(mdir.path_join("baked_v%d.bin" % MapBuilder.BAKE_VERSION)) and not mid.begins_with("dev_"):
+	# the saved map is baked_v<N>.bin, or baked_v<N>_flach.bin when no ground heights could be loaded: after a change
+	# to the bake with the same BAKE_VERSION both must go, or the pictures show the old map (lesson karten-cache-flach)
+	var cached: Array = []
+	for f in DirAccess.get_files_at(mdir):
+		if f.begins_with("baked_v%d" % MapBuilder.BAKE_VERSION) and f.ends_with(".bin"):
+			cached.append(f)
+	if cached.is_empty() and not mid.begins_with("dev_"):
 		print("E2E HINWEIS: gebackene Karte fehlt in %s – sie wird neu aufbereitet (Geofabrik/Overpass nötig)." % ProjectSettings.globalize_path(mdir))
+	elif not cached.is_empty():
+		print("E2E HINWEIS: gespeicherte Karte %s wird benutzt – nach Änderungen am Aufbereiten erst löschen." % ", ".join(cached))
 	_rlog = FileAccess.open(_out.path_join("repro.log"), FileAccess.WRITE)
 	print("E2E repro #%d: %s" % [int(_iss.get("id", 0)), _iss.get("title")])
 	var ok: bool = await get_parent().load_save_file(_iss_dir.path_join("spielstand.sav"))

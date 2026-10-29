@@ -53,6 +53,7 @@ description: Use this skill to set up, check, test, build or deliver the Tiefbau
   - `--geofabrik-index=<url>`: lokaler Geofabrik-Ersatz.
   - `--data-pack=<pck>`
   - Repro: `--e2e=repro --issue=<ordner> --watch=<s> --out=<dir>` (Skill issue-ablauf). `--every=<s>` macht beim Laufen alle s Sekunden ein Bild der gemeldeten Kameraansicht (für Animationen).
+  - Zusatzbilder: `--views=x,z,dist,yaw,pitch[,ohne][,unter]|…` („ohne“ blendet Gebäude aus, „unter“ schaltet die Untergrund-Ansicht ein). Nach Änderungen am Aufbereiten ohne Versionssprung alle `baked_v*.bin` der Karte löschen, auch `_flach` (Lektion karten-cache-flach).
 
 ## 3. Screenshots (bei jeder sichtbaren Änderung)
 

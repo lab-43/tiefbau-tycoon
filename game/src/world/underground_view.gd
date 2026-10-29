@@ -30,7 +30,7 @@ func setup(w: World) -> void:
 	var low := 0.0
 	if Terrain.cur:
 		var hs: PackedFloat32Array = Terrain.cur.h
-		for i in range(0, hs.size(), 7):
+		for i in range(0, hs.size(), 31):
 			low = minf(low, hs[i])
 	var pm := PlaneMesh.new()
 	pm.size = b.size * 4.0 + Vector2(4000, 4000)

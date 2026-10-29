@@ -98,12 +98,12 @@ func in_tunnel(ag: Agent) -> bool:
 	var u = under_lanes.get(int(pc.key))
 	if u == null:
 		return false
-	if pc.t == Agent.LANE:
-		var half := ag.length * 0.5 + 0.3
-		if u[0] and ag.s < half:
-			return false
-		if u[1] and router.lane_len(int(pc.key)) - ag.s < half:
-			return false
+	# LANE and BLEND pieces both count s along the lane (BLEND: the lane it leaves)
+	var half := ag.length * 0.5 + 0.3
+	if u[0] and ag.s < half:
+		return false
+	if u[1] and router.lane_len(int(pc.key)) - ag.s < half:
+		return false
 	return true
 
 
