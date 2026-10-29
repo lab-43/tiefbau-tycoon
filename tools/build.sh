@@ -17,6 +17,10 @@ TEST=0; [ "$2" = "--test-build" ] && TEST=1
 mkdir -p "$OUT" && OUT="$(cd "$OUT" && pwd)"   # absolute: the export runs inside game/
 [ -d "$ROOT/game/assets/consim" ] || { echo "Assets fehlen (game/assets/consim) – siehe Skill tycoon-dev, Abschnitt Assets"; exit 1; }
 
+# session clones are often shallow: without the history and tags the version is a bare hash (lesson version-ohne-tag)
+if [ "$(git -C "$ROOT" rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+  git -C "$ROOT" fetch -q --unshallow --tags origin 2>/dev/null || echo "WARNUNG: flacher Klon, Version ohne Tag (git fetch --unshallow --tags)"
+fi
 VERSION=$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo dev)
 BRANCH=$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
 COMMIT=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo "")
