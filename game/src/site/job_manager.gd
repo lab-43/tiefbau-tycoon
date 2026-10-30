@@ -46,6 +46,8 @@ func _build_candidates() -> void:
 		var e: Dictionary = net.edges[ei]
 		if not (e.cls in STREET_CLASSES) or e.bridge or e.get("tunnel", false) or e.get("under", false) or ei == world.traffic._hq_edge:
 			continue
+		if Terrain.cur != null and Terrain.cur.decks.has(ei):
+			continue   # raised: a ramp on an embankment (#32)
 		var dir: int = (key >> 3) & 1
 		if (key & 7) != net.lane_count(ei, dir) - 1:
 			continue
@@ -181,6 +183,9 @@ func check_spot(p: Vector2, pipe: Dictionary, L := 4.0, D := 1.8, y_click := NAN
 		return out
 	if e.bridge:
 		out.error = "auf einer Brücke wird nicht gegraben"
+		return out
+	if Terrain.cur != null and Terrain.cur.decks.has(ei):   # raised as a bridge ramp (#32)
+		out.error = "auf einer Brückenrampe wird nicht gegraben"
 		return out
 	if e.get("tunnel", false) or e.get("under", false):
 		out.error = "im Tunnel wird nicht gegraben"

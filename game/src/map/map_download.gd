@@ -371,7 +371,7 @@ func _query(j: Dictionary) -> String:
 				"way[\"natural\"~\"^(water|wood|scrub|grassland|heath|sand|beach|wetland)$\"];" +
 				"way[\"waterway\"~\"^(riverbank|dock|canal|river)$\"];way[\"water\"];" +
 				"way[\"amenity\"=\"parking\"];way[\"railway\"~\"^(rail|light_rail|subway|tram)$\"];" +
-				"way[\"area:highway\"];" +
+				"way[\"area:highway\"];way[\"man_made\"=\"bridge\"];" +
 				"node[\"highway\"~\"^(traffic_signals|stop|give_way|crossing|bus_stop|street_lamp)$\"];" +
 				"node[\"natural\"=\"tree\"];);out body geom qt;")
 		"relidx":
@@ -381,7 +381,8 @@ func _query(j: Dictionary) -> String:
 				"relation[\"type\"=\"multipolygon\"][\"leisure\"~\"^(park|garden)$\"];" +
 				"relation[\"type\"=\"multipolygon\"][\"natural\"~\"^(water|wood|scrub|grassland|wetland)$\"];" +
 				"relation[\"type\"=\"multipolygon\"][\"waterway\"=\"riverbank\"];" +
-				"relation[\"type\"=\"multipolygon\"][\"water\"];);out ids;")
+				"relation[\"type\"=\"multipolygon\"][\"water\"];" +
+				"relation[\"type\"=\"multipolygon\"][\"man_made\"=\"bridge\"];);out ids;")
 		"rel":
 			var ids: PackedInt64Array = j.ids
 			var s := []

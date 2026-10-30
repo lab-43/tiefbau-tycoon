@@ -300,6 +300,7 @@ func _make_edge(r: Dictionary, a: int, b: int, data: OsmData) -> Dictionary:
 		"width": carriage, "sw_l": sw_l, "sw_r": sw_r,
 		"speed": kmh / 3.6, "bridge": tags.get("bridge", "") in ["yes", "viaduct"], "layer": layer,
 		"tunnel": tags.get("tunnel", "") == "yes", "under": is_under(tags),
+		"maxheight": parse_width(str(tags.get("maxheight", ""))),
 		"bus": data.bus_way_ids.has(int(r.way.id)) or cls == "busway",
 		"turn_f": str(tags.get("turn:lanes", tags.get("turn:lanes:forward", ""))) if true else "",
 		"turn_b": str(tags.get("turn:lanes:backward", "")),

@@ -94,6 +94,8 @@ static func get_mat(name: String) -> Material:
 			m = f
 		"portal":
 			m = _std(Color(0.66, 0.65, 0.62), 0.9)
+		"embankment":
+			m = _std(Color(0.42, 0.52, 0.32), 0.97)   # grass on the slopes of raised roads (#32)
 		"portal_green":
 			m = _std(Color(0.40, 0.51, 0.31), 0.97)
 		"portal_dark":

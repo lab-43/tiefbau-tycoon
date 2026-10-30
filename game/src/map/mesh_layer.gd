@@ -68,7 +68,7 @@ func quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: Vector3, ua := Vect
 ## Flat horizontal polygon at height y facing up (uses world xz as uv * uv_scale).
 ## With ground heights: y above the ground, cut into DRAPE cells so the polygon follows the slopes.
 func polygon_up(poly: PackedVector2Array, y: float, uv_scale: float = 1.0, col := Color.WHITE, holes: Array = []) -> bool:
-	if terrain != null and terrain.mode_deck.is_empty() and terrain.mode_node < 0:
+	if terrain != null and not terrain.flat and terrain.mode_deck.is_empty() and terrain.mode_node < 0:
 		return _polygon_draped(poly, y, uv_scale, col, holes)
 	return _polygon_flat(poly, y, uv_scale, col, holes)
 

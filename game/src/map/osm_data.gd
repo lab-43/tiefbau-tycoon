@@ -13,6 +13,7 @@ var bounds := Rect2()                 # map rectangle in local coordinates
 var roads: Array = []                 # {id, ids: PackedInt64Array, pts: PackedVector2Array, tags}
 var paths: Array = []                 # {id, pts, tags}
 var rails: Array = []                 # {id, pts, tags}
+var bridge_areas: Array = []          # man_made=bridge outlines {outer, tags}: bridge:structure for the bridges (#32)
 var under_rails: Array = []           # rails in tunnels (U-Bahn, S-Bahn tunnel): only for the underground view (#31)
 var buildings: Array = []             # {id, outer: PackedVector2Array, holes: Array, tags}
 var areas: Array = []                 # {id, kind, outer, holes, tags}

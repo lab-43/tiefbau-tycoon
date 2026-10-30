@@ -17,7 +17,7 @@ const WAY_KEYS := {
 	"natural": ["water", "wood", "scrub", "grassland", "heath", "sand", "beach", "wetland"],
 	"waterway": ["riverbank", "dock", "canal", "river"],
 	"water": null, "amenity": ["parking"], "railway": ["rail", "light_rail", "subway", "tram"],
-	"area:highway": null,
+	"area:highway": null, "man_made": ["bridge"],
 }
 const NODE_KEYS := {
 	"highway": ["traffic_signals", "stop", "give_way", "crossing", "bus_stop", "street_lamp"],
@@ -26,6 +26,7 @@ const NODE_KEYS := {
 const REL_KEYS := {
 	"building": null, "landuse": null, "leisure": ["park", "garden"],
 	"natural": ["water", "wood", "scrub", "grassland", "wetland"], "waterway": ["riverbank"], "water": null,
+	"man_made": ["bridge"],
 }
 
 var parser: OsmParser

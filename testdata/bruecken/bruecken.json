@@ -1,0 +1,10 @@
+{
+ "quelle": "OpenStreetMap-Mitwirkende (ODbL), Geofabrik-Auszug Hamburg vom 27.10.2026; Geländehöhen: Mapterhorn mit DGM1 Hamburg © Freie und Hansestadt Hamburg, LGV (dl-de/by-2.0)",
+ "name": "Waltershof / Köhlbrandbrücke (Meldung #32)",
+ "art": "Autobahnkreuz A7 Waltershof, Köhlbrandbrücke (Schrägseil), Bahn- und Straßenbrücken im Hafen",
+ "lat": 53.5205,
+ "lon": 9.942,
+ "halbe_kante_m": 2000.0,
+ "pbf": "waltershof.osm.pbf",
+ "gelaende": "gelaende"
+}

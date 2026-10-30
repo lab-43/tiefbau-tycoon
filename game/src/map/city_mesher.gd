@@ -31,6 +31,8 @@ const STREET_TREE_GAP := 6.0   # made-up street trees keep this far from real on
 var _asphalt: AsphaltIndex
 var _real_trees := {}         # Vector2i (REAL_TREE_CELL cells) -> Array[Vector2]
 var portals: TunnelPortals = null   # railway tunnels register their portals here (#31)
+var rail_decks := {}          # rail way index -> deck (BridgeHeights, #32)
+var path_decks := {}          # path way index -> deck
 
 
 func _init(d: OsmData, n: RoadNet, chunk: float) -> void:
@@ -201,7 +203,6 @@ func _areas() -> void:
 
 
 func _paths() -> void:
-	var decks := TerrainBake.line_decks(terrain, data.paths) if terrain else {}
 	for pi in data.paths.size():
 		var p: Dictionary = data.paths[pi]
 		var hw: String = p.tags.get("highway", "")
@@ -222,13 +223,18 @@ func _paths() -> void:
 		if tw > 0.5 and tw < 12.0:
 			w = tw
 		var pts := Geo.chaikin(p.pts, 1, 2.0)
+		var dk: Dictionary = path_decks.get(pi, {})
+		if not dk.is_empty():
+			pts = Geo.densify(pts, 3.0)
 		var ck := chunk_of(pts[pts.size() >> 1])
 		var l := layer(ck, layer_name)
 		if terrain:
-			terrain.mode_deck = decks.get(pi, [])
+			terrain.mode_deck = dk
 		_flat_strip(l, pts, w, PATH_Y)
+		if not dk.is_empty() and not (str(p.tags.get("bridge", "")) in ["", "no"]):
+			_deck_sides(ck, pts, w * 0.5, 1.1)
 	if terrain:
-		terrain.mode_deck = []
+		terrain.mode_deck = {}
 
 
 func _flat_strip(l: MeshLayer, pts: PackedVector2Array, w: float, y: float) -> void:
@@ -241,12 +247,14 @@ func _flat_strip(l: MeshLayer, pts: PackedVector2Array, w: float, y: float) -> v
 
 
 func _rails() -> void:
-	var decks := TerrainBake.line_decks(terrain, data.rails) if terrain else {}
 	for ri in data.rails.size():
 		var r: Dictionary = data.rails[ri]
 		if terrain:
-			terrain.mode_deck = decks.get(ri, [])
+			terrain.mode_deck = rail_decks.get(ri, {})
 		var pts := Geo.chaikin(r.pts, 2, 3.0)
+		var dk: Dictionary = rail_decks.get(ri, {})
+		if not dk.is_empty():
+			pts = Geo.densify(pts, 3.0)   # the ballast follows the profile of a raised track (#32)
 		var ck := chunk_of(pts[pts.size() >> 1])
 		var is_tram: bool = r.tags.get("railway", "") == "tram"
 		if not is_tram:
@@ -258,8 +266,59 @@ func _rails() -> void:
 		for off in [-0.72, 0.72]:
 			var line := Geo.offset_polyline(rpts, off)
 			_flat_strip(rl, line, 0.08, 0.075 if is_tram else 0.12)
+		if not dk.is_empty():
+			if str(r.tags.get("bridge", "")) in ["", "no"]:
+				_embankment_line(ck, dk, pts, 1.9)
+			else:
+				_deck_sides(ck, pts, 2.0, 1.0)
 	if terrain:
-		terrain.mode_deck = []
+		terrain.mode_deck = {}
+
+
+## Sides of a raised deck (railway and path bridges, #32): concrete from 1.2 m below the surface up to a
+## parapet of `parapet` metres, `hw` to either side of the centre line. Built while terrain.mode_deck is set.
+func _deck_sides(ck: Vector2i, pts: PackedVector2Array, hw: float, parapet: float) -> void:
+	var cb := layer(ck, "bridge")
+	for side in [1.0, -1.0]:
+		var line := Geo.offset_polyline(pts, (hw + 0.3) * side)
+		var line_in := Geo.offset_polyline(pts, hw * side)
+		for i in range(line.size() - 1):
+			var a := line[i]
+			var b := line[i + 1]
+			var nout: Vector2 = Geo.right_of((b - a).normalized()) * side
+			var n := Vector3(nout.x, 0, nout.y)
+			cb.quad(Geo.v3(a, -1.2), Geo.v3(b, -1.2), Geo.v3(b, parapet), Geo.v3(a, parapet), n)
+			cb.quad(Geo.v3(line_in[i], 0.0), Geo.v3(line_in[i + 1], 0.0), Geo.v3(line_in[i + 1], parapet),
+				Geo.v3(line_in[i], parapet), -n)
+			cb.quad(Geo.v3(line_in[i], parapet), Geo.v3(line_in[i + 1], parapet), Geo.v3(b, parapet), Geo.v3(a, parapet), Vector3.UP)
+
+
+## Embankment of a raised track or path that is no bridge (#32): grass slopes 1 : 1.5 down to the ground.
+func _embankment_line(ck: Vector2i, dk: Dictionary, pts: PackedVector2Array, hw: float) -> void:
+	var keep: Dictionary = terrain.mode_deck
+	terrain.mode_deck = {}
+	var l := layer(ck, "embankment")
+	for side in [1.0, -1.0]:
+		var tops := Geo.offset_polyline(pts, hw * side)
+		var feet := PackedVector2Array()
+		var ht := PackedFloat32Array()
+		var raise := PackedFloat32Array()
+		for i in pts.size():
+			var sc := terrain.deck_s(dk, pts[i])
+			var z := Terrain.deck_h(dk, sc)
+			var r := maxf(0.0, z - Terrain.deck_g(dk, sc))
+			raise.append(r)
+			var d := (pts[mini(i + 1, pts.size() - 1)] - pts[maxi(i - 1, 0)]).normalized()
+			feet.append(tops[i] + Geo.right_of(d) * side * (r * 1.5 + 0.05))
+			ht.append(z - 0.02 - terrain.sample(tops[i].x, tops[i].y))
+		for i in pts.size() - 1:
+			if raise[i] < 0.1 and raise[i + 1] < 0.1:
+				continue
+			var out: Vector2 = Geo.right_of((pts[i + 1] - pts[i]).normalized()) * side
+			var n := (Vector3.UP * 1.5 + Vector3(out.x, 0.0, out.y)).normalized()
+			l.quad(Geo.v3(tops[i], maxf(ht[i], 0.0)), Geo.v3(tops[i + 1], maxf(ht[i + 1], 0.0)), Geo.v3(feet[i + 1], 0.0),
+				Geo.v3(feet[i], 0.0), n)
+	terrain.mode_deck = keep
 
 
 ## Railways below the surface (#31): a band per track for the underground view (U-Bahn blue, other trains

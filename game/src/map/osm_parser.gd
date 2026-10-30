@@ -153,6 +153,14 @@ func _way(el: Dictionary) -> void:
 		else:
 			_add_clipped_lines(data.under_rails, id, pts, tags)
 		return
+	if tags.get("man_made", "") == "bridge":
+		# outline of a bridge: its structure (beam, arch, cable-stayed ...) for the bridges on it (#32)
+		# (an outline that reaches beyond the read area comes as its longest part inside: closed straight across)
+		if pts.size() >= 4 and pts[0].distance_to(pts[pts.size() - 1]) < 0.05:
+			data.bridge_areas.append({"id": id, "outer": pts.slice(0, pts.size() - 1), "tags": tags})
+		elif pts.size() >= 3:
+			data.bridge_areas.append({"id": id, "outer": pts, "tags": tags})
+		return
 	var kind := OsmData.area_kind(tags)
 	if kind != "" and pts.size() >= 4 and pts[0].distance_to(pts[pts.size() - 1]) < 0.05:
 		_add_area(id, kind, pts.slice(0, pts.size() - 1), [], tags)
@@ -273,6 +281,10 @@ func _relation(el: Dictionary) -> void:
 	var outer_rings := _assemble_rings(outers)
 	var inner_rings := _assemble_rings(inners)
 	var is_building: bool = tags.has("building") and tags.get("building", "") != "no"
+	if not is_building and tags.get("man_made", "") == "bridge":
+		for ring in outer_rings:
+			data.bridge_areas.append({"id": int(el["id"]), "outer": ring, "tags": tags})
+		return
 	var kind := "" if is_building else OsmData.area_kind(tags)
 	if not is_building and kind == "":
 		return

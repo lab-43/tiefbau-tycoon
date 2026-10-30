@@ -66,12 +66,12 @@ func build_all() -> void:
 	var total := maxi(1, net.edges.size() + net.nodes.size())
 	for ei in net.edges.size():
 		if terrain:
-			terrain.mode_deck = terrain.decks.get(ei, [])
+			terrain.mode_deck = terrain.decks.get(ei, {})
 		_edge(ei)
 		if ei % 200 == 0 and progress_cb.is_valid():
 			progress_cb.call(float(ei) / total)
 	if terrain:
-		terrain.mode_deck = []
+		terrain.mode_deck = {}
 	for ni in net.nodes.size():
 		if terrain:
 			terrain.mode_node = ni if terrain.node_decks.has(ni) else -1
@@ -117,6 +117,8 @@ func _edge(ei: int) -> void:
 		_sidewalk_strip(ck, left, Geo.offset_polyline(center, -hw - e.sw_l), center, false, clips)
 	if e.bridge:
 		_bridge_sides(ck, center, hw + e.sw_r, hw + e.sw_l)
+	elif _on_deck():
+		_embankment(ck, center, s0, hw + e.sw_r, hw + e.sw_l)   # an approach ramp (#32)
 	_edge_markings(ei, e, ck, s0, s1)
 
 
@@ -159,6 +161,13 @@ func _under_edge(ei: int, e: Dictionary, s0: float, s1: float) -> void:
 				wr = maxf(wr, ow)
 		portals.add(smp[0], d, wl, wr, "road", own)
 		under_stats.portals += 1
+
+
+func _on_bridge_node(n: Dictionary) -> bool:
+	for end in n.ends:
+		if not net.edges[end >> 1].bridge:
+			return false
+	return true
 
 
 ## Junction areas a sidewalk must not cover: [polygon, bounding rect] of node n if its area was built
@@ -240,6 +249,82 @@ func _inside_any(p: Vector2, clips: Array) -> bool:
 		if (cl[1] as Rect2).has_point(p) and Geometry2D.is_point_in_polygon(p, cl[0]):
 			return true
 	return false
+
+
+## Embankment of a raised road that is no bridge (approach ramp, #32): grass slopes 1 : 1.5 from the outer edge
+## (sidewalk included) down to the ground on both sides. center starts at arc length s0 of the edge.
+const SLOPE := 1.5
+
+func _embankment(ck: Vector2i, center: PackedVector2Array, s0: float, off_r: float, off_l: float) -> void:
+	var dk: Dictionary = terrain.mode_deck
+	terrain.mode_deck = {}   # the foot lies on the ground, the top is given as height above it
+	var l := layer(ck, "embankment")
+	var cum := Geo.cumulative(center)
+	for side in [1.0, -1.0]:
+		var off: float = (off_r if side > 0 else off_l) + 0.2
+		var tops := Geo.offset_polyline(center, off * side)
+		var feet := PackedVector2Array()
+		var ht := PackedFloat32Array()   # top height above its own ground
+		var raise := PackedFloat32Array()
+		for i in center.size():
+			var z := Terrain.deck_h(dk, s0 + cum[i])
+			var r := maxf(0.0, z - Terrain.deck_g(dk, s0 + cum[i]))
+			raise.append(r)
+			var d := (center[mini(i + 1, center.size() - 1)] - center[maxi(i - 1, 0)]).normalized()
+			feet.append(tops[i] + Geo.right_of(d) * side * (r * SLOPE + 0.05))
+			ht.append(z - 0.05 - terrain.sample(tops[i].x, tops[i].y))
+		for i in center.size() - 1:
+			if raise[i] < 0.1 and raise[i + 1] < 0.1:
+				continue
+			var a := Geo.v3(tops[i], maxf(ht[i], 0.0))
+			var b := Geo.v3(tops[i + 1], maxf(ht[i + 1], 0.0))
+			var c := Geo.v3(feet[i + 1], 0.0)
+			var f := Geo.v3(feet[i], 0.0)
+			var out: Vector2 = Geo.right_of((center[i + 1] - center[i]).normalized()) * side
+			var n := (Vector3.UP * SLOPE + Vector3(out.x, 0.0, out.y)).normalized()
+			l.quad(a, b, c, f, n)
+	terrain.mode_deck = dk
+
+
+## Embankment around a raised junction area that does not lie on a bridge: slopes from the outline down to the
+## ground, except where its roads leave it.
+func _junction_embankment(ck: Vector2i, ni: int, poly: PackedVector2Array) -> void:
+	var n: Dictionary = net.nodes[ni]
+	var z: float = terrain.node_decks[ni]
+	var mode := terrain.mode_node
+	terrain.mode_node = -1
+	var l := layer(ck, "embankment")
+	var m := poly.size()
+	for i in m:
+		var a := poly[i]
+		var b := poly[(i + 1) % m]
+		if a.distance_to(b) < 0.2:
+			continue
+		var d := (b - a).normalized()
+		var out := Geo.right_of(d)
+		var mid := (a + b) * 0.5
+		if Geometry2D.is_point_in_polygon(mid + out * 0.3, poly):
+			out = -out
+		# where a road leaves the junction area the ground in front is that road, not a slope
+		var mouth := false
+		for end in n.ends:
+			var e: Dictionary = net.edges[end >> 1]
+			var at_b: bool = (end & 1) == 1
+			var smp := Geo.sample(e.pts, e.cum, float(e.len) - float(e.trim_b) if at_b else float(e.trim_a))
+			if (smp[0] as Vector2).distance_to(mid) < float(e.width) * 0.5 + maxf(float(e.sw_l), float(e.sw_r)) + 0.5:
+				mouth = true
+				break
+		if mouth:
+			continue
+		var ra := maxf(0.0, z - terrain.sample(a.x, a.y))
+		var rb := maxf(0.0, z - terrain.sample(b.x, b.y))
+		if ra < 0.1 and rb < 0.1:
+			continue
+		var fa := a + out * (ra * SLOPE + 0.05)
+		var fb := b + out * (rb * SLOPE + 0.05)
+		var nrm := (Vector3.UP * SLOPE + Vector3(out.x, 0.0, out.y)).normalized()
+		l.quad(Geo.v3(a, ra - 0.05), Geo.v3(b, rb - 0.05), Geo.v3(fb, 0.0), Geo.v3(fa, 0.0), nrm)
+	terrain.mode_node = mode
 
 
 func _bridge_sides(ck: Vector2i, center: PackedVector2Array, off_r: float, off_l: float) -> void:
@@ -578,6 +663,8 @@ func _junction(ni: int) -> void:
 	asp.polygon_up(poly, Y_ROAD, 1.0, Color.WHITE, n.get("holes", []))
 	for extra in n.get("extra_polys", []):
 		asp.polygon_up(extra, Y_ROAD, 1.0)
+	if terrain and terrain.node_decks.has(ni) and not _on_bridge_node(n):
+		_junction_embankment(ck, ni, poly)
 	var mk := layer(ck, "mark")
 	for c in n.get("crossings", []):
 		_crossing_at(mk, c.p, c.d, c.hw, c.kind)

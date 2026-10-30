@@ -2,9 +2,10 @@ class_name Terrain
 extends RefCounted
 ## Ground heights of the map (#8): a smoothed height grid in local metres, sampled bilinearly. The same grid
 ## is a global shader texture, so the GPU computes the exact same surface per pixel (common.gdshaderinc).
-## Also holds the bridge decks: a bridge does not follow the ground but runs straight between its ends.
-## Terrain.cur is the terrain of the loaded map (null = flat map, height 0 everywhere).
-## Built by TerrainBake in the bake thread, saved with the baked map.
+## Also holds the decks (#32): bridges and their approach ramps do not follow the ground; their height is a profile
+## along the centre line, computed by BridgeHeights. Maps without heights get a flat terrain (flat = true, height 0
+## everywhere) so their bridges can rise as well. Terrain.cur is the terrain of the loaded map (null before one is
+## loaded). Built by TerrainBake (or flat_for) in the bake thread, saved with the baked map.
 
 static var cur: Terrain = null
 
@@ -14,13 +15,17 @@ var nx := 0
 var nz := 0
 var h := PackedFloat32Array()     # row-major, index = j * nx + i
 var info := {}                    # source, attribution, statistics (shown in the log)
-# bridges: edge index -> [h_a, h_b, a(Vector2), b(Vector2), land_a, land_b, trim_a, trim_b, blend, half width, pts]
+var flat := false                 # no height data: everything at 0, only the decks rise (#32)
+# raised road edges (bridges, approach ramps): edge index -> deck (make_deck)
 var decks := {}
-var node_decks := {}              # node index on a bridge (not touching land) -> deck height
+var node_decks := {}              # raised junction (on a bridge or a ramp) -> height of its flat area
 var node_pos := {}                # same nodes -> position (for surface_near)
-# set by the meshers while they build a bridge (deck array as in decks) or a junction on a bridge (bake thread)
-var mode_deck: Array = []
+# set by the meshers while they build a deck (a deck dictionary) or a raised junction (bake thread)
+var mode_deck := {}
 var mode_node := -1
+
+const DECK_STEP := 2.0            # profile stations at most this far apart (m)
+const DECK_CELL := 12.0           # cells of the per-deck segment index
 
 var _inv := 0.1
 
@@ -36,6 +41,18 @@ func setup(o: Vector2, c: float, w: int, d: int, heights: PackedFloat32Array) ->
 
 func is_empty() -> bool:
 	return nx < 2 or nz < 2
+
+
+## A terrain without heights for maps whose height tiles could not be loaded (and offline test maps): sample()
+## is 0 everywhere, but it carries the decks so bridges still rise (#32). The shaders treat it as flat.
+static func flat_for(bounds: Rect2) -> Terrain:
+	var t := Terrain.new()
+	var b := bounds.grow(2000.0)
+	var c := maxf(b.size.x, b.size.y)
+	t.setup(b.position, c, 2, 2, PackedFloat32Array([0.0, 0.0, 0.0, 0.0]))
+	t.flat = true
+	t.info = {"source": "flach", "name": "flach", "attribution": "", "min": 0.0, "max": 0.0}
+	return t
 
 
 ## Height of the ground at local (x, z), bilinear between the grid nodes, clamped at the border.
@@ -103,7 +120,7 @@ func _build_gradients() -> void:
 				(h[j1 * nx + i] - h[j0 * nx + i]) * sz)
 
 
-## Height of whatever the mesher is building right now: a bridge deck or the ground.
+## Height of whatever the mesher is building right now: a deck or the ground.
 func surface(x: float, z: float) -> float:
 	if not mode_deck.is_empty():
 		return deck_at(mode_deck, Vector2(x, z))
@@ -112,7 +129,7 @@ func surface(x: float, z: float) -> float:
 	return sample(x, z)
 
 
-## Height of a junction on a bridge at p (never below the ground). Not on a bridge: the ground.
+## Height of a raised junction at p (never below the ground). Not raised: the ground.
 func node_height(ni: int, p: Vector2) -> float:
 	var g := sample(p.x, p.y)
 	if not node_decks.has(ni):
@@ -126,41 +143,95 @@ func surface_normal(x: float, z: float) -> Vector3:
 	return normal(x, z)
 
 
-## Deck height of bridge edge ei at p. Not a bridge: the ground.
+## Deck height of road edge ei at p. Not raised: the ground.
 func deck_height(ei: int, p: Vector2) -> float:
-	var dk: Array = decks.get(ei, [])
+	var dk: Dictionary = decks.get(ei, {})
 	if dk.is_empty():
 		return sample(p.x, p.y)
 	return deck_at(dk, p)
 
 
-## A deck [h_a, h_b, a, b, land_a, land_b, trim_a, trim_b, blend]: straight between a and b. Near a land end it
-## starts at the ground height where the junction area ends and runs smoothly into the straight line (not along the
-## ground, which drops away at a bank). At a junction on the bridge the deck stays at the junction's height up to
-## the end of the junction area, so road and junction meet without a step. Never below the ground (embankments).
-func deck_at(dk: Array, p: Vector2) -> float:
-	var a: Vector2 = dk[2]
-	var b: Vector2 = dk[3]
-	var ab := b - a
-	var len2 := maxf(ab.length_squared(), 0.01)
-	var t := clampf((p - a).dot(ab) / len2, 0.0, 1.0)
-	var s := t * sqrt(len2)
-	var total := sqrt(len2)
-	var bl: float = dk[8]
-	var ta: float = dk[6]
-	var tb: float = dk[7]
-	var s0 := 0.0 if dk[4] else minf(ta, total * 0.45)
-	var s1 := total if dk[5] else total - minf(tb, total * 0.45)
-	var deck := lerpf(float(dk[0]), float(dk[1]), clampf((s - s0) / maxf(s1 - s0, 0.01), 0.0, 1.0))
-	# the ground where the junction area ends, at the same distance from the centre line as p
-	var dir := ab / total
-	if dk[4] and s < ta + bl:
-		var qa := p - dir * maxf(0.0, s - ta)
-		deck = lerpf(sample(qa.x, qa.y), deck, smoothstep(ta, ta + bl, s))
-	if dk[5] and total - s < tb + bl:
-		var qb := p + dir * maxf(0.0, total - s - tb)
-		deck = lerpf(sample(qb.x, qb.y), deck, smoothstep(tb, tb + bl, total - s))
-	return maxf(deck, sample(p.x, p.y))
+## A deck: the height profile h along a centre line (pts, cum), stations evenly spaced from s = 0 to the end, and
+## the ground under the centre line at the same stations (g). hw: half width (sidewalks included).
+static func make_deck(pts: PackedVector2Array, cum: PackedFloat32Array, h: PackedFloat32Array, g: PackedFloat32Array,
+		hw: float) -> Dictionary:
+	var total: float = cum[cum.size() - 1]
+	return {"pts": pts, "cum": cum, "h": h, "g": g, "hw": hw, "step": total / maxf(1.0, h.size() - 1.0)}
+
+
+## Height of deck dk at p: the profile where p lies across the centre line. Flat across where the deck is
+## raised; where it lies on the ground (the ends of a ramp) it follows the ground across the road as roads do.
+func deck_at(dk: Dictionary, p: Vector2) -> float:
+	var s := deck_s(dk, p)
+	var z := deck_h(dk, s)
+	var raise := z - deck_g(dk, s)
+	if raise >= 0.5:
+		return z
+	var dg := sample(p.x, p.y) - deck_g(dk, s)
+	return z + maxf(0.0, dg) * (1.0 - clampf(raise / 0.5, 0.0, 1.0))
+
+
+## Profile height at arc length s.
+static func deck_h(dk: Dictionary, s: float) -> float:
+	return _deck_lerp(dk.h, float(dk.step), s)
+
+
+## Ground under the centre line at arc length s.
+static func deck_g(dk: Dictionary, s: float) -> float:
+	return _deck_lerp(dk.g, float(dk.step), s)
+
+
+static func _deck_lerp(a: PackedFloat32Array, step: float, s: float) -> float:
+	if a.size() < 2:
+		return a[0] if a.size() == 1 else 0.0
+	var f := clampf(s / maxf(step, 0.001), 0.0, a.size() - 1.0)
+	var i := mini(int(f), a.size() - 2)
+	return lerpf(a[i], a[i + 1], f - i)
+
+
+## Arc length of the point of the centre line of dk nearest to p.
+func deck_s(dk: Dictionary, p: Vector2) -> float:
+	return deck_ds(dk, p).y
+
+
+## [distance, arc length] of the nearest point of the centre line of dk to p (segment index per DECK_CELL cell).
+func deck_ds(dk: Dictionary, p: Vector2) -> Vector2:
+	var pts: PackedVector2Array = dk.pts
+	var cum: PackedFloat32Array = dk.cum
+	if not dk.has("_g"):
+		_index_deck(dk)
+	var cands = (dk._g as Dictionary).get(Vector2i(floori(p.x / DECK_CELL), floori(p.y / DECK_CELL)))
+	var best := INF
+	var bs := 0.0
+	if cands == null:
+		cands = range(pts.size() - 1)   # far from the deck (should not happen while meshing it)
+	for i in cands:
+		var a := pts[i]
+		var b := pts[i + 1]
+		var q := Geometry2D.get_closest_point_to_segment(p, a, b)
+		var d := q.distance_squared_to(p)
+		if d < best:
+			best = d
+			bs = cum[i] + a.distance_to(q)
+	return Vector2(sqrt(best), bs)
+
+
+## Segment index of a deck: every segment in the cells its box (grown by the half width) touches.
+func _index_deck(dk: Dictionary) -> void:
+	var pts: PackedVector2Array = dk.pts
+	var grow: float = float(dk.get("hw", 6.0)) + 4.0
+	var g := {}
+	for i in pts.size() - 1:
+		var r := Rect2(pts[i], Vector2.ZERO).expand(pts[i + 1]).grow(grow)
+		for gx in range(floori(r.position.x / DECK_CELL), floori(r.end.x / DECK_CELL) + 1):
+			for gz in range(floori(r.position.y / DECK_CELL), floori(r.end.y / DECK_CELL) + 1):
+				var k := Vector2i(gx, gz)
+				if not g.has(k):
+					g[k] = PackedInt32Array()
+				var arr: PackedInt32Array = g[k]
+				arr.append(i)
+				g[k] = arr
+	dk["_g"] = g
 
 
 func is_bridge(ei: int) -> bool:
@@ -175,9 +246,9 @@ const BGRID := 50.0
 func _index_bridges() -> void:
 	_bgrid_ready = true
 	for ei in decks:
-		var dk: Array = decks[ei]
-		var hw: float = dk[9] if dk.size() > 9 else 8.0
-		var pts: PackedVector2Array = dk[10] if dk.size() > 10 else PackedVector2Array([dk[2], dk[3]])
+		var dk: Dictionary = decks[ei]
+		var hw: float = dk.hw
+		var pts: PackedVector2Array = dk.pts
 		var r := Rect2(pts[0], Vector2.ZERO)
 		for p in pts:
 			r = r.expand(p)
@@ -219,15 +290,9 @@ func surface_near(p: Vector2, hint: float) -> float:
 					bd = absf(hn - hint)
 					best = hn
 			continue
-		var dk: Array = decks[ei]
-		var hw: float = dk[9] if dk.size() > 9 else 8.0
-		var pts: PackedVector2Array = dk[10] if dk.size() > 10 else PackedVector2Array([dk[2], dk[3]])
-		var near := false
-		for i in pts.size() - 1:
-			if Geometry2D.get_closest_point_to_segment(p, pts[i], pts[i + 1]).distance_to(p) <= hw + 1.0:
-				near = true
-				break
-		if not near:
+		var dk: Dictionary = decks[ei]
+		var ds := deck_ds(dk, p)
+		if ds.x > float(dk.hw) + 1.0:
 			continue
 		var hd := deck_at(dk, p)
 		if absf(hd - hint) < bd:
@@ -249,8 +314,8 @@ func road_height(p: Vector2, key: int = -1, node: int = -1) -> float:
 # Static access for the running game
 # ------------------------------------------------------------------------------------------
 
-## Height of the road under a vehicle on route piece pc (Router/Agent piece) at p: bridge decks for lanes of a
-## bridge and junctions on a bridge, otherwise the ground. 0 on flat maps.
+## Height of the road under a vehicle on route piece pc (Router/Agent piece) at p: decks for lanes of a raised
+## road and raised junctions, otherwise the ground.
 static func piece_y(pc: Dictionary, p: Vector2) -> float:
 	if cur == null:
 		return 0.0
@@ -303,6 +368,9 @@ static func activate(t: Terrain) -> void:
 	if cur == null:
 		RenderingServer.global_shader_parameter_set("terrain_rect", Vector4(0, 0, 0.1, 0))
 		return
+	if cur.flat:
+		RenderingServer.global_shader_parameter_set("terrain_rect", Vector4(0, 0, 0.1, 0))   # shaders: flat map
+		return
 	var img := Image.create_from_data(cur.nx, cur.nz, false, Image.FORMAT_RF, cur.h.to_byte_array())
 	var tex := ImageTexture.create_from_image(img)
 	RenderingServer.global_shader_parameter_set("terrain_tex", tex)
@@ -315,8 +383,13 @@ static func activate(t: Terrain) -> void:
 # ------------------------------------------------------------------------------------------
 
 func serialize() -> Dictionary:
-	return {"origin": origin, "cell": cell, "nx": nx, "nz": nz, "h": h, "info": info, "decks": decks,
-		"node_decks": node_decks, "node_pos": node_pos}
+	var dks := {}
+	for ei in decks:
+		var dk: Dictionary = (decks[ei] as Dictionary).duplicate()
+		dk.erase("_g")   # segment index, rebuilt on first use
+		dks[ei] = dk
+	return {"origin": origin, "cell": cell, "nx": nx, "nz": nz, "h": h, "info": info, "decks": dks,
+		"node_decks": node_decks, "node_pos": node_pos, "flat": flat}
 
 
 static func deserialize(d: Dictionary) -> Terrain:
@@ -329,5 +402,6 @@ static func deserialize(d: Dictionary) -> Terrain:
 	t.decks = d.get("decks", {})
 	t.node_decks = d.get("node_decks", {})
 	t.node_pos = d.get("node_pos", {})
+	t.flat = bool(d.get("flat", false))
 	return null if t.is_empty() else t
 

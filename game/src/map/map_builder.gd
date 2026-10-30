@@ -4,7 +4,7 @@ extends RefCounted
 ## The scene-tree part (creating MeshInstances) happens on the main thread in build_scene().
 
 const CHUNK := 500.0
-const BAKE_VERSION := 11  # 4: water on top of the base ground, no bank walls (#4); 5: merged junctions (#5); 6: smooth transitions (#5); 7: arc turn paths, islands (#5); 8: ground heights (#8); 9: markings after RMS (#5); 10: trees off the road (#30); 11: tunnels below the surface, portals, underground layers (#31)
+const BAKE_VERSION := 12  # 4: water on top of the base ground, no bank walls (#4); 5: merged junctions (#5); 6: smooth transitions (#5); 7: arc turn paths, islands (#5); 8: ground heights (#8); 9: markings after RMS (#5); 10: trees off the road (#30); 11: tunnels below the surface, portals, underground layers (#31); 12: bridge heights, ramps, embankments (#32)
 const GROUND_Y := 0.0     # opaque base ground plane; flat map layers below it are invisible (test/layer_test.gd)
 
 var progress := 0.0
@@ -78,6 +78,8 @@ func bake(meta: Dictionary, osm_dir: String, pbf := "") -> Dictionary:
 		hq = plan_hq(data, Vector2(meta.hq.x, meta.hq.z))
 	set_step("Geländehöhen aufbereiten", _p(0.27))
 	var terrain := TerrainBake.build(meta, data, hq, func(t: String): note(t))
+	if terrain == null:
+		terrain = Terrain.flat_for(data.bounds)   # no heights: flat, but bridges still rise (#32)
 	set_step("Straßennetz berechnen (%d Straßenzüge)" % data.roads.size(), _p(0.30))
 	var net := RoadNet.new()
 	net.build(data, hq)
@@ -86,8 +88,10 @@ func bake(meta: Dictionary, osm_dir: String, pbf := "") -> Dictionary:
 			if net.nodes[ni].osm_id == -900000002:
 				net.hq_node = ni
 	note("Straßennetz: %d Kreuzungen (%d aus mehreren OSM-Knoten zusammengefasst), %d Abschnitte, %d Fahrstreifen" % [net.nodes.size(), net.group_count, net.edges.size(), net.lane_geo.size()])
-	if terrain:
-		TerrainBake.add_decks(terrain, net)
+	set_step("Brücken und Rampen berechnen", _p(0.53))
+	var bh := BridgeHeights.new(terrain, net, data)
+	bh.run()
+	note(bh.summary())
 	set_step("Straßen modellieren", _p(0.55))
 	var portals := TunnelPortals.new()
 	var rm := RoadMesher.new(net, CHUNK, data.bounds.position)
@@ -103,6 +107,8 @@ func bake(meta: Dictionary, osm_dir: String, pbf := "") -> Dictionary:
 		cm.hq_rect = hq.lot
 	cm.progress_cb = func(f: float, part: String): set_step("Stadt modellieren: %s" % part, _p(0.70 + 0.2 * f))
 	cm.portals = portals
+	cm.rail_decks = bh.rail_decks
+	cm.path_decks = bh.path_decks
 	cm.build_all()
 	portals.build(net, data.rails, cm)
 	portals.clear_xforms(cm.trees)
@@ -112,7 +118,7 @@ func bake(meta: Dictionary, osm_dir: String, pbf := "") -> Dictionary:
 	note("Stadt modelliert: %d Kacheln" % cm.chunks.size())
 	if int(cm.tree_stats.get("osm", 0)) > 0:
 		note("Bäume: %d aus OpenStreetMap, %d von der Fahrbahn an den Rand gerückt, %d mitten auf der Straße weggelassen" % [cm.tree_stats.osm, cm.tree_stats.moved, cm.tree_stats.dropped])
-	if terrain:
+	if not terrain.flat:
 		set_step("Boden modellieren", _p(0.88))
 		TerrainBake.ground_layers(terrain, cm.chunks, CHUNK, data.bounds.position, float(meta.size_m))
 	set_step("Fertigstellen", _p(0.90))
@@ -183,7 +189,7 @@ const NO_SHADOW := {"ground": 1, "asphalt": 1, "mark": 1, "sidewalk": 1, "path":
 static func create_city_root(res: Dictionary) -> Node3D:
 	var root := Node3D.new()
 	root.name = "City"
-	if res.get("terrain") != null:
+	if res.get("terrain") != null and not (res.terrain as Terrain).flat:
 		return root   # the ground comes as chunk layers "ground" (TerrainBake.ground_layers)
 	var b: Rect2 = res.bounds
 	# base ground

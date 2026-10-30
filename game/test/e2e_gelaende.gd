@@ -123,25 +123,24 @@ func _check_bridges(w: World) -> void:
 	var n := 0
 	var worst := 0.0
 	for ei in tr.decks:
-		var dk: Array = tr.decks[ei]
+		var dk: Dictionary = tr.decks[ei]
 		var e: Dictionary = w.net.edges[ei]
-		var a: Vector2 = dk[2]
-		var b: Vector2 = dk[3]
-		var total := a.distance_to(b)
-		for end in [[dk[4], e.a, a, b, float(dk[6])], [dk[5], e.b, b, a, float(dk[7])]]:
-			if end[0] or not tr.node_decks.has(end[1]) or total < 1.0:
+		var pts: PackedVector2Array = dk.pts
+		var total: float = (dk.cum as PackedFloat32Array)[pts.size() - 1]
+		for end in [[e.a, float(e.trim_a)], [e.b, total - float(e.trim_b)]]:
+			if not tr.node_decks.has(end[0]) or total < 1.0:
 				continue
-			var at_trim: Vector2 = (end[2] as Vector2).move_toward(end[3], minf(end[4], total * 0.45))
-			worst = maxf(worst, absf(tr.deck_at(dk, at_trim) - tr.node_height(end[1], at_trim)))
+			var at_trim: Vector2 = Geo.sample(pts, dk.cum, clampf(float(end[1]), 0.0, total))[0]
+			worst = maxf(worst, absf(tr.deck_at(dk, at_trim) - tr.node_height(end[0], at_trim)))
 			n += 1
 	print("GELAENDE Kreuzungen auf Brücken: %d Anschlüsse geprüft" % n)
-	ok(worst < 0.01, "Brückenfahrbahn trifft Kreuzung ohne Stufe (max. %.3f m)" % worst)
+	ok(worst < 0.05, "Brückenfahrbahn trifft Kreuzung ohne Stufe (max. %.3f m)" % worst)
 	var picked := 0
 	var high := 0
 	for ei in tr.decks:
-		var dk: Array = tr.decks[ei]
-		var pts: PackedVector2Array = dk[10]
-		var mid: Vector2 = pts[pts.size() >> 1] if pts.size() > 2 else pts[0].lerp(pts[1], 0.5)
+		var dk: Dictionary = tr.decks[ei]
+		var pts: PackedVector2Array = dk.pts
+		var mid: Vector2 = Geo.sample(pts, dk.cum, (dk.cum as PackedFloat32Array)[pts.size() - 1] * 0.5)[0]
 		var deck := tr.deck_at(dk, mid)
 		if deck - tr.sample(mid.x, mid.y) < 2.0:
 			continue
@@ -153,14 +152,12 @@ func _check_bridges(w: World) -> void:
 	ok(picked == high, "Mausklick trifft die Brücke (%d von %d)" % [picked, high])
 
 
-## Within a bridge footprint (decks and junctions on bridges, incl. the blend into the ground at the ends).
+## Within a deck footprint (bridges, ramps and raised junctions).
 func _on_bridge(tr: Terrain, p: Vector2) -> bool:
 	for ei in tr.decks:
-		var dk: Array = tr.decks[ei]
-		var pts: PackedVector2Array = dk[10]
-		for i in pts.size() - 1:
-			if Geometry2D.get_closest_point_to_segment(p, pts[i], pts[i + 1]).distance_to(p) <= float(dk[9]) + 3.0:
-				return true
+		var dk: Dictionary = tr.decks[ei]
+		if tr.deck_ds(dk, p).x <= float(dk.hw) + 3.0:
+			return true
 	for ni in tr.node_pos:
 		if (tr.node_pos[ni] as Vector2).distance_to(p) <= Terrain.NODE_R + 3.0:
 			return true

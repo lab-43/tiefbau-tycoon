@@ -15,8 +15,8 @@ func _init(n: RoadNet, terrain: Terrain = null) -> void:
 	net = n
 	for ei in net.edges.size():
 		var e: Dictionary = net.edges[ei]
-		if terrain != null and terrain.decks.has(ei):
-			continue   # bridge deck: the ground below it is free
+		if terrain != null and terrain.decks.has(ei) and e.bridge:
+			continue   # bridge deck: the ground below it is free (a ramp on an embankment is not)
 		if e.get("under", false):
 			continue   # tunnel (#31): the ground above it is free
 		if float(e.len) - float(e.trim_a) - float(e.trim_b) < 0.05:
@@ -27,9 +27,9 @@ func _init(n: RoadNet, terrain: Terrain = null) -> void:
 			var r := Rect2(pts[i], Vector2.ZERO).expand(pts[i + 1]).grow(grow)
 			_put(_segs, r, [ei, i])
 	for ni in net.nodes.size():
-		if terrain != null and terrain.node_decks.has(ni):
-			continue
 		var nd: Dictionary = net.nodes[ni]
+		if terrain != null and terrain.node_decks.has(ni) and _all_bridges(nd):
+			continue
 		if nd.get("under", false):
 			continue
 		var polys: Array = [nd.get("polygon", PackedVector2Array())] + nd.get("extra_polys", [])
@@ -44,6 +44,13 @@ func _init(n: RoadNet, terrain: Terrain = null) -> void:
 			if not holes.is_empty() and not _holes_cut(poly, holes):
 				holes = []   # the mesh could not cut the islands out: they are drawn as asphalt
 			_put(_areas, r, [poly, r, holes])
+
+
+func _all_bridges(nd: Dictionary) -> bool:
+	for end in nd.ends:
+		if not net.edges[end >> 1].bridge:
+			return false
+	return true
 
 
 func _put(grid: Dictionary, r: Rect2, item: Array) -> void:

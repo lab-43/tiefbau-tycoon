@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs end-to-end scenarios headless on the offline Utrecht map and reports pass/fail.
 # usage: tools/test.sh [scenario ...]            default: smoke issue
-#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren tunnel debug leuchten verkehrslichter rig schaufel altstand markierungen absperrung gelaende vollsperrung umbau fahrzeuge baeume stellplaetze platzieren  (save+load = save mid-dig,
+#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren tunnel debug leuchten verkehrslichter rig schaufel bruecken altstand markierungen absperrung gelaende vollsperrung umbau fahrzeuge baeume stellplaetze platzieren  (save+load = save mid-dig,
 #              then load and finish; rig = excavator linkage/cylinders, see game/test/rig_test.gd;
 #              schaufel = soil in the bucket (game/test/bucket_test.gd, stand-in model always, real model if present);
 #              ebenen = height order of flat map layers, see game/test/layer_test.gd – also part of pbf;
@@ -9,7 +9,9 @@
 #              baeume = no tree on the asphalt, few real trees dropped (#30), game/test/tree_test.gd – also part of pbf;
 #              fahren = calm driving: no twitching cars, no racing through bends, game/test/drive_test.gd on testdata/kreuzungen;
 #              tunnel = roads below the surface hidden, portals, underground layers, traffic hidden inside (#31),
-#                       game/test/tunnel_test.gd on the Deichtorplatz fixture)
+#                       game/test/tunnel_test.gd on the Deichtorplatz fixture;
+#              bruecken = bridge heights (#32): clear heights, grades, no steps, Köhlbrandbrücke, ramps with
+#                       embankments, game/test/bridge_test.gd on testdata/bruecken with and without ground heights)
 #   env: E2E_SPEED (default 10), E2E_TIMEOUT seconds per scenario (default 1500), E2E_SHOTS=<dir>
 # Logs: /tmp/tt_e2e_<scenario>.log. Exit 1 if any scenario fails.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -61,6 +63,11 @@ tunnel() {  # tunnels below the surface (#31): no asphalt on top, portals, under
   if timeout 600 "$G" --headless --path "$ROOT/game" res://test/tunnel_test.tscn -- --fixtures="$ROOT/testdata/kreuzungen" > "$log" 2>&1 \
      && grep -q "TUNNEL OK" "$log"; then echo "OK    tunnel $(grep -o 'TUNNEL OK.*' "$log")"; else FAIL=1; echo "FAIL  tunnel – $log"; grep -E "TUNNEL|SCRIPT ERROR|^  " "$log" | tail -10 | sed 's/^/      /'; fi
 }
+bruecken() {  # bridge heights (#32): clear heights below bridges, grades, no steps at junctions, ramps with embankments
+  local log=/tmp/tt_e2e_bruecken.log
+  if timeout 900 "$G" --headless --path "$ROOT/game" res://test/bridge_test.tscn -- --fixture="$ROOT/testdata/bruecken" > "$log" 2>&1 \
+     && grep -q "BRUECKEN OK" "$log"; then echo "OK    bruecken $(grep -o 'BRUECKEN OK.*' "$log")"; else FAIL=1; echo "FAIL  bruecken – $log"; grep -E "BRUECKEN|SCRIPT ERROR|^  " "$log" | tail -14 | sed 's/^/      /'; fi
+}
 for s in "${SCEN[@]}"; do
   case "$s" in
     smoke)  run smoke  "E2E OK" --e2e=smoke ;;
@@ -84,6 +91,7 @@ for s in "${SCEN[@]}"; do
     sichtweite) sichtweite ;;
     fahren) fahren ;;
     tunnel) tunnel ;;
+    bruecken) bruecken ;;
     rig)  # excavator linkage + cylinders over all poses, A 918 and R 938 (needs the private models, skips without)
       for mdl in excavator_a918 excavator_r938; do
         log=/tmp/tt_e2e_rig_$mdl.log
