@@ -2,7 +2,7 @@ extends SceneTree
 ## Trees and street lamps off the road (#30: real street trees stood on the asphalt, the game draws the
 ## carriageway wider than it is). Bakes the Utrecht .pbf and checks every tree and lamp against the triangles
 ## of the baked asphalt meshes (what the player sees, independent of AsphaltIndex), and that only a few real
-## trees were dropped.
+## trees were dropped. Lamps high up on a bridge or ramp stand above the ground asphalt and are not counted.
 ## usage: godot --headless --path game -s res://test/tree_test.gd -- <utrecht.osm.pbf>   (tools/test.sh baeume)
 ## Prints "BAEUME OK" and exits 0, or "BAEUME FAIL [...]" and exits 1 (also after a script error, via watchdog).
 
@@ -72,6 +72,8 @@ func _check(res: Dictionary, bad: Array) -> bool:
 			for tf in res[kind[0]][ck]:
 				var p := Vector2((tf as Transform3D).origin.x, (tf as Transform3D).origin.z)
 				n += 1
+				if (tf as Transform3D).origin.y > CityMesher.LAMP_ABOVE:
+					continue   # on a bridge or ramp above the ground asphalt (the test map is flat, #32)
 				for t in grid.get(Vector2i(int(floor(p.x / CELL)), int(floor(p.y / CELL))), []):
 					if Geometry2D.point_is_inside_triangle(p, t[0], t[1], t[2]):
 						on_road.append(p)

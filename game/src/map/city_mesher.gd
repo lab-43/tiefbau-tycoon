@@ -28,6 +28,7 @@ const TREE_CURB_MARGIN := 1.0
 const TREE_MAX_SHIFT := 5.0
 const REAL_TREE_CELL := 8.0
 const STREET_TREE_GAP := 6.0   # made-up street trees keep this far from real ones
+const LAMP_ABOVE := 2.0        # a lamp this high above the ground (bridge, ramp) stands above whatever lies below
 var _asphalt: AsphaltIndex
 var _real_trees := {}         # Vector2i (REAL_TREE_CELL cells) -> Array[Vector2]
 var portals: TunnelPortals = null   # railway tunnels register their portals here (#31)
@@ -465,8 +466,11 @@ func _lamps() -> void:
 				var sw: float = e.sw_r if sd > 0 else e.sw_l
 				var off: float = e.width * 0.5 + (sw - 0.45 if sw > 0.0 else 0.6)
 				var p: Vector2 = smp[0] + r * off * sd
-				# not on a neighbouring road or junction area (#30); lamps on a bridge deck may stand above one
-				if _asphalt != null and not (terrain != null and terrain.decks.has(ei)) and _asphalt.on_asphalt(p):
+				var ly := terrain.deck_height(ei, p) if terrain else 0.0
+				# not on a neighbouring road or junction area (#30); a lamp high up on a bridge or ramp (#32) may
+				# stand above one
+				var above := terrain != null and ly - terrain.sample(p.x, p.y) > LAMP_ABOVE
+				if _asphalt != null and not above and _asphalt.on_asphalt(p):
 					continue
 				var ck := chunk_of(p)
 				if not lamps.has(ck):
@@ -474,7 +478,6 @@ func _lamps() -> void:
 				# lamp arm points toward the road (-r*sd)
 				var toward: Vector2 = -r * sd
 				var basis := Basis.looking_at(Vector3(toward.x, 0, toward.y), Vector3.UP)
-				var ly := terrain.deck_height(ei, p) if terrain else 0.0
 				lamps[ck].append(Transform3D(basis, Vector3(p.x, ly, p.y)))
 			s += spacing
 			side = -side
