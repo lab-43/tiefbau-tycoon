@@ -105,7 +105,7 @@ static func terrain_hit(from: Vector3, dir: Vector3) -> Variant:
 		t1 = minf(t1, (lo - from.y) / dir.y)
 	var t := t0
 	var prev := t0
-	while t <= t1:
+	while t0 <= t1:
 		var p := from + dir * t
 		if p.y <= Terrain.top(Vector2(p.x, p.z)):
 			var a := prev
@@ -120,8 +120,11 @@ static func terrain_hit(from: Vector3, dir: Vector3) -> Variant:
 			var hit := from + dir * b
 			hit.y = Terrain.top(Vector2(hit.x, hit.z))
 			return hit
+		if t >= t1:
+			break
 		prev = t
-		t += maxf(1.5, t * 0.006)
+		# the last step lands exactly on t1 (below the lowest ground): a longer step could jump past it and miss
+		t = minf(t + maxf(1.5, t * 0.006), t1)
 	return null
 
 
