@@ -20,6 +20,7 @@ var flat := false                 # no height data: everything at 0, only the de
 var decks := {}
 var node_decks := {}              # raised junction (on a bridge or a ramp) -> height of its flat area
 var node_pos := {}                # same nodes -> position (for surface_near)
+var node_r := {}                  # same nodes -> radius of their flat area (NODE_R if missing)
 # set by the meshers while they build a deck (a deck dictionary) or a raised junction (bake thread)
 var mode_deck := {}
 var mode_node := -1
@@ -257,7 +258,7 @@ func _index_bridges() -> void:
 	# junctions on a bridge: id -1 - node
 	for ni in node_pos:
 		var np: Vector2 = node_pos[ni]
-		_grid_add(Rect2(np, Vector2.ZERO).grow(NODE_R + 2.0), -1 - int(ni))
+		_grid_add(Rect2(np, Vector2.ZERO).grow(float(node_r.get(ni, NODE_R)) + 2.0), -1 - int(ni))
 
 
 const NODE_R := 18.0
@@ -284,7 +285,7 @@ func surface_near(p: Vector2, hint: float) -> float:
 	for ei in _bgrid.get(Vector2i(floori(p.x / BGRID), floori(p.y / BGRID)), []):
 		if ei < 0:
 			var ni := -1 - int(ei)
-			if (node_pos[ni] as Vector2).distance_to(p) <= NODE_R:
+			if (node_pos[ni] as Vector2).distance_to(p) <= float(node_r.get(ni, NODE_R)):
 				var hn: float = node_height(ni, p)
 				if absf(hn - hint) < bd:
 					bd = absf(hn - hint)
@@ -389,7 +390,7 @@ func serialize() -> Dictionary:
 		dk.erase("_g")   # segment index, rebuilt on first use
 		dks[ei] = dk
 	return {"origin": origin, "cell": cell, "nx": nx, "nz": nz, "h": h, "info": info, "decks": dks,
-		"node_decks": node_decks, "node_pos": node_pos, "flat": flat}
+		"node_decks": node_decks, "node_pos": node_pos, "node_r": node_r, "flat": flat}
 
 
 static func deserialize(d: Dictionary) -> Terrain:
@@ -402,6 +403,7 @@ static func deserialize(d: Dictionary) -> Terrain:
 	t.decks = d.get("decks", {})
 	t.node_decks = d.get("node_decks", {})
 	t.node_pos = d.get("node_pos", {})
+	t.node_r = d.get("node_r", {})
 	t.flat = bool(d.get("flat", false))
 	return null if t.is_empty() else t
 
