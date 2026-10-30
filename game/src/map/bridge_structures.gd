@@ -46,6 +46,7 @@ func _init(heights: BridgeHeights, roads: RoadNet, t: Terrain, asphalt_index: As
 
 
 func build(mesher: Object) -> void:
+	var t0 := Time.get_ticks_msec()
 	_index_lines()
 	for c in bh.crossings:
 		if int(c.lower) < 0 and not c.big and float(c.hi) - float(c.lo) >= WATER_SPAN:
@@ -79,11 +80,12 @@ func build(mesher: Object) -> void:
 				_abutment(li, dk, float(end[1]), float(end[2]), mesher)
 	terrain.mode_deck = keep_dm
 	terrain.mode_node = keep_nm
+	stats["ms"] = Time.get_ticks_msec() - t0
 
 
 func summary() -> String:
-	return "Brückenbauwerke: %d Pfeiler, %d Widerlager, %d Pfeiler fanden keinen Platz" % [stats.piers, stats.abutments,
-		stats.blocked]
+	return "Brückenbauwerke: %d Pfeiler, %d Widerlager, %d Pfeiler fanden keinen Platz (%d ms)" % [stats.piers,
+		stats.abutments, stats.blocked, int(stats.get("ms", 0))]
 
 
 ## The deck of bridge link li (road edge, railway or path), or {}.
@@ -204,7 +206,7 @@ static func _parts(half: float) -> Array:
 	var n := clampi(int(ceil(w * 0.75 / 7.0)) + 1, 2, 5)
 	var res: Array = []
 	for i in n:
-		res.append([lerpf(-w * 0.36, w * 0.36, float(i) / (n - 1)), COLUMN, COLUMN])
+		res.append([lerpf(-w * 0.36, w * 0.36, float(i) / (n - 1)), COLUMN, COLUMN])   # lint-ok: n >= 2 (clampi)
 	return res
 
 
