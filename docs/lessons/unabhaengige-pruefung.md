@@ -26,3 +26,5 @@ Dazu kamen echte Wettlaufbedingungen bei Übernahmen. Eigene Tests prüfen meist
 Die e2e-Szenarien hatten nur Stellen getroffen, an denen genug Nachbarstraße frei war. Hilfreich war:
 - Die Probe-Skripte des Agenten (`-s` mit eigenem Mini-Netz, alte Klasse aus dem früheren Commit zum Vergleich) laufen in Sekunden. Nach den Korrekturen sollen sie erneut laufen.
 - Den Agenten nach Grenzfällen fragen (leere Listen, Ränder, alte Spielstände), nicht nach „funktioniert es“.
+
+**Nachtrag (#32, Brückenhöhen):** Alle eigenen Tests waren grün, der Prüf-Agent fand trotzdem vier echte Fehler, alle belegt und behoben: Rampen steiler als nötig, eine 0,57-m-Stufe am Fahrbahnrand auf Querneigung (die Tests prüften nur die Mittellinie), angehobene Wege ohne Unterbau und eine stille Regression in `map_service.gd` (eine Prüfung auf `terrain == null` griff nicht mehr, weil es jetzt immer ein Gelände gibt). Wer einen Rückgabewert von „null“ auf „Ersatzobjekt“ umstellt, sucht alle Prüfungen auf null (`grep -rn "== null" … terrain`).

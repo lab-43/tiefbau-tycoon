@@ -10,3 +10,5 @@ pruefung: e2e:bruecken
 **Regel:**
 - „Angehoben“ heißt über dem tiefsten Boden der Fläche (hier: Minimum aus Knotenmitte und den Rändern, an denen die Straßen die Kreuzung verlassen). Ist die Fläche nicht angehoben, folgt das Anschlussstück dort dem Boden, nicht der Knotenhöhe.
 - Tests vergleichen die Höhe beider Flächen genau an der Naht (`bridge_test.gd`: `deck_at` am Fahrbahnende gegen `node_height` am selben Punkt) und laufen mit echten Geländehöhen und flach. Flache Tests finden Fehler dieser Art nicht.
+
+**Nachtrag (unabhängige Prüfung):** Die Naht hat auch eine Breite. Auf Querneigung lag der Fahrbahnrand an einer nicht angehobenen Kreuzung 0,57 m über ihr (Finkenwerder Straße), weil das Deck quer nur nach oben dem Boden folgte und die Tests nur die Mittellinie verglichen. Jetzt: Deck und Kreuzungsfläche haben dieselbe Regel – eben auf der geforderten Höhe, nie unter dem Boden (`max(lv, Boden)`, `lv` je Station im Deck); der tiefste Boden einer Kreuzung zählt auch an den Rändern ihrer Fahrbahnen; der Test vergleicht Mitte und beide Ränder.
