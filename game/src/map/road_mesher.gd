@@ -118,7 +118,7 @@ func _edge(ei: int) -> void:
 	if e.bridge:
 		_bridge_sides(ck, center, hw + e.sw_r, hw + e.sw_l)
 	elif _on_deck():
-		_embankment(ck, center, s0, hw + e.sw_r, hw + e.sw_l)   # an approach ramp (#32)
+		_embankment(ck, center, hw + e.sw_r, hw + e.sw_l)   # an approach ramp (#32)
 	_edge_markings(ei, e, ck, s0, s1)
 
 
@@ -252,29 +252,25 @@ func _inside_any(p: Vector2, clips: Array) -> bool:
 
 
 ## Embankment of a raised road that is no bridge (approach ramp, #32): grass slopes 1 : 1.5 from the outer edge
-## (sidewalk included) down to the ground on both sides. center starts at arc length s0 of the edge.
+## (sidewalk included) down to the ground on both sides, from the height of the deck at its edge.
 const SLOPE := 1.5
 
-func _embankment(ck: Vector2i, center: PackedVector2Array, s0: float, off_r: float, off_l: float) -> void:
+func _embankment(ck: Vector2i, center: PackedVector2Array, off_r: float, off_l: float) -> void:
 	var dk: Dictionary = terrain.mode_deck
 	terrain.mode_deck = {}   # the foot lies on the ground, the top is given as height above it
 	var l := layer(ck, "embankment")
-	var cum := Geo.cumulative(center)
 	for side in [1.0, -1.0]:
 		var off: float = (off_r if side > 0 else off_l) + 0.2
 		var tops := Geo.offset_polyline(center, off * side)
 		var feet := PackedVector2Array()
-		var ht := PackedFloat32Array()   # top height above its own ground
-		var raise := PackedFloat32Array()
+		var ht := PackedFloat32Array()   # top height above its own ground (the edge of the deck, cross-slopes)
 		for i in center.size():
-			var z := Terrain.deck_h(dk, s0 + cum[i])
-			var r := maxf(0.0, z - Terrain.deck_g(dk, s0 + cum[i]))
-			raise.append(r)
+			var r := terrain.deck_at(dk, tops[i]) - terrain.sample(tops[i].x, tops[i].y)
 			var d := (center[mini(i + 1, center.size() - 1)] - center[maxi(i - 1, 0)]).normalized()
-			feet.append(tops[i] + Geo.right_of(d) * side * (r * SLOPE + 0.05))
-			ht.append(z - 0.05 - terrain.sample(tops[i].x, tops[i].y))
+			feet.append(tops[i] + Geo.right_of(d) * side * (maxf(r, 0.0) * SLOPE + 0.05))
+			ht.append(r - 0.05)
 		for i in center.size() - 1:
-			if raise[i] < 0.1 and raise[i + 1] < 0.1:
+			if ht[i] < 0.05 and ht[i + 1] < 0.05:
 				continue
 			var a := Geo.v3(tops[i], maxf(ht[i], 0.0))
 			var b := Geo.v3(tops[i + 1], maxf(ht[i + 1], 0.0))

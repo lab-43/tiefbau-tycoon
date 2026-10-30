@@ -23,6 +23,8 @@ const BIG_CLEAR := 50.0       # Köhlbrandbrücke: 53 m above the water
 const BIG_DEPTH := 3.0
 const MARGIN := 0.2           # a little extra above every requirement
 const CREST := [15.0, 40.0, 6.0]   # the crest over a requirement is rounded over this length on each side
+const RAMP_FASTER := 1.25     # a ramp on ground steeper than its grade comes down this much faster than the ground
+const LEVEL_FLOOR := 5.0      # required heights deeper below the ground than this are stored as this deep
 const RAISED := 0.05          # higher than this above the ground counts as raised
 const STEP := 2.0             # profile stations (Terrain.DECK_STEP)
 const PARALLEL_GAP := 3.5     # a path this close beside a raised road and parallel to it rides along at its height
@@ -37,6 +39,8 @@ var links: Array = []         # carriers of all three networks (see _add_link)
 var nodes: Array = [[], [], []]   # per network: {pos, ground, links: Array[int]}
 var profiles := {}            # link index -> PackedFloat32Array (heights at evenly spaced stations)
 var origins := {}             # link index -> PackedInt32Array: the bridge (chain) whose requirement set each station
+var levels := {}              # link index -> PackedFloat32Array: required height at each station, may lie below the
+                              # ground (Terrain deck "lv": the deck is flat at it across, never below the ground)
 var chain := PackedInt32Array()   # link index -> bridge chain (connected bridge links), -1 for other links
 var rail_decks := {}          # rail way index -> Terrain deck
 var path_decks := {}          # path way index -> Terrain deck
@@ -72,6 +76,7 @@ func run() -> void:
 		var before := profiles.duplicate()
 		profiles.clear()
 		origins.clear()
+		levels.clear()
 		for nid in 3:
 			_solve(nid, src)
 		change = _max_change(before)
@@ -111,8 +116,10 @@ func _build_networks() -> void:
 	# leave it (otherwise a ramp could end between the ground at the edge and the ground at the node: a step).
 	for l in links:
 		for end in [[int(l.a), float(l.u0)], [int(l.b), float(l.u1)]]:
-			var p: Vector2 = Geo.sample(l.pts, l.cum, end[1])[0]
-			nodes[ROAD][end[0]].ground = minf(float(nodes[ROAD][end[0]].ground), terrain.sample(p.x, p.y))
+			var smp := Geo.sample(l.pts, l.cum, end[1])
+			var across: Vector2 = Geo.right_of(smp[1]) * float(l.hw)
+			for p: Vector2 in [smp[0], smp[0] + across, smp[0] - across]:   # centre line and both edges
+				nodes[ROAD][end[0]].ground = minf(float(nodes[ROAD][end[0]].ground), terrain.sample(p.x, p.y))
 	_line_network(RAIL, data.rails)
 	_line_network(PATH, data.paths)
 
@@ -162,7 +169,7 @@ static func grade(nid: int, cls: String) -> float:
 	if nid == RAIL:
 		return 0.02 if cls == "rail" else 0.04
 	if nid == PATH:
-		return 0.10
+		return 0.60 if cls == "steps" else 0.10   # stairs: about 30°
 	match cls:
 		"motorway", "trunk":
 			return 0.04
@@ -605,19 +612,26 @@ func _solve(nid: int, src: Dictionary) -> void:
 		if not res.is_empty():
 			profiles[li] = res[0]
 			origins[li] = res[1]
+			levels[li] = res[2]
 
 
-## Height that a raised end (height h, at end a if from_a) leaves at the other end of link l's free length. It falls
-## with the grade of the link; a ramp (not a bridge) also loses its height above the ground at least that fast, so on
-## ground falling steeper than the grade it follows the ground down instead of running on as a long embankment.
+## How fast a raised end comes down along link l (rise per metre), from end a if from_a. The grade of the link;
+## a ramp (not a bridge) on ground that falls steeper than that comes down a quarter faster than the ground, so it
+## still reaches it instead of running on as an endless embankment.
+static func descent(l: Dictionary, from_a: bool) -> float:
+	var g: float = l.g
+	var lf: float = float(l.u1) - float(l.u0)
+	if l.bridge or lf < 1.0:
+		return g
+	var fall: float = (float(l.ga) - float(l.gb)) / lf
+	if not from_a:
+		fall = -fall
+	return g if fall <= g else fall * RAMP_FASTER
+
+
+## Height that a raised end (height h, at end a if from_a) leaves at the other end of link l's free length.
 static func _carry(l: Dictionary, h: float, from_a: bool) -> float:
-	var drop: float = float(l.g) * (float(l.u1) - float(l.u0))
-	var c := h - drop
-	if not l.bridge:
-		var g0: float = l.ga if from_a else l.gb
-		var g1: float = l.gb if from_a else l.ga
-		c = minf(c, g1 + (h - g0) - drop)
-	return c
+	return h - descent(l, from_a) * (float(l.u1) - float(l.u0))
 
 
 ## [heights, origins] at evenly spaced stations along link li, rounded off; empty if it nowhere rises above the ground.
@@ -633,9 +647,11 @@ func _profile(li: int, va: float, vb: float, oa: int, ob: int, srcs: Array) -> A
 	var z := PackedFloat32Array()
 	var gr := PackedFloat32Array()
 	var zo := PackedInt32Array()
+	var lv := PackedFloat32Array()
 	z.resize(n + 1)
 	gr.resize(n + 1)
 	zo.resize(n + 1)
+	lv.resize(n + 1)
 	var crest: float = CREST[int(l.net)]
 	# An end whose junction is not raised lies on the ground, which in its junction area may be lower than at the
 	# node itself: the profile follows the ground there instead of the node height (no step at the junction edge).
@@ -644,6 +660,8 @@ func _profile(li: int, va: float, vb: float, oa: int, ob: int, srcs: Array) -> A
 		va = -INF
 	if vb <= float(ns[int(l.b)].ground) + RAISED:
 		vb = -INF
+	var da := descent(l, true)
+	var db := descent(l, false)
 	var top := 0.0
 	for k in n + 1:
 		var s := step * k
@@ -652,11 +670,9 @@ func _profile(li: int, va: float, vb: float, oa: int, ob: int, srcs: Array) -> A
 		var f := clampf(s, u0, u1) - u0
 		var h := ground
 		var o := -1
-		var ha := va - g * f
-		var hb := vb - g * (lf - f)
-		if not l.bridge:   # a ramp loses its height above the ground at least with its grade (see _carry)
-			ha = minf(ha, ground + (va - float(l.ga)) - g * f)
-			hb = minf(hb, ground + (vb - float(l.gb)) - g * (lf - f))
+		var ha := va - da * f
+		var hb := vb - db * (lf - f)
+		var need := maxf(ha, hb)
 		if ha > h:
 			h = ha
 			o = oa
@@ -667,16 +683,18 @@ func _profile(li: int, va: float, vb: float, oa: int, ob: int, srcs: Array) -> A
 			var flo := clampf(float(q[0]), u0, u1) - u0
 			var fhi := clampf(float(q[1]), u0, u1) - u0
 			var hq := cone(float(q[2]), maxf(0.0, maxf(flo - f, f - fhi)), g, crest)
+			need = maxf(need, hq)
 			if hq > h:
 				h = hq
 				o = int(q[3])
 		z[k] = h
 		zo[k] = o
+		lv[k] = maxf(need, ground - LEVEL_FLOOR)
 		gr[k] = ground
 		top = maxf(top, h - ground)
 	if top < RAISED:
 		return []
-	return [z, zo]
+	return [z, zo, lv]
 
 
 func _max_change(before: Dictionary) -> float:
@@ -728,7 +746,7 @@ func _store() -> void:
 			top = maxf(top, z[k] - gr[k])
 			if k > 0 and (z[k] - gr[k] > RAISED or z[k - 1] - gr[k - 1] > RAISED):
 				up += step
-		var dk := Terrain.make_deck(l.pts, l.cum, z, gr, float(l.hw) + 0.5)
+		var dk := Terrain.make_deck(l.pts, l.cum, z, gr, float(l.hw) + 0.5, levels.get(li, PackedFloat32Array()))
 		match int(l.net):
 			ROAD:
 				terrain.decks[int(l.id)] = dk

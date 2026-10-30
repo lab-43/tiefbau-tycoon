@@ -513,7 +513,7 @@ func _add_patch(p: Dictionary) -> void:
 	var cc := c + d * hl + r * hw
 	var dd := c - d * hl + r * hw
 	var l := MeshLayer.new()
-	l.terrain = Terrain.cur   # on the ground (#8); null on flat maps
+	l.terrain = Terrain.cur   # on the ground (#8); a flat terrain on maps without heights
 	l.quad(Geo.v3(a, 0.056), Geo.v3(b, 0.056), Geo.v3(cc, 0.056), Geo.v3(dd, 0.056), Vector3.UP)
 	var mi := MeshInstance3D.new()
 	mi.mesh = l.commit()

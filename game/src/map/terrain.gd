@@ -154,22 +154,20 @@ func deck_height(ei: int, p: Vector2) -> float:
 
 ## A deck: the height profile h along a centre line (pts, cum), stations evenly spaced from s = 0 to the end, and
 ## the ground under the centre line at the same stations (g). hw: half width (sidewalks included).
+## lv: the required height at the same stations (may lie below the ground; h = max(lv, ground)), empty = h.
 static func make_deck(pts: PackedVector2Array, cum: PackedFloat32Array, h: PackedFloat32Array, g: PackedFloat32Array,
-		hw: float) -> Dictionary:
+		hw: float, lv := PackedFloat32Array()) -> Dictionary:
 	var total: float = cum[cum.size() - 1]
-	return {"pts": pts, "cum": cum, "h": h, "g": g, "hw": hw, "step": total / maxf(1.0, h.size() - 1.0)}
+	return {"pts": pts, "cum": cum, "h": h, "g": g, "lv": lv if lv.size() == h.size() else h, "hw": hw,
+		"step": total / maxf(1.0, h.size() - 1.0)}
 
 
-## Height of deck dk at p: the profile where p lies across the centre line. Flat across where the deck is
-## raised; where it lies on the ground (the ends of a ramp) it follows the ground across the road as roads do.
+## Height of deck dk at p: flat across the road at the required height where p lies across the centre line, but
+## never below the ground. Where a ramp comes down to the ground it follows the ground across the road (as roads
+## do), and its edges meet a junction area (flat at its height, never below the ground) without a step.
 func deck_at(dk: Dictionary, p: Vector2) -> float:
 	var s := deck_s(dk, p)
-	var z := deck_h(dk, s)
-	var raise := z - deck_g(dk, s)
-	if raise >= 0.5:
-		return z
-	var dg := sample(p.x, p.y) - deck_g(dk, s)
-	return z + maxf(0.0, dg) * (1.0 - clampf(raise / 0.5, 0.0, 1.0))
+	return maxf(_deck_lerp(dk.lv, float(dk.step), s), sample(p.x, p.y))
 
 
 ## Profile height at arc length s.

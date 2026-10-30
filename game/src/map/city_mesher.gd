@@ -232,8 +232,11 @@ func _paths() -> void:
 		if terrain:
 			terrain.mode_deck = dk
 		_flat_strip(l, pts, w, PATH_Y)
-		if not dk.is_empty() and not (str(p.tags.get("bridge", "")) in ["", "no"]):
-			_deck_sides(ck, pts, w * 0.5, 1.1)
+		if not dk.is_empty():
+			if str(p.tags.get("bridge", "")) in ["", "no"]:
+				_embankment_line(ck, dk, pts, w * 0.5)   # a raised path (stairs, ramp, beside a raised road)
+			else:
+				_deck_sides(ck, pts, w * 0.5, 1.1)
 	if terrain:
 		terrain.mode_deck = {}
 
@@ -302,18 +305,14 @@ func _embankment_line(ck: Vector2i, dk: Dictionary, pts: PackedVector2Array, hw:
 	for side in [1.0, -1.0]:
 		var tops := Geo.offset_polyline(pts, hw * side)
 		var feet := PackedVector2Array()
-		var ht := PackedFloat32Array()
-		var raise := PackedFloat32Array()
+		var ht := PackedFloat32Array()   # top height above its own ground (the edge of the deck, cross-slopes)
 		for i in pts.size():
-			var sc := terrain.deck_s(dk, pts[i])
-			var z := Terrain.deck_h(dk, sc)
-			var r := maxf(0.0, z - Terrain.deck_g(dk, sc))
-			raise.append(r)
+			var r := terrain.deck_at(dk, tops[i]) - terrain.sample(tops[i].x, tops[i].y)
 			var d := (pts[mini(i + 1, pts.size() - 1)] - pts[maxi(i - 1, 0)]).normalized()
-			feet.append(tops[i] + Geo.right_of(d) * side * (r * 1.5 + 0.05))
-			ht.append(z - 0.02 - terrain.sample(tops[i].x, tops[i].y))
+			feet.append(tops[i] + Geo.right_of(d) * side * (maxf(r, 0.0) * 1.5 + 0.05))
+			ht.append(r - 0.02)
 		for i in pts.size() - 1:
-			if raise[i] < 0.1 and raise[i + 1] < 0.1:
+			if ht[i] < 0.05 and ht[i + 1] < 0.05:
 				continue
 			var out: Vector2 = Geo.right_of((pts[i + 1] - pts[i]).normalized()) * side
 			var n := (Vector3.UP * 1.5 + Vector3(out.x, 0.0, out.y)).normalized()

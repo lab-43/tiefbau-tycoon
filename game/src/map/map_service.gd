@@ -324,7 +324,9 @@ func _bake(osm_dir: String, cache: String, flat := "") -> bool:
 	_end("scene")
 	if cancelled:
 		return false
-	if terrain_dir != "" and bake_result.get("terrain") == null and flat != "":
+	# (MapBuilder gives a flat terrain instead of none since #32, for bridge heights)
+	var no_heights: bool = bake_result.get("terrain") == null or (bake_result.terrain as Terrain).flat
+	if terrain_dir != "" and no_heights and flat != "":
 		# tiles were there but unreadable: download them again on the next start, keep this map as the flat one
 		DirAccess.remove_absolute(terrain_dir.path_join("terrain.json"))
 		cache = flat

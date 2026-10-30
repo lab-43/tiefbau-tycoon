@@ -5,10 +5,12 @@ extends Node
 ##                 (cable-stayed bridges over wide water: 50 m, or as high as their own ramps allow),
 ##   Steigung    – raised decks rise no steeper than their class allows, unless the ground itself is steeper
 ##                 (then a ramp loses its height above the ground with that grade),
-##   Stufen      – a raised road meets its junction without a step,
+##   Stufen      – a raised road meets its junction without a step (centre line and both edges),
+##   Durchdringen – no bridge cuts through a road it raised itself (same chain),
 ##   Köhlbrand   – the Köhlbrandbrücke stands more than 40 m above the water,
 ##   Mausklick   – a click from above hits the decks of high bridges (CameraRig.terrain_hit),
-##   Rampen      – some roads next to bridges are raised as ramps and get embankments (RoadMesher),
+##   Rampen      – some roads next to bridges are raised as ramps and get embankments (RoadMesher), also below
+##                 an edge that is raised only by a cross-slope,
 ##   Ruhe        – the solution settles (fewer than 6 rounds).
 ## usage: godot --headless --path game res://test/bridge_test.tscn -- --fixture=<testdata/bruecken>
 ## (a scene: TerrainBake reads tiles through TerrainSource, which needs the Game autoload)  ·  tools/test.sh bruecken
@@ -59,6 +61,7 @@ func _run(dir: String, spec: Dictionary, with_ground: bool) -> String:
 		fails.append("[%s] Höhen kommen nicht zur Ruhe" % tag)
 	# clear heights
 	var low := 0
+	var through := 0   # raised by the same chain (measured from the ground above): must still not cut through it
 	var by := {}
 	for c in bh.crossings:
 		var li: int = c.link
@@ -70,6 +73,11 @@ func _run(dir: String, spec: Dictionary, with_ground: bool) -> String:
 			var ho := bh.height_and_origin(int(c.lower), float(c.ls))
 			base = ho.x if int(ho.y) != bh.chain[li] else bh.ground_at(int(c.lower), float(c.ls))
 			kind = ["Straße", "Gleis", "Weg"][int(bh.links[int(c.lower)].net)]
+			var dep: float = BridgeHeights.BIG_DEPTH if c.big else float(BridgeHeights.DEPTH[int(l.net)])
+			if top - dep < ho.x + 0.5:
+				through += 1
+				print("    Brücke durchdringt, was unter ihr liegt: %s über %s bei %s (Unterkante %.1f, darunter %.1f)" % [
+					l.cls, kind, str(Geo.sample(l.pts, l.cum, float(c.s))[0].round()), top - dep, ho.x])
 		var depth: float = BridgeHeights.BIG_DEPTH if c.big else float(BridgeHeights.DEPTH[int(l.net)])
 		var free := top - base - depth
 		var need: float = c.clear
@@ -93,7 +101,9 @@ func _run(dir: String, spec: Dictionary, with_ground: bool) -> String:
 		fails.append("[%s] nur %d Kreuzungen unter Brücken gefunden" % [tag, bh.crossings.size()])
 	if low > 0:
 		fails.append("[%s] %d Kreuzungen zu niedrig" % [tag, low])
-	# grades
+	if through > 0:
+		fails.append("[%s] %d Brücken durchdringen, was unter ihnen liegt" % [tag, through])
+	# grades: the grade of the link, or a quarter faster than the ground where that falls steeper (ramps)
 	var steep := 0
 	for li in bh.profiles:
 		var l: Dictionary = bh.links[li]
@@ -101,19 +111,18 @@ func _run(dir: String, spec: Dictionary, with_ground: bool) -> String:
 		var step: float = float(l.len) / maxf(1.0, z.size() - 1)
 		if step < 0.5:
 			continue
+		var allowed := maxf(BridgeHeights.descent(l, true), BridgeHeights.descent(l, false)) + 0.005
 		for k in z.size() - 1:
-			var gr := absf(z[k + 1] - z[k]) / step
-			if gr <= float(l.g) + 0.005:
+			if absf(z[k + 1] - z[k]) / step <= allowed:
 				continue
 			var pa: Vector2 = Geo.sample(l.pts, l.cum, step * k)[0]
 			var pb: Vector2 = Geo.sample(l.pts, l.cum, step * (k + 1))[0]
-			var ga := t.sample(pa.x, pa.y)
-			var gb := t.sample(pb.x, pb.y)
-			var on_ground := absf(z[k] - ga) < 0.02 or absf(z[k + 1] - gb) < 0.02
-			# a ramp on falling ground goes down with the ground and loses its height above it with its grade
-			var along_ground: bool = not l.bridge and absf((z[k + 1] - gb) - (z[k] - ga)) / step <= float(l.g) + 0.005
-			if not on_ground and not along_ground:
-				steep += 1
+			if absf(z[k] - t.sample(pa.x, pa.y)) < 0.02 or absf(z[k + 1] - t.sample(pb.x, pb.y)) < 0.02:
+				continue   # on the ground: the ground is that steep
+			steep += 1
+			if steep <= 3:
+				print("    zu steil: %s %.1f %% (erlaubt %.1f %%) bei %s" % [l.cls, absf(z[k + 1] - z[k]) / step * 100.0,
+					allowed * 100.0, str(pa.round())])
 	print("    zu steil (nicht vom Gelände): ", steep)
 	if steep > 0:
 		fails.append("[%s] %d zu steile Stücke" % [tag, steep])
@@ -125,13 +134,16 @@ func _run(dir: String, spec: Dictionary, with_ground: bool) -> String:
 		var e: Dictionary = net.edges[ei]
 		var total: float = float(e.len)
 		for end in [[e.a, float(e.trim_a)], [e.b, total - float(e.trim_b)]]:
-			var at: Vector2 = Geo.sample(e.pts, e.cum, clampf(float(end[1]), 0.0, total))[0]
-			var node_h := t.node_height(int(end[0]), at)
-			var d := absf(t.deck_at(dk, at) - node_h)
-			if d > worst:
-				worst = d
-				worst_at = "%s %s an Knoten %d bei %s (Fahrbahn %.2f, Kreuzung %.2f, Grund %.2f)" % [e.cls, e.name,
-					int(end[0]), str(at.round()), t.deck_at(dk, at), node_h, t.sample(at.x, at.y)]
+			var smp := Geo.sample(e.pts, e.cum, clampf(float(end[1]), 0.0, total))
+			var across: Vector2 = Geo.right_of(smp[1]) * (float(dk.hw) - 0.5) * 0.9
+			for side in [0.0, 1.0, -1.0]:   # the centre line and both edges (cross-slopes)
+				var at: Vector2 = smp[0] + across * side
+				var node_h := t.node_height(int(end[0]), at)
+				var d := absf(t.deck_at(dk, at) - node_h)
+				if d > worst:
+					worst = d
+					worst_at = "%s %s an Knoten %d bei %s (Fahrbahn %.2f, Kreuzung %.2f, Grund %.2f)" % [e.cls, e.name,
+						int(end[0]), str(at.round()), t.deck_at(dk, at), node_h, t.sample(at.x, at.y)]
 	print("    größte Stufe zur Kreuzung: %.3f m %s" % [worst, worst_at])
 	if worst > 0.1:
 		fails.append("[%s] Stufe von %.2f m zwischen Fahrbahn und Kreuzung" % [tag, worst])
@@ -185,4 +197,54 @@ func _run(dir: String, spec: Dictionary, with_ground: bool) -> String:
 	print("    Rampen %.1f km, Böschungsdreiecke %d" % [float(bh.stats.ramp_m) / 1000.0, emb])
 	if float(bh.stats.ramp_m) < 200.0 or emb == 0:
 		fails.append("[%s] keine Rampen mit Böschung" % tag)
+	# a ramp edge above the ground stands on an embankment (also on cross-slopes where its centre lies on the
+	# ground): just outside the edge there is embankment
+	var tris := {}
+	for ck in rm.chunks:
+		var ml = rm.chunks[ck].get("embankment")
+		if ml == null:
+			continue
+		for i in range(0, (ml as MeshLayer).indices.size(), 3):
+			var tri: Array = []
+			for j in 3:
+				var v: Vector3 = ml.verts[ml.indices[i + j]]
+				tri.append(Vector2(v.x, v.z))
+			var r := Rect2(tri[0], Vector2.ZERO).expand(tri[1]).expand(tri[2])
+			for gx in range(floori(r.position.x / 10.0), floori(r.end.x / 10.0) + 1):
+				for gz in range(floori(r.position.y / 10.0), floori(r.end.y / 10.0) + 1):
+					var key := Vector2i(gx, gz)
+					if not tris.has(key):
+						tris[key] = []
+					tris[key].append(tri)
+	var bare := 0
+	var edges := 0
+	for ei in t.decks:
+		var e: Dictionary = net.edges[ei]
+		if e.bridge:
+			continue
+		var dk: Dictionary = t.decks[ei]
+		var s := float(e.trim_a) + 2.0
+		while s < float(e.len) - float(e.trim_b) - 2.0:
+			var smp := Geo.sample(e.pts, e.cum, s)
+			s += 4.0
+			for side in [1.0, -1.0]:
+				var off: float = float(e.width) * 0.5 + float(e.sw_r if side > 0 else e.sw_l)
+				var q: Vector2 = smp[0] + Geo.right_of(smp[1]) * off * side
+				if t.deck_at(dk, q) - t.sample(q.x, q.y) < 0.3:
+					continue
+				edges += 1
+				var out: Vector2 = smp[0] + Geo.right_of(smp[1]) * (off + 0.4) * side
+				var hit := false
+				for tri in tris.get(Vector2i(floori(out.x / 10.0), floori(out.y / 10.0)), []):
+					if Geometry2D.point_is_inside_triangle(out, tri[0], tri[1], tri[2]):
+						hit = true
+						break
+				if not hit:
+					bare += 1
+					if bare <= 3:
+						print("    Rampenrand ohne Böschung: %s %s bei %s (%.2f m über Grund)" % [e.cls, e.name, str(q.round()),
+							t.deck_at(dk, q) - t.sample(q.x, q.y)])
+	print("    Rampenränder über Grund: %d, davon ohne Böschung %d" % [edges, bare])
+	if bare > edges / 50:
+		fails.append("[%s] %d von %d Rampenrändern ohne Böschung" % [tag, bare, edges])
 	return "%s: %d Kreuzungen, Köhlbrand %.0f m" % [tag, bh.crossings.size(), kb]
