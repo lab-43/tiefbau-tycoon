@@ -60,6 +60,8 @@ description: Use this skill to set up, check, test, build or deliver the Tiefbau
 - `E2E_SHOTS=/tmp/shots tools/gd.sh run -- --autostart --fixture=utrecht --e2e=smoke --shots=/tmp/shots`
   - Gerendert wird mit Vulkan/Mesa unter xvfb, langsam aber echt.
   - Die PNGs mit dem Read-Tool ansehen.
+  - Auf einer echten Karte: `tools/gd.sh run -- --autostart --map=<karten-id> --e2e=ansichten --shots=<dir> "--views=…"` (Karten unter `app_userdata/Baustellen Manager/maps/`).
+  - Hängt der Lauf nach „E2E OK“ beim Beenden (unter xvfb zweimal gesehen, #32), sind die Bilder fertig: den Godot-Prozess beenden. Die gespeicherte Karte ist dann trotzdem vollständig (sie wird vor den Bildern geschrieben).
 - Eigene Kamerapositionen: `shot("name", fokus, distanz, yaw, pitch)` im e2e-Treiber.
 - Einzelszene: `tools/gd.sh shot res://pfad.tscn /tmp/x.png`.
 
