@@ -233,8 +233,9 @@ func _paths() -> void:
 			terrain.mode_deck = dk
 		_flat_strip(l, pts, w, PATH_Y)
 		if not dk.is_empty():
-			if str(p.tags.get("bridge", "")) in ["", "no"]:
-				_embankment_line(ck, dk, pts, w * 0.5)   # a raised path (stairs, ramp, beside a raised road)
+			# a raised path (ramp, beside a raised road) on an embankment; bridges and stairs are concrete
+			if str(p.tags.get("bridge", "")) in ["", "no"] and p.tags.get("highway", "") != "steps":
+				_embankment_line(ck, dk, pts, w * 0.5)
 			else:
 				_deck_sides(ck, pts, w * 0.5, 1.1)
 	if terrain:
