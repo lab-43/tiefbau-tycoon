@@ -8,9 +8,11 @@ signal done(p: Variant)
 signal preview_changed(text: String, ok: bool)
 
 var pipe_i := 0                # the same pipe (trench width) for the preview and the contract
+var click_y := NAN             # height of the last click (a bridge deck or the ground)
 var preview: PitPreview
 var _last_screen := Vector2(-1, -1)
 var _last_p := Vector2(INF, INF)
+var _last_ms := -1000
 
 
 func _init() -> void:
@@ -21,6 +23,7 @@ func on_left_click(screen: Vector2) -> bool:
 	var gp = Game.world.camera_rig.ground_point(screen)
 	if gp == null:
 		return true
+	click_y = gp.y
 	done.emit(Vector2(gp.x, gp.z))
 	return true
 
@@ -50,11 +53,13 @@ func update_preview() -> void:
 		preview_changed.emit("", false)
 		return
 	var p := Vector2(gp.x, gp.z)
-	if p.distance_to(_last_p) < 0.25:
+	var now := Time.get_ticks_msec()
+	if p.distance_to(_last_p) < 0.25 or now - _last_ms < 40:
 		return
 	_last_p = p
+	_last_ms = now
 	var pipe: Dictionary = JobManager.PIPES[pipe_i]
-	var r: Dictionary = w.jobs.check_spot(p, pipe)
+	var r: Dictionary = w.jobs.check_spot(p, pipe, 4.0, 1.8, gp.y)
 	preview.show_result(r, pipe, w.net)
 	var txt := "Grube passt hierher." if r.ok else str(r.error)
 	if r.ok and not (r.hints as Array).is_empty():

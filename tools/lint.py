@@ -89,11 +89,17 @@ def check_gd(path, rel, lines):
                 report("WARN", f"{rel}:{i}", "set_anchors_preset() lässt die Offsets stehen – set_anchors_and_offsets_preset() oder Offsets setzen", "ui-anker")
         if re.search(r"Program Files|steamapps", line):
             report("ERROR", f"{rel}:{i}", "Pfad in den Steam-Spielordner – dort wird nie geschrieben", "privat-assets")
+        if COUNT_DIV_RE.search(code):
+            report("WARN", f"{rel}:{i}", "Teilen durch (n - 1): bei n = 1 entsteht NaN (z. B. gestauchte Vorlage) – "
+                   "maxf(1, n - 1) oder mit # lint-ok begründen, warum n ≥ 2 bleibt", "teilen-durch-null-teile")
         m = GROUND_RE.search(code)
         if m and rel.startswith(GROUND_DIRS) and not DIRECTION_NAMES.match(m.group(1).split(".")[-1]) and "request_focus" not in code:
             report("WARN", f"{rel}:{i}", "Weltpunkt mit fester Höhe aus einer Kartenposition – Geländehöhe fehlt "
                    "(Site.gw(), Terrain.at(); Richtungen mit # lint-ok markieren)", "gelaende-hoehen")
 
+
+# Spacing with "/ (n - 1)" for a count of items: one item gives 0/0 = NaN (#33, a squeezed closure template).
+COUNT_DIV_RE = re.compile(r"/\s*\(\s*[a-z_][a-z0-9_]*\s*-\s*1\s*\)")
 
 # Positions on the map need the ground height (#8): Vector3(p.x, 0.05, p.y) in gameplay code ignores it.
 GROUND_RE = re.compile(r"Vector3\(([A-Za-z_][A-Za-z0-9_.]*)\.x,\s*-?[0-9.]+,\s*\1\.[yz]\)")

@@ -532,8 +532,9 @@ func _flatbed_next(v: Vehicle) -> void:
 func _go_van_spot(v: Vehicle) -> void:
 	var vp := lay.van_pose()
 	crew_van = v
-	var appr := lay.van_approach()
-	v.drive_plan({"key": lay.key, "s": lay.s_van - appr}, job.short_title(), [v.pull_over_piece(lay.key, lay.s_van - appr, SiteLayout.CURB, appr)], func(veh):
+	var sp := lay.van_spot()   # on K, or on a lane next to it if the street is short (#33)
+	var appr: float = sp.appr
+	v.drive_plan({"key": sp.key, "s": float(sp.s) - appr}, job.short_title(), [v.pull_over_piece(sp.key, float(sp.s) - appr, SiteLayout.CURB, appr)], func(veh):
 		veh.place(gw(vp.pos, 0.0), vp.yaw)
 		_arrived(veh, "van"))
 	_reserve(v, "van")
@@ -554,9 +555,13 @@ func _go_stage(v: Vehicle) -> void:
 			_reserve(v, "stage")
 			_arrived(v, "stage")
 			return
-	var s := lay.stage_s(_stage_index(v)) + v.rear_ext
-	s = minf(s, lay.len_k - 13.0)
-	if v.drive_plan({"key": lay.key, "s": s - 12.0}, job.short_title() + " (wartet)", [v.pull_over_piece(lay.key, s - 12.0, SiteLayout.CURB, 12.0)], func(veh): _arrived(veh, "stage")):
+	var sp := lay.stage_spot(_stage_index(v), v.rear_ext)
+	if sp.is_empty():
+		# no kerb anywhere near (very short streets): wait close to the site on K as before
+		var s0 := minf(lay.stage_s(_stage_index(v)) + v.rear_ext, lay.len_k - 13.0)
+		sp = {"key": lay.key, "s": s0, "appr": 12.0}
+	var appr: float = sp.appr
+	if v.drive_plan({"key": sp.key, "s": float(sp.s) - appr}, job.short_title() + " (wartet)", [v.pull_over_piece(sp.key, float(sp.s) - appr, SiteLayout.CURB, appr)], func(veh): _arrived(veh, "stage")):
 		_reserve(v, "stage")
 
 
@@ -674,16 +679,20 @@ func _arrived(v: Vehicle, spot: String) -> void:
 
 func exit_plan(v: Vehicle) -> Dictionary:
 	var spot: String = spot_of.get(v, "")
-	if spot == "van" and v.pos2().distance_to(lay.lane_pt(lay.s_van, SiteLayout.CURB)) < 6.0:
-		# pull out into the lane before the detour starts (or, behind the site, before the lane ends, #33)
-		var sj := minf(lay.s_van + 9.0, lay.s_det0 - 1.5)
-		if lay.s_van > lay.s_det1:
-			sj = minf(lay.s_van + 9.0, lay.len_k - 0.5)
+	if spot == "van" and v.pos2().distance_to(lay.van_pose().pos as Vector2) < 6.0:
+		# pull out into the lane before the detour starts (or, behind the site or on a lane next to it,
+		# before that lane ends, #33)
+		var vs := lay.van_spot()
+		var vk: int = vs.key
+		var vsv: float = vs.s
+		var sj := minf(vsv + 9.0, lay.s_det0 - 1.5)
+		if vk != lay.key or vsv > lay.s_det1:
+			sj = minf(vsv + 9.0, lay.kerb_len(vk) - 0.5)
 		var a := v.pos2()
-		var join := HQ.bezier(a, a + v.forward2() * 3.0, lay.lane_pt(sj - 3.0), lay.lane_pt(sj))
+		var join := HQ.bezier(a, a + v.forward2() * 3.0, lay.kerb_pt(vk, sj - 3.0), lay.kerb_pt(vk, sj))
 		in_place.erase(v)
 		spot_of.erase(v)
-		return {"key": lay.key, "s": sj, "pre": [Router.poly_piece(join, 3.0)], "obs": {"key": lay.key, "s0": lay.s_van - 28.0, "s1": sj + 2.0}}
+		return {"key": vk, "s": sj, "pre": [Router.poly_piece(join, 3.0)], "obs": {"key": vk, "s0": vsv - 28.0, "s1": sj + 2.0}}
 	if not (spot in ["exc", "load"]) or not contains(v.pos2()):
 		return {}
 	var r: Array = Geo.closest_on_polyline(lay._g[0], lay._g[1], v.pos2())
@@ -741,7 +750,7 @@ func _check_demob() -> void:
 	for v in world.fleet.vehicles:
 		if not is_instance_valid(v) or v == crew_van or v.carried_by != null:
 			continue
-		var inside := contains(v.pos2()) and lay.lane_pt(lay.s_van, SiteLayout.CURB).distance_to(v.pos2()) > 8.0
+		var inside: bool = contains(v.pos2()) and (lay.van_pose().pos as Vector2).distance_to(v.pos2()) > 8.0
 		if inside or (v.site == self and spot_of.get(v, "") in ["exc", "load"]):
 			_set_status("Noch Fahrzeuge in der Absperrung: %s" % v.vname)
 			return
@@ -766,7 +775,7 @@ func _ensure_workers() -> void:
 		var w := Worker.new()
 		add_child(w)
 		w.position = gw(Vector2(cp.x + i * 0.7 - 0.7, cp.y), 0.05)
-		w.rotation.y = SiteLayout.yaw_of(lay.lane_dir(lay.s_van))
+		w.rotation.y = SiteLayout.yaw_of(lay.van_dir())
 		workers.append(w)
 	crew_van.light_mode.hazard = true
 
@@ -795,7 +804,7 @@ func _idle_workers() -> Array:
 
 func _worker_home(w: Worker, i: int) -> void:
 	var cp := lay.crew_point()
-	var d := lay.lane_dir(lay.s_van)
+	var d := lay.van_dir()
 	var p := cp + d * (i * 0.8 - 0.8)
 	w.walk_to(gw(p, 0.05))
 
@@ -1023,7 +1032,8 @@ func set_plan(p: ClosurePlan, build := true) -> void:
 		return
 	var ext_new: Dictionary = p.extent(lay)
 	var van_moves: bool = crew_van != null and is_instance_valid(crew_van) and spot_of.get(crew_van, "") == "van" \
-		and absf(float(ext_new.van) - lay.s_van) > 0.5
+		and (absf(float(ext_new.van) - lay.s_van) > 0.5 or (float(ext_new.van) < 0.0 and \
+		lay.plan_kerb(ext_new).van.get("rear", -1.0) != lay.kerb.van.get("rear", -1.0)))
 	var van_driving := false
 	if van_moves:
 		# the crew gets in, the van reverses along the curb to its new spot ahead of the taper
@@ -1100,8 +1110,8 @@ func _reverse_van_to(new_s: float) -> bool:
 	var v := crew_van
 	var r: Array = Geo.closest_on_polyline(lay._g[0], lay._g[1], v.pos2())
 	var s_here: float = r[1]
-	if new_s > s_here - 0.5:
-		return false
+	if new_s < 0.0 or lay.s_van < 0.0 or new_s > s_here - 0.5:
+		return false   # to or from a lane next to K (#33), or forwards: placed directly
 	var path := lay.lane_poly(s_here, new_s, func(_s): return SiteLayout.CURB, 1.0)
 	path[0] = v.pos2()
 	var pc := Router.poly_piece(path, 1.8, true, "rev")
@@ -2272,10 +2282,12 @@ func _lowbed_back(v: Vehicle = null) -> float:
 
 
 func _dispatch_lowbed(v: Vehicle) -> void:
-	var s := lay.lowbed_s(_lowbed_back(v))
-	s = minf(s, lay.len_k - 12.0)
+	var sp := lay.lowbed_spot(_lowbed_back(v))   # behind the closure, or on a lane next to K (#33)
+	if sp.is_empty():
+		sp = {"key": lay.key, "s": minf(lay.lowbed_s(_lowbed_back(v)), lay.len_k - 12.0), "appr": 12.0}
 	var label := job.short_title()
-	v.drive_plan({"key": lay.key, "s": s - 12.0}, label, [v.pull_over_piece(lay.key, s - 12.0, SiteLayout.CURB, 12.0)], func(veh): _arrived(veh, "lowbed"))
+	var appr: float = sp.appr
+	v.drive_plan({"key": sp.key, "s": float(sp.s) - appr}, label, [v.pull_over_piece(sp.key, float(sp.s) - appr, SiteLayout.CURB, appr)], func(veh): _arrived(veh, "lowbed"))
 	_reserve(v, "lowbed")
 
 

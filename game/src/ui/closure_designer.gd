@@ -59,6 +59,7 @@ var _undo: Array = []
 var _redo: Array = []
 var _checks: Array = []
 var _ext := {}
+var _kerb := {}                # kerb spots of _ext (van, waiting spots, low-loader; #33)
 var _prev_speed := 1
 var _prev_light := -1.0
 var _prev_tool: Object = null
@@ -618,7 +619,7 @@ func _changed(user_edit := true) -> void:
 	if user_edit:
 		plan.custom = true
 		dirty = true
-	_ext = plan.extent(lay)
+	_set_ext(plan.extent(lay))
 	_checks = plan.checks(lay)
 	if plan.full and mode == "lane":
 		mode = "select"   # no traffic paths to lay on a closed road
@@ -713,11 +714,25 @@ func _spot_ref(id: String) -> Vector2:
 		"pile":
 			return Vector2(float(sl.pile_s), float(sl.pile_lat))
 		"van":
+			# on a lane next to K when the street is short (#33): where it really stands, in K coordinates
+			var kv: Dictionary = _kerb.get("van", {})
+			if float(_ext.van) < 0.0 and not kv.is_empty():
+				var dv := SiteLayout.slot_drive(kv, SiteLayout.VAN_REAR)
+				return lay.lane_coords(lay.kerb_pt(dv.key, dv.s, SiteLayout.CURB))
 			return Vector2(float(_ext.van), SiteLayout.CURB)
 		"stage":
+			var ks: Array = _kerb.get("stage", [])
+			if not ks.is_empty() and not (ks[0] as Dictionary).is_empty() and int(ks[0].key) != lay.key:
+				var ds := SiteLayout.slot_drive(ks[0], 4.0)
+				return lay.lane_coords(lay.kerb_pt(ds.key, ds.s, SiteLayout.CURB))
 			var st: float = sl.stage
 			return Vector2(st if st >= 0.0 else float(_ext.det1) + 10.0, SiteLayout.CURB)
 	return Vector2.ZERO
+
+
+func _set_ext(e: Dictionary) -> void:
+	_ext = e
+	_kerb = lay.plan_kerb(e) if not e.is_empty() else {}
 
 
 ## Footprint of a spot in lane coordinates: Rect2(s0, lat0, ds, dlat).
@@ -760,7 +775,7 @@ func _spot_drag() -> void:
 	plan.slots = (_press.orig as Dictionary).duplicate()
 	plan.slots[str(_press.id)] = lc
 	plan.custom = true
-	_ext = plan.extent(lay)
+	_set_ext(plan.extent(lay))
 
 
 func _spot_release(pr: Dictionary) -> void:
@@ -1004,7 +1019,7 @@ func _lane_press() -> void:
 		ctrl.insert(idx, Vector2(c.x, SiteLayout.ctrl_lat(ctrl, c.x)))
 		plan.traffic[pid] = ctrl
 		plan.custom = true
-		_ext = plan.extent(lay)
+		_set_ext(plan.extent(lay))
 		h = {"p": pid, "i": idx}
 		_press = {"type": "lane", "p": pid, "i": idx, "orig": ctrl, "start": _mp_raw, "snap": snap_plan, "moved": true}
 	else:
@@ -1026,7 +1041,7 @@ func _lane_drag() -> void:
 	ctrl[i] = v
 	plan.traffic[pid] = ctrl
 	plan.custom = true
-	_ext = plan.extent(lay)
+	_set_ext(plan.extent(lay))
 
 
 func _lane_release(pr: Dictionary) -> void:

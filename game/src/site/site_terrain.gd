@@ -61,11 +61,11 @@ func setup(c: Vector2, d: Vector2, length: float, width: float, dep: float, sand
 
 
 func cell_u(i: int) -> float:
-	return -hl + i * (hl * 2.0) / (nu - 1)
+	return -hl + i * (hl * 2.0) / (nu - 1)   # lint-ok: grid of at least 2 x 2
 
 
 func cell_v(j: int) -> float:
-	return -hw + j * (hw * 2.0) / (nv - 1)
+	return -hw + j * (hw * 2.0) / (nv - 1)   # lint-ok: grid of at least 2 x 2
 
 
 func idx(i: int, j: int) -> int:
@@ -87,7 +87,7 @@ func local_of(p: Vector3) -> Vector2:
 
 
 func cell_area() -> float:
-	return (hl * 2.0 / (nu - 1)) * (hw * 2.0 / (nv - 1))
+	return (hl * 2.0 / (nu - 1)) * (hw * 2.0 / (nv - 1))   # lint-ok: grid of at least 2 x 2
 
 
 ## Enables the road cut-out for this pit (slot 0..3).
@@ -398,8 +398,8 @@ func _rebuild() -> void:
 	verts.resize(nu * nv)
 	norms.resize(nu * nv)
 	cols.resize(nu * nv)
-	var du := hl * 2.0 / (nu - 1)
-	var dv := hw * 2.0 / (nv - 1)
+	var du := hl * 2.0 / (nu - 1)   # lint-ok: grid of at least 2 x 2
+	var dv := hw * 2.0 / (nv - 1)   # lint-ok: grid of at least 2 x 2
 	var inv := global_transform.affine_inverse() if is_inside_tree() else Transform3D()
 	for j in nv:
 		for i in nu:

@@ -125,10 +125,10 @@ func _build_job(c: Dictionary, pipe: Dictionary, L: float, W: float, D: float, s
 
 ## Debug: an offer whose trench lies at point p, on the right lane of the nearest street (#33: only the
 ## pit has to fit, the player plans the rest). Returns {"job": Job} or {"error": String}. The job is
-## added to the offers. pipe_i: index into PIPES (-1: random).
-func offer_at(p: Vector2, pipe_i := -1) -> Dictionary:
+## added to the offers. pipe_i: index into PIPES (-1: random); y_click: height of the click (bridge decks).
+func offer_at(p: Vector2, pipe_i := -1, y_click := NAN) -> Dictionary:
 	var pipe: Dictionary = PIPES[pipe_i if pipe_i >= 0 and pipe_i < PIPES.size() else rng.randi() % PIPES.size()]
-	var r := check_spot(p, pipe)
+	var r := check_spot(p, pipe, 4.0, 1.8, y_click)
 	if not r.ok:
 		return {"error": "Hier geht keine Baustelle: " + str(r.error) if r.get("near_road", false) else str(r.error)}
 	var lay: SiteLayout = r.lay
@@ -148,7 +148,7 @@ const PIT_GAP_OTHER := 4.0     # m between two pits on different streets
 ## Rules for the pit only: on the right lane of the clicked direction of a street, not on a bridge, in a
 ## tunnel or in a junction area, room behind it for excavator and tipper, not inside another site.
 ## Returns {ok, error, near_road, lay, key, s0, L, D, shift, hints: Array[String]}.
-func check_spot(p: Vector2, pipe: Dictionary, L := 4.0, D := 1.8) -> Dictionary:
+func check_spot(p: Vector2, pipe: Dictionary, L := 4.0, D := 1.8, y_click := NAN) -> Dictionary:
 	var out := {"ok": false, "error": "", "near_road": false, "lay": null, "key": -1, "s0": 0.0, "L": L, "D": D, "shift": 0.0, "hints": []}
 	var net: RoadNet = world.net
 	var near := net.nearest_lane(p, 25.0)
@@ -158,6 +158,11 @@ func check_spot(p: Vector2, pipe: Dictionary, L := 4.0, D := 1.8) -> Dictionary:
 	var ei: int = int(near.key) >> 4
 	var e: Dictionary = net.edges[ei]
 	out.near_road = true
+	out["probe"] = {"key": int(near.key), "s": float(near.s)}
+	# a click on a bridge deck means the bridge, not the road below it
+	if not is_nan(y_click) and y_click > Terrain.at(p) + 2.5 and not e.bridge:
+		out.error = "auf einer Brücke wird nicht gegraben"
+		return out
 	if e.cls in PLACE_EXCLUDE:
 		out.error = "Autobahnen und Zufahrten (service) gehen noch nicht" if e.cls != "service" else "Zufahrten und Parkplatzwege gehen noch nicht"
 		return out

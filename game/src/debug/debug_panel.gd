@@ -219,7 +219,7 @@ func _cancel_place() -> void:
 
 func _on_place_done(p: Variant) -> void:
 	# a click on an unsuitable spot keeps the mode on, so the next click can try elsewhere
-	if p is Vector2 and not DebugTools.try_place_job_at(p, _accept_chk.button_pressed, _tool.pipe_i if _tool else -1).ok:
+	if p is Vector2 and not DebugTools.try_place_job_at(p, _accept_chk.button_pressed, _tool.pipe_i if _tool else -1, _tool.click_y if _tool else NAN).ok:
 		return
 	_cancel_place()
 	_refresh()
