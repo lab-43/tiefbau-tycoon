@@ -63,9 +63,11 @@ Autoloads (`project.godot`):
 
 ## Baustelle (`src/site/`)
 
-- **`JobManager`** erzeugt Angebote auf geeigneten Straßen (rechter Streifen, Abstand zur Kreuzung, kein Zebrastreifen und keine Haltestelle). Aus einem angenommenen Auftrag wird eine `Site`. Er verwaltet auch Ablauf und Abrechnung.
+- **`JobManager`** erzeugt Angebote auf geeigneten Straßen und macht aus einem angenommenen Auftrag eine `Site`. Er verwaltet auch Ablauf und Abrechnung. `check_spot(p, pipe)` (#33) prüft ohne Nebenwirkung, ob eine Grube an p passt (Vorschau und Debug-Platzieren über `offer_at`). Geprüft wird nur die Grube: rechter Fahrstreifen der angeklickten Richtung, nicht Brücke/Tunnel/Kreuzungsfläche, Platz für Bagger und Kipper dahinter, keine Überschneidung (`_clash`). Zebrastreifen, Haltestellen und kurze Straßen sind nur Hinweise (`_spot_hints`). Debug-Vorschau: `PlaceJobTool` + `PitPreview` (`src/debug/`).
 - **`Job`:** Vertrag (Leitung, DN, Graben, Vergütung, Frist).
 - **`SiteLayout`:** die gesamte Geometrie in Spurkoordinaten der gesperrten Spur K, also Schilder, Verziehung, Grube, Stellplätze (exc, load, van, stage, lowbed) und Ausweichspur K2.
+  - Die Grube liegt immer bei `anchor_s + TAPER + HEAD_GAP`. An Kreuzungen staucht sich die Vorlage (#33): `s0` ≥ `HEAD_MIN`, `taper_out`/`det_out` kürzer, `squeezed`. Die Grundwerte der Verkehrsgeometrie stehen in `_def` (Basis jedes Spielerplans), `extent_limits()` ist der ganze Abschnitt minus `REV_ROOM`.
+  - Parkplätze (`plan_kerb(ext)` → `kerb`): Bus (`s_van` ≥ 0 auf K, sonst `kerb.van`), drei Warteplätze, Tieflader. Zuerst auf K vor/hinter der Absperrung, sonst auf dem geraden Zulauf (`pre_key`) oder Ablauf (`post_key`). In `site.gd` nur über `van_spot()`, `van_pose()`, `stage_spot(i, rear_ext)`, `lowbed_spot(back)` und `kerb_pt/kerb_dir/kerb_len` (Spur kann eine andere sein als K).
 - **`Site`** (größte Datei, Hotspot):
   - `STEPS` = scout → closure → dig → pipe → refill → asphalt → demob → teardown → acceptance.
   - `phase`, `running`, `status`, `progress`, `sub`.

@@ -289,3 +289,30 @@ Fahrzeuge (Kolonnenbus, Pritsche, Kipper, Sattelzug mit Tieflader, Mobilbagger):
   - Tunnel liegen in der Untergrund-Ansicht auf Bodenhöhe übereinander, nicht in ihrer echten Tiefe.
   - Gleise im Einschnitt mit `layer<0` ohne Tunnel-Tag zählen auch als Untergrund (vorher gar nicht gezeichnet). Züge gibt es keine.
 - **Technik:** `edge.under`, `node.under`, `OsmData.under_rails`, Ebenen `under_road`/`under_subway`/`under_rail` und `portal`/`portal_dark`/`portal_green`, `UndergroundView` (Schleier, Kästen), `TrafficSim.in_tunnel`, `Router.nearest_lane(…, under)`. Kartenversion 11 (Karten werden neu aufbereitet). Test: `tools/test.sh tunnel` (Deichtorplatz: kein Asphalt über Tunneln, Portale, Ebenen, Verkehr versteckt, Klick über dem Tunnel).
+
+## Aufträge fast überall platzieren (Meldung #33)
+- **Vorher:** Ein Auftrag brauchte rund 114 m freie Straße (34 m bis zur Kreuzung vorn, 80 m dahinter), keinen Zebrastreifen und keine Haltestelle im Bereich und 160 m Abstand zu jedem anderen Auftrag. Auf der Hamburg-Karte (4 × 4 km um 53,520° N, 9,925° O) ließen sich nur 34 % der Straßenpunkte belegen.
+- **Jetzt zählt die Grube** (`JobManager.check_spot`, `SiteLayout.setup`):
+  - Sie liegt im rechten Fahrstreifen der angeklickten Richtung, nicht in der Kreuzungsfläche, nicht auf einer Brücke oder im Tunnel und nicht in einer engen Kurve (12° über die Grubenlänge).
+  - Dahinter müssen rund 30 m desselben Abschnitts frei sein: Bagger und Kipper stehen dort und fahren von hinten rückwärts hinein. Das ist die einzige große Bedingung, die noch übrig ist.
+  - Die Grube darf keine andere Baustelle auf derselben Straße überlappen.
+  - Zebrastreifen, Haltestellen und kurze Straßen sind nur noch Hinweise.
+  - Klickt man neben eine passende Stelle, rückt die Grube bis 25 m entlang der Straße.
+  - Ergebnis: 73 % aller Straßenpunkte, 87 % ohne Brücken. Die Brücken machen im Hafengebiet 15 % aus.
+- **Die Vorlage staucht sich:** Ist wenig Platz, werden Verziehung, Rückverziehung und Umleitung gekürzt. Bei weniger als 3 m Verziehung gibt es keine Leitbaken, und die Querabsperrung steht dort, wo der Verkehr schon verschwenkt ist. Schilder stehen am Anfang des Abschnitts hintereinander.
+- **Parkplätze auf den Nachbarstraßen** (`SiteLayout.plan_kerb`): Kolonnenbus, drei Warteplätze und der Tieflader stehen am Bordstein vor bzw. hinter der Absperrung. Passt es dort nicht, stehen sie auf dem geraden Zulauf bzw. Ablauf des Abschnitts. Die Kolonne läuft von dort zur Baustelle, der Planer zeigt den Bus, wo er wirklich steht.
+- **Planer:** Absperrung, Umleitung und Fahrspuren reichen über den ganzen Abschnitt, nicht mehr nur bis 15 m vor die Vorlage. Die roten Grenzlinien „frühestens ab / höchstens bis hier“ stehen jetzt am Abschnittsanfang bzw. vor dem Platz zum Wenden.
+- **Debug-Menü, „Auftrag platzieren“:** Die Grube hängt am Mauszeiger, aufgesprüht wie auf dem Asphalt. Orange heißt: passt. Rot heißt: passt nicht, mit dem Grund. Dahinter ist gestrichelt der Platz für Bagger und Kipper eingezeichnet, dazu Größe, Tiefe und Hinweise. Ein Klick auf ein Brückendeck meint die Brücke, nicht die Straße darunter.
+- **Ausschreibungen** entstehen auch auf kürzeren Straßen (ab 60 m statt 135 m), mit Abstand zur Zentrale und zueinander wie bisher.
+- **Grenzen (bewusst noch nicht):**
+  - Die Grube liegt immer im rechten Fahrstreifen ihrer Richtung.
+  - Einbahnstraßen mit nur einem Fahrstreifen gehen nicht (2 % der Punkte); dort ginge nur eine Vollsperrung.
+  - Der Verkehr reagiert nur auf Teile im eigenen Abschnitt: Die Verschwenkung beginnt frühestens am Abschnittsanfang, Kreuzungen und Seitenstraßen lassen sich nicht absperren.
+  - Abschnitte unter rund 36 m gehen nicht, auch wenn die Straße hinter einem Übergang (Knoten mit zwei Straßen) weiterläuft.
+- **Test:** `tools/test.sh platzieren`:
+  - Statistik über die Straßenpunkte (mindestens 75 % ohne Brücken).
+  - Vorschau orange und rot.
+  - Planer an beiden Stellen.
+  - Zwei echte Aufträge ohne Überspringen bis zur Abnahme: Grube 3,5 m hinter einer Kreuzung (Bus auf dem Zulauf) und Grube knapp vor der nächsten Kreuzung (Warteplatz und Tieflader auf dem Ablauf, Bagger per Tieflader).
+  - Unterwegs wird nach NaN-Positionen gesucht.
+  - Läuft auch auf Hamburg: `--autostart --map=<karten-id>` mit einer vom PC geholten Karte.
