@@ -284,7 +284,7 @@ func _statistics(w: World, jm: JobManager) -> void:
 	ks.sort_custom(func(a, b): return reasons[a] > reasons[b])
 	for k in ks:
 		print("PLATZ   %5d  %s" % [reasons[k], k])
-	# Hamburg (4 x 4 km, harbour): 87 %; Utrecht: 65 % (many one-way streets with one lane, not possible yet);
+	# Hamburg (4 x 4 km, harbour): 82 %; Utrecht: 65 % (many one-way streets with one lane, not possible yet);
 	# before #33 Hamburg had 34 %
 	ok(share_nb >= 60.0, "mindestens 60 %% der Straßenpunkte außerhalb von Brücken nehmen einen Auftrag (%.0f %%)" % share_nb)
 

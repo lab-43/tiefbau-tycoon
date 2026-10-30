@@ -86,12 +86,24 @@ func _make_offer() -> Job:
 		if max_s0 < 34.0:
 			continue
 		var s0 := rng.randf_range(34.0, max_s0)
-		if not lay.setup(world.net, c.key, s0, L, W, D, pipe.d) or lay.squeezed or lay.s_van < 0.0:
+		if not lay.setup(world.net, c.key, s0, L, W, D, pipe.d) or not _standard_kerb(lay):
 			continue
 		if not _location_free(lay):
 			continue
 		return _build_job(c, pipe, L, W, D, s0)
 	return null
+
+
+## Generated offers keep the full standard closure: not squeezed, the crew van in front of it, all waiting
+## spots and the low-loader behind it on the same street (#33).
+static func _standard_kerb(lay: SiteLayout) -> bool:
+	if lay.squeezed or lay.s_van < 0.0 or str(lay.kerb.get("lowbed", {}).get("run", "")) != "down":
+		return false
+	for i in 3:
+		var sl: Dictionary = (lay.kerb.stage as Array)[i]
+		if sl.is_empty() or int(sl.key) != lay.key:
+			return false
+	return true
 
 
 ## Job for lane candidate c ({key, dist}) with the trench starting at s0 (layout already validated).
@@ -152,7 +164,7 @@ const PIT_GAP_OTHER := 4.0     # m between two pits on different streets
 func check_spot(p: Vector2, pipe: Dictionary, L := 4.0, D := 1.8, y_click := NAN) -> Dictionary:
 	var out := {"ok": false, "error": "", "near_road": false, "lay": null, "key": -1, "s0": 0.0, "L": L, "D": D, "shift": 0.0, "hints": []}
 	var net: RoadNet = world.net
-	var near := net.nearest_lane(p, 25.0)
+	var near: Dictionary = world.router.nearest_lane(p, 25.0)   # grid lookup (the preview calls this per mouse move)
 	if near.is_empty():
 		out.error = "Keine Straße in der Nähe"
 		return out
@@ -226,22 +238,34 @@ func _other_layouts() -> Array:
 	return out
 
 
-## Why lay cannot go next to the other sites ("" = it can): two closures on one road must not overlap,
-## pits on other roads keep a few metres apart.
+## Why lay cannot go next to the other sites ("" = it can): nothing one site occupies on a lane (detour
+## with the reversing room behind it, the oncoming zone, kerb spots of van, waiting vehicles and
+## low-loader) may overlap what the other occupies; pits on other streets keep a few metres apart.
 func _clash(lay: SiteLayout, others: Array) -> String:
 	var c := lay.trench_center()
+	var mine := occupied(lay)
 	for o in others:
 		var ol: SiteLayout = o.lay
 		var j: Job = o.job
-		var roads := [ol.key >> 4, ol.key2 >> 4]
-		if (lay.key >> 4) in roads or (lay.key2 >> 4) in roads:
-			var a: float = lay.lane_coords(ol.lane_pt(ol.s_det0)).x
-			var b: float = lay.lane_coords(ol.lane_pt(ol.s_det1)).x
-			if maxf(a, b) > lay.s_det0 - 5.0 and minf(a, b) < lay.s_det1 + 5.0:
-				return "überschneidet sich mit %s" % j.short_title()
+		for a in mine:
+			for b in occupied(ol):
+				if int(a.key) == int(b.key) and float(a.a) < float(b.b) + 5.0 and float(a.b) > float(b.a) - 5.0:
+					return "überschneidet sich mit %s" % j.short_title()
 		if ol.trench_center().distance_to(c) < PIT_GAP_OTHER + (lay.L + ol.L) * 0.5:
 			return "zu nah an %s" % j.short_title()
 	return ""
+
+
+## Lane ranges a site uses, each in its lane's own coordinates: [{key, a, b}].
+static func occupied(lay: SiteLayout) -> Array:
+	var out: Array = [{"key": lay.key, "a": lay.s_det0, "b": lay.s_det1 + SiteLayout.REV_ROOM},
+		{"key": lay.key2, "a": lay.s2_a, "b": lay.s2_b}]
+	var vs := lay.van_spot()
+	out.append({"key": vs.key, "a": float(vs.s) - SiteLayout.VAN_REAR - float(vs.appr), "b": float(vs.s) + SiteLayout.VAN_FRONT + 3.0})
+	for sl in (lay.kerb.get("stage", []) as Array) + [lay.kerb.get("lowbed", {})]:
+		if not (sl as Dictionary).is_empty():
+			out.append({"key": sl.key, "a": float(sl.rear) - 6.0, "b": float(sl.rear) + float(sl.len) + 3.0})
+	return out
 
 
 ## Things the player should know about a spot (none of them blocks it).
@@ -565,15 +589,18 @@ func _relocate(j: Job) -> bool:
 			continue
 		var g: Array = net.lane_geo[key]
 		var s_c: float = Geo.closest_on_polyline(g[0], g[1], j.center)[1]
-		var s0 := s_c - SiteLayout.TAPER - SiteLayout.HEAD_GAP - j.length * 0.5
-		var l2 := SiteLayout.new()
-		if not l2.setup(net, key, s0, j.length, j.width, j.depth, j.pipe_d):
-			continue
-		var dc := l2.trench_center().distance_to(j.center)
-		if dc < best_d:
-			best_d = dc
-			best_key = key
-			best_s0 = s0
+		# a few metres of slack: a squeezed site (#33) may just miss the new lane ends
+		for sh in [0.0, -1.0, 1.0, -2.0, 2.0]:
+			var s0: float = s_c - SiteLayout.TAPER - SiteLayout.HEAD_GAP - j.length * 0.5 + sh
+			var l2 := SiteLayout.new()
+			if not l2.setup(net, key, s0, j.length, j.width, j.depth, j.pipe_d):
+				continue
+			var dc := l2.trench_center().distance_to(j.center)
+			if dc < best_d:
+				best_d = dc
+				best_key = key
+				best_s0 = s0
+			break
 	if best_key < 0:
 		return false
 	print("Auftrag %d: Straße neu zugeordnet (Abschnitt %d -> %d, %.1f m)" % [j.id, j.key, best_key, best_d])

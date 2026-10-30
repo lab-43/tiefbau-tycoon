@@ -294,23 +294,35 @@ Fahrzeuge (Kolonnenbus, Pritsche, Kipper, Sattelzug mit Tieflader, Mobilbagger):
 - **Vorher:** Ein Auftrag brauchte rund 114 m freie Straße (34 m bis zur Kreuzung vorn, 80 m dahinter), keinen Zebrastreifen und keine Haltestelle im Bereich und 160 m Abstand zu jedem anderen Auftrag. Auf der Hamburg-Karte (4 × 4 km um 53,520° N, 9,925° O) ließen sich nur 34 % der Straßenpunkte belegen.
 - **Jetzt zählt die Grube** (`JobManager.check_spot`, `SiteLayout.setup`):
   - Sie liegt im rechten Fahrstreifen der angeklickten Richtung, nicht in der Kreuzungsfläche, nicht auf einer Brücke oder im Tunnel und nicht in einer engen Kurve (12° über die Grubenlänge).
-  - Dahinter müssen rund 30 m desselben Abschnitts frei sein: Bagger und Kipper stehen dort und fahren von hinten rückwärts hinein. Das ist die einzige große Bedingung, die noch übrig ist.
-  - Die Grube darf keine andere Baustelle auf derselben Straße überlappen.
+  - Dahinter müssen rund 32 m desselben Abschnitts frei sein: Bagger und Kipper stehen dort und fahren von hinten rückwärts hinein. Das ist die einzige große Bedingung, die noch übrig ist.
+  - Was zwei Baustellen auf einem Fahrstreifen belegen, darf sich nicht überschneiden: Umleitung mit dem Platz zum Rückwärts-Einfahren, Gegenrichtung und Parkplätze.
   - Zebrastreifen, Haltestellen und kurze Straßen sind nur noch Hinweise.
   - Klickt man neben eine passende Stelle, rückt die Grube bis 25 m entlang der Straße.
-  - Ergebnis: 73 % aller Straßenpunkte, 87 % ohne Brücken. Die Brücken machen im Hafengebiet 15 % aus.
+  - Ergebnis: 69 % aller Straßenpunkte, 82 % ohne Brücken. Die Brücken machen im Hafengebiet 15 % aus.
 - **Die Vorlage staucht sich:** Ist wenig Platz, werden Verziehung, Rückverziehung und Umleitung gekürzt. Bei weniger als 3 m Verziehung gibt es keine Leitbaken, und die Querabsperrung steht dort, wo der Verkehr schon verschwenkt ist. Schilder stehen am Anfang des Abschnitts hintereinander.
-- **Parkplätze auf den Nachbarstraßen** (`SiteLayout.plan_kerb`): Kolonnenbus, drei Warteplätze und der Tieflader stehen am Bordstein vor bzw. hinter der Absperrung. Passt es dort nicht, stehen sie auf dem geraden Zulauf bzw. Ablauf des Abschnitts. Die Kolonne läuft von dort zur Baustelle, der Planer zeigt den Bus, wo er wirklich steht.
+- **Parkplätze auf den Nachbarstraßen** (`SiteLayout.plan_kerb`): Kolonnenbus, sechs Warteplätze und der Tieflader stehen am Bordstein vor bzw. hinter der Absperrung. Passt es dort nicht, stehen sie auf dem geraden Zulauf bzw. Ablauf des Abschnitts. Die Kolonne läuft von dort zur Baustelle, der Planer zeigt den Bus, wo er wirklich steht.
+  - Nachbarstraßen, aus denen man nur über die Baustellenstraße herauskommt, zählen nicht. Bei einer Vollsperrung säßen die Fahrzeuge dort fest.
+  - Der Tieflader steht nur hinter der Baustelle, nie davor. Sonst müsste der Bagger beim Aufladen falsch herum durch die Absperrung fahren. Gibt es hinten keinen Platz, bleibt der Tieflader in der Zentrale, und die Maschine fährt selbst.
+  - Findet ein wartendes Fahrzeug keinen Platz, wartet es in der Zentrale, bis die Baustelle es ruft.
+  - Lässt ein eigener Plan dem Bus nirgends Platz, meldet der Planer das als Pflichtpunkt.
 - **Planer:** Absperrung, Umleitung und Fahrspuren reichen über den ganzen Abschnitt, nicht mehr nur bis 15 m vor die Vorlage. Die roten Grenzlinien „frühestens ab / höchstens bis hier“ stehen jetzt am Abschnittsanfang bzw. vor dem Platz zum Wenden.
 - **Debug-Menü, „Auftrag platzieren“:** Die Grube hängt am Mauszeiger, aufgesprüht wie auf dem Asphalt. Orange heißt: passt. Rot heißt: passt nicht, mit dem Grund. Dahinter ist gestrichelt der Platz für Bagger und Kipper eingezeichnet, dazu Größe, Tiefe und Hinweise. Ein Klick auf ein Brückendeck meint die Brücke, nicht die Straße darunter.
-- **Ausschreibungen** entstehen auch auf kürzeren Straßen (Abschnitte ab 95 m statt 135 m), behalten aber die volle Standard-Absperrung (Bus davor, Warteplätze dahinter) und den Abstand zur Zentrale und zueinander. Gestauchte Stellen an Kreuzungen entstehen nur, wenn du sie selbst platzierst.
+- **Ausschreibungen** entstehen auch auf kürzeren Straßen (Abschnitte ab 95 m statt 135 m), behalten aber die volle Standard-Absperrung (Bus davor, drei Warteplätze und Tieflader dahinter auf derselben Straße) und den Abstand zur Zentrale und zueinander. Gestauchte Stellen an Kreuzungen entstehen nur, wenn du sie selbst platzierst.
 - **Grenzen (bewusst noch nicht):**
   - Die Grube liegt immer im rechten Fahrstreifen ihrer Richtung.
   - Einbahnstraßen mit nur einem Fahrstreifen gehen nicht (Hamburg 2 %, Utrecht 23 % der Punkte). Dort ginge nur eine Vollsperrung, und die Maschinen müssten von hinten über die nächste Straße hineinfahren.
   - Der Verkehr reagiert nur auf Teile im eigenen Abschnitt: Die Verschwenkung beginnt frühestens am Abschnittsanfang, Kreuzungen und Seitenstraßen lassen sich nicht absperren.
-  - Abschnitte unter rund 36 m gehen nicht, auch wenn die Straße hinter einem Übergang (Knoten mit zwei Straßen) weiterläuft.
+  - Abschnitte unter rund 38 m gehen nicht, auch wenn die Straße hinter einem Übergang (Knoten mit zwei Straßen) weiterläuft.
+  - Liegt die Grube direkt hinter einer Kreuzung und gibt es Gegenverkehr, warten die Autos vor der Engstelle in der Kreuzung, weil vor der Verschwenkung kaum Fahrstreifen bleibt. Eine Baustellenampel kommt später.
+- **Unabhängige Prüfung:** Ein frischer Prüf-Agent hat den Umbau durchgesehen und mit eigenen Testskripten nachgerechnet. Gefunden hat er unter anderem:
+  - Ohne freien Parkplatz lag das Ersatzziel mitten in der Umleitung.
+  - Der Tieflader stand auf dem Platz des Busses.
+  - Der Platz zum Rückwärts-Einfahren war 2,6 m zu kurz, der Kipper stand in der Kreuzung.
+  - Ältere eigene Pläne hätten sich beim Laden leicht verschoben (Schilder 2 m, Beginn der Verschwenkung).
+
+  Alles davon ist behoben. Offen bleibt das Warten in der Kreuzung (siehe Grenzen).
 - **Test:** `tools/test.sh platzieren`:
-  - Statistik über die Straßenpunkte (mindestens 60 % ohne Brücken; Hamburg 87 %, Utrecht 65 % wegen vieler einspuriger Einbahnstraßen).
+  - Statistik über die Straßenpunkte (mindestens 60 % ohne Brücken; Hamburg 82 %, Utrecht 65 % wegen vieler einspuriger Einbahnstraßen).
   - Vorschau orange und rot.
   - Planer an beiden Stellen.
   - Zwei echte Aufträge ohne Überspringen bis zur Abnahme: Grube 3,5 m hinter einer Kreuzung (Bus auf dem Zulauf) und Grube knapp vor der nächsten Kreuzung (Warteplatz und Tieflader auf dem Ablauf, Bagger per Tieflader).

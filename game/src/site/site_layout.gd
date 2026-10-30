@@ -19,16 +19,18 @@ const EXC_REAR := 2.0          # m from the turret axis back to the excavator's 
 # placing anywhere (#33): only the pit itself has to fit; the closure template squeezes to the lane
 const PIT_GAP := 1.5           # m between the pit and either end of the lane (the junction area)
 const HEAD_MIN := 0.5          # nothing of the closure on K before this s (the lane starts at the junction)
-const REV_ROOM := 8.0          # m on K after the detour where tippers and the excavator stop to reverse in
+const REV_ROOM := 10.0         # m on K after the detour where tippers and the excavator stop to reverse in
+                               # (stop at det1 + 3 + front: the tipper's front reaches at most 0.6 m past K)
 const TAPER_OUT_MIN := 2.0
 const DET_OUT_MIN := 1.0
 const TRENCH_BEND := 12.0      # degrees the lane may turn along the trench (it is dug as a straight box)
 const VAN_APPR_MIN := 6.0      # shortest pull-over of the crew van to its kerb spot
-const VAN_EXIT_GAP := 4.5      # m between a van in front of the closure and the start of the detour
+const VAN_EXIT_GAP := 7.5      # m between a van in front of the closure and the start of the detour
 const VAN_EXIT_MIN := 3.0      # m a van behind the site needs to pull out into the lane
 const VAN_FRONT := 2.6         # crew van: origin to front / rear (kerb spots, #33)
 const VAN_REAR := 2.9
 const STAGE_SLOT := 12.0       # kerb length of one waiting vehicle away from K (rear to front)
+const STAGE_SPOTS := 6         # waiting spots planned per site; more waiting vehicles wait in the HQ
 const LOWBED_FRONT := 6.5      # low-loader: tractor origin to its front
 
 var net: RoadNet
@@ -88,6 +90,7 @@ var pre_len := 0.0
 var post_key := -1
 var post_len := 0.0
 var kerb := {}                 # {van: slot (only if not on K), stage: [slot…], lowbed: slot}, see plan_kerb()
+static var _tipper_meta := {}
 
 # machine geometry (from the extracted assets; fallbacks if missing)
 var exc_turret_z := 0.17
@@ -133,7 +136,11 @@ func setup(n: RoadNet, k: int, start_s: float, length: float, width: float, dep:
 	_g2 = net.lane_geo[key2]
 	len_k2 = (_g2[1] as PackedFloat32Array)[(_g2[1] as PackedFloat32Array).size() - 1]
 	lw2 = lw
-	var meta := VehicleModels.load_meta("truck_tipper")
+	if _tipper_meta.is_empty():
+		_tipper_meta = VehicleModels.load_meta("truck_tipper")
+		if _tipper_meta.is_empty():
+			_tipper_meta = {"none": true}
+	var meta: Dictionary = _tipper_meta
 	if meta.has("bbox_max"):
 		tip_rear = float(meta.bbox_max[2])
 		tip_front = -float(meta.bbox_min[2])
@@ -272,9 +279,18 @@ func van_pose() -> Dictionary:
 
 ## Where the crew van parks: {key, s (its origin), appr (pull-over length)} – on K, or on a lane next to it (#33).
 func van_spot() -> Dictionary:
-	if s_van >= 0.0 or (kerb.get("van", {}) as Dictionary).is_empty():
+	if s_van >= 0.0:
 		return {"key": key, "s": s_van, "appr": van_approach()}
-	return slot_drive(kerb.van, VAN_REAR)
+	if not (kerb.get("van", {}) as Dictionary).is_empty():
+		return slot_drive(kerb.van, VAN_REAR)
+	# a plan left no kerb for the van at all (ClosurePlan checks it): the template's spot
+	var sv: float = maxf(float(_def.get("van", -1.0)), HEAD_MIN + VAN_APPR_MIN)
+	return {"key": key, "s": sv, "appr": clampf(sv - HEAD_MIN, VAN_APPR_MIN, 12.0)}
+
+
+## True if the crew van has a kerb spot under this extent (on K or next to it).
+func van_fits(ext: Dictionary) -> bool:
+	return float(ext.get("van", -1.0)) >= 0.0 or not (plan_kerb(ext).van as Dictionary).is_empty()
 
 
 func van_dir() -> Vector2:
@@ -350,7 +366,7 @@ func _neighbour(conns: Array, incoming: bool) -> Dictionary:
 		if e.bridge or e.get("tunnel", false) or e.get("under", false) or e.cls in ["motorway", "motorway_link"]:
 			continue
 		var k := RoadNet.lane_key(oe, od, net.lane_count(oe, od) - 1)
-		if not net.lane_geo.has(k):
+		if not net.lane_geo.has(k) or not _has_other_way(k, incoming):
 			continue
 		var cum: PackedFloat32Array = net.lane_geo[k][1]
 		var ln: float = cum[cum.size() - 1]
@@ -359,6 +375,18 @@ func _neighbour(conns: Array, incoming: bool) -> Dictionary:
 			best_score = score
 			best = {"key": k, "len": ln}
 	return best
+
+
+## A lane next to K is only a parking place if traffic can leave it (incoming) or reach it (outgoing)
+## without K: under a full closure vehicles parked there would be trapped otherwise.
+func _has_other_way(k: int, incoming: bool) -> bool:
+	var conns: Array = net.lane_out.get(k, []) if incoming else net.lane_in.get(k, [])
+	for ci in conns:
+		var c: Dictionary = net.connectors[ci]
+		var o: int = c.to if incoming else c.from
+		if c.turn != "U" and (o >> 4) != (key >> 4) and (o >> 4) != (key2 >> 4):
+			return true
+	return false
 
 
 func kerb_pt(k: int, s: float, lat := 0.0) -> Vector2:
@@ -443,51 +471,53 @@ func plan_kerb(ext: Dictionary) -> Dictionary:
 				out.van = sv
 				used.append([sv.key, sv.rear, sv.rear + sv.len])
 				break
+	# the low-loader may stand where vehicles wait (it rarely comes while they do), never on the van
+	var van_used: Array = used.duplicate()
 	var st0: float = float(ext.get("slots", {}).get("stage", -1.0))
-	for i in 3:
+	for i in STAGE_SPOTS:
 		var sl := {}
 		# the standard waiting spot behind the site, 14 m apart
 		var r: float = (st0 if st0 >= 0.0 else float(ext.det1) + 10.0) + i * 14.0
-		if r - 8.0 >= float(ext.det1) + 0.5 and r + 10.0 <= len_k - 0.5:
+		if r - 8.0 >= float(ext.det1) + 0.5 and r + 10.0 <= len_k - 0.5 and _free(used, key, r, r + STAGE_SLOT):
 			sl = {"key": key, "rear": r, "len": STAGE_SLOT, "a": float(ext.det1) + 0.5, "run": "down"}
 		else:
-			for id in ["post", "up", "pre"]:
-				sl = _slot(runs, id, STAGE_SLOT, id != "post", used)
+			for id in ["down", "post", "up", "pre"]:
+				sl = _slot(runs, id, STAGE_SLOT, id in ["up", "pre"], used)
 				if not sl.is_empty():
 					break
 		if not sl.is_empty():
 			used.append([sl.key, sl.rear, sl.rear + sl.len])
 		out.stage.append(sl)
-	# low-loader: its ramp lands behind the closure (the machine backs off it and reverses in), else on
-	# the lane out of K, else in front of the site
+	# low-loader: behind the closure, its ramp lands behind the tail (the machine backs off it and reverses
+	# in), else on the lane out of K. Never in front of the site: loading the excavator there would make it
+	# drive the wrong way through the closure. No spot: the machine drives itself (Site._dispatch_lowbed).
 	var back := 21.5
 	var lr: float = maxf(float(ext.get("obst1", s_taper1)) + 1.0, s_taper1) + 3.0
-	if lr + back - 12.0 >= float(ext.det1) + 0.5 and lr + back + LOWBED_FRONT <= len_k - 0.5:
+	if lr + back - 12.0 >= float(ext.det1) + 0.5 and lr + back + LOWBED_FRONT <= len_k - 0.5 and _free(van_used, key, lr, lr + back + LOWBED_FRONT):
 		out.lowbed = {"key": key, "rear": lr, "len": back + LOWBED_FRONT, "a": float(ext.det1) + 0.5, "run": "down"}
 	else:
-		for id in ["post", "up", "pre", "down"]:
-			var sb := _slot(runs, id, back + LOWBED_FRONT, id in ["up", "pre"], [])
+		for id in ["down", "post"]:
+			var sb := _slot(runs, id, back + LOWBED_FRONT, false, van_used)
 			if not sb.is_empty():
 				out.lowbed = sb
 				break
 	return out
 
 
-## Waiting spot i for a vehicle (rear_ext: origin to its rear): {key, s, appr}, {} if there is none.
-## More than three waiting vehicles queue on behind the last spot.
+static func _free(used: Array, k: int, a: float, b: float) -> bool:
+	for u in used:
+		if int(u[0]) == k and a < float(u[2]) + 1.0 and b > float(u[1]) - 1.0:
+			return false
+	return true
+
+
+## Waiting spot i for a vehicle (rear_ext: origin to its rear): {key, s, appr}, {} if there is none
+## (the vehicle then waits in the HQ until the site calls it).
 func stage_spot(i: int, rear_ext: float) -> Dictionary:
 	var st: Array = kerb.get("stage", [])
-	var n := mini(i, st.size() - 1)
-	while n >= 0 and (st[n] as Dictionary).is_empty():
-		n -= 1
-	if n < 0:
+	if i < 0 or i >= st.size() or (st[i] as Dictionary).is_empty():
 		return {}
-	var sl: Dictionary = st[n]
-	var d := slot_drive(sl, rear_ext)
-	if i > n:
-		var away := -1.0 if str(sl.run) in ["up", "pre"] else 1.0
-		d.s = float(d.s) + away * 14.0 * (i - n)
-	return d
+	return slot_drive(st[i], rear_ext)
 
 
 ## Low-loader spot: {key, s (tractor origin), appr} for a trailer whose ramp end lies back m behind it.
@@ -754,7 +784,7 @@ func _finish_slots(ext: Dictionary, slots: Dictionary) -> void:
 	if slots.has("stage"):
 		st = clampf((slots.stage as Vector2).x, float(ext.det1) + 6.0, maxf(float(ext.det1) + 6.0, len_k - 14.0))
 	if slots.has("van"):
-		ext.van = _van_for(float(ext.det0), float(ext.det1), (slots.van as Vector2).x)
+		ext.van = _van_for(float(ext.det0), float(ext.det1), (slots.van as Vector2).x, 8.0)
 	ext["slots"] = {"tc": tc, "exc_lat": el, "load_rear": lr, "load_lat": ll, "pile_s": ps, "pile_lat": pl, "stage": st}
 
 
@@ -791,7 +821,7 @@ func _extent_items(items: Array) -> Dictionary:
 	# the detour starts 8 m before the first item in K and ends 5 m after the last, anywhere on the lane
 	# between the junctions (#33); it always covers the pit and the machine spots
 	var lim := extent_limits()
-	var a_eff := clampf(a, lim.x, maxf(lim.x, minf(s_c0 - 4.0, float(_def.obst0) - 1.0)))
+	var a_eff := clampf(a, lim.x, maxf(lim.x, s_c0 - 4.0))
 	var d0 := maxf(lim.x, a_eff - 8.0)
 	var b_eff := clampf(b, minf(s_c1 + 2.0, lim.y - DET_OUT_MIN), lim.y - DET_OUT_MIN)
 	var d1 := minf(b_eff + 5.0, lim.y)
@@ -817,10 +847,11 @@ func extent_limits() -> Vector2:
 
 ## Crew van spot for a detour from d0 to d1: the wanted s if it is outside the detour with room to pull
 ## in and out, otherwise the nearest such spot in front of or behind the closure (#33).
-func _van_for(d0: float, d1: float, want: float) -> float:
+func _van_for(d0: float, d1: float, want: float, gap := 12.0) -> float:
 	var up_lo := HEAD_MIN + VAN_APPR_MIN
-	# 12 m in front of the detour as in the standard layout; closer only where the lane is short
-	var up_hi := d0 - 12.0 if d0 - 12.0 >= up_lo else d0 - VAN_EXIT_GAP
+	# 12 m in front of the detour as in the standard layout (8 m for a spot the player dragged); closer
+	# only where the lane is short
+	var up_hi := d0 - gap if d0 - gap >= up_lo else d0 - VAN_EXIT_GAP
 	var dn_lo := d1 + REV_ROOM + 3.0
 	var dn_hi := len_k - 0.5 - 3.0 - VAN_EXIT_MIN
 	var best := -1.0
@@ -881,17 +912,21 @@ func items() -> Array:
 	var d0 := lane_dir(s0)
 	var side := lw * 0.5 + 0.7
 	# close to a junction the signs stand at the start of the lane, one behind the other (#33)
-	var s123 := maxf(1.0, s0 - 48.0)
-	var s208 := maxf(s123 + 3.0, s0 - 30.0)
+	var s123 := maxf(3.0, s0 - 48.0)
+	var s208 := maxf(3.0, s0 - 30.0)
+	if s208 < s123 + 0.5:
+		s208 = s123 + 3.0
 	out.append(_item("z123", lane_pt(s123, side), yaw_of(lane_dir(s123)), "signs"))
 	out.append(_item("z208", lane_pt(s208, side), yaw_of(lane_dir(s208)), "signs"))
 	var k2_sign_kind := "z308" if oncoming else ""
 	# standard positions: from the default K2 range (a player plan may have moved s2_a)
 	var s2a_def: float = _def.get("s2_a", s2_a)
-	var s2_123 := maxf(1.0, s2a_def - 45.0)
+	var s2_123 := maxf(3.0, s2a_def - 45.0)
 	out.append({"kind": "z123", "pos": lane2_pt(s2_123, lw2 * 0.5 + 0.7), "yaw": yaw_of(lane2_dir(s2_123)), "phase": 0.0, "group": "signs"})
 	if k2_sign_kind != "":
-		var s2_308 := maxf(s2_123 + 3.0, s2a_def - 24.0)
+		var s2_308 := maxf(3.0, s2a_def - 24.0)
+		if s2_308 < s2_123 + 0.5:
+			s2_308 = s2_123 + 3.0
 		out.append({"kind": "z308", "pos": lane2_pt(s2_308, lw2 * 0.5 + 0.7), "yaw": yaw_of(lane2_dir(s2_308)), "phase": 0.0, "group": "signs"})
 	# taper (Verschwenkung) with running warning lights
 	# a short taper near a junction gets fewer Leitbaken; under 3 m none (the traffic swings over right at

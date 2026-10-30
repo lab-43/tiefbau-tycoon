@@ -557,9 +557,17 @@ func _go_stage(v: Vehicle) -> void:
 			return
 	var sp := lay.stage_spot(_stage_index(v), v.rear_ext)
 	if sp.is_empty():
-		# no kerb anywhere near (very short streets): wait close to the site on K as before
-		var s0 := minf(lay.stage_s(_stage_index(v)) + v.rear_ext, lay.len_k - 13.0)
-		sp = {"key": lay.key, "s": s0, "appr": 12.0}
+		# no free kerb near the site (#33): wait in the HQ until the site calls the vehicle
+		_reserve(v, "stage")
+		if v.at_hq() and v.state == "parked":
+			_arrived(v, "stage")
+			v.status_text = "Wartet in der Zentrale auf %s" % job.short_title()
+		elif not v._drive_to_hq(func(veh):
+				if veh.site == self and spot_of.get(veh, "") == "stage":
+					_arrived(veh, "stage")
+					veh.status_text = "Wartet in der Zentrale auf %s" % job.short_title()):
+			spot_of.erase(v)
+		return
 	var appr: float = sp.appr
 	if v.drive_plan({"key": sp.key, "s": float(sp.s) - appr}, job.short_title() + " (wartet)", [v.pull_over_piece(sp.key, float(sp.s) - appr, SiteLayout.CURB, appr)], func(veh): _arrived(veh, "stage")):
 		_reserve(v, "stage")
@@ -610,7 +618,13 @@ func _behind_site(v: Vehicle) -> bool:
 	var r: Array = Geo.closest_on_polyline(lay._g[0], lay._g[1], v.pos2())
 	# a machine backed off the low-loader stands with its rear in the tail taper (#24): past the work
 	# zone is enough, otherwise it drives around the block (1.2 km at walking pace for the R 938)
-	return r[1] > lay.tail_s() - lay.taper_out and r[0] < 6.0
+	if r[1] > lay.tail_s() - lay.taper_out and r[0] < 6.0:
+		return true
+	if lay.post_key >= 0:
+		var gp: Array = world.net.lane_geo[lay.post_key]
+		var rp: Array = Geo.closest_on_polyline(gp[0], gp[1], v.pos2())
+		return rp[0] < 6.0 and rp[1] < 45.0 and r[1] > lay.len_k - 1.0
+	return false
 
 
 func _slot_arrived(v: Vehicle, spot: String, slot_s: float, slot_lat := 0.0) -> void:
@@ -692,7 +706,10 @@ func exit_plan(v: Vehicle) -> Dictionary:
 		var join := HQ.bezier(a, a + v.forward2() * 3.0, lay.kerb_pt(vk, sj - 3.0), lay.kerb_pt(vk, sj))
 		in_place.erase(v)
 		spot_of.erase(v)
-		return {"key": vk, "s": sj, "pre": [Router.poly_piece(join, 3.0)], "obs": {"key": vk, "s0": vsv - 28.0, "s1": sj + 2.0}}
+		var o0 := vsv - 28.0
+		if vk == lay.key and vsv > lay.s_det1:
+			o0 = maxf(o0, lay.s_det1 + 0.5)
+		return {"key": vk, "s": sj, "pre": [Router.poly_piece(join, 3.0)], "obs": {"key": vk, "s0": o0, "s1": sj + 2.0}}
 	if not (spot in ["exc", "load"]) or not contains(v.pos2()):
 		return {}
 	var r: Array = Geo.closest_on_polyline(lay._g[0], lay._g[1], v.pos2())
@@ -1110,8 +1127,8 @@ func _reverse_van_to(new_s: float) -> bool:
 	var v := crew_van
 	var r: Array = Geo.closest_on_polyline(lay._g[0], lay._g[1], v.pos2())
 	var s_here: float = r[1]
-	if new_s < 0.0 or lay.s_van < 0.0 or new_s > s_here - 0.5:
-		return false   # to or from a lane next to K (#33), or forwards: placed directly
+	if new_s < 0.0 or lay.s_van < 0.0 or new_s > s_here - 0.5 or (s_here > lay.s_det1) != (new_s > lay.s_det1):
+		return false   # to or from a lane next to K or across the closure (#33), or forwards: placed directly
 	var path := lay.lane_poly(s_here, new_s, func(_s): return SiteLayout.CURB, 1.0)
 	path[0] = v.pos2()
 	var pc := Router.poly_piece(path, 1.8, true, "rev")
@@ -2282,9 +2299,18 @@ func _lowbed_back(v: Vehicle = null) -> float:
 
 
 func _dispatch_lowbed(v: Vehicle) -> void:
-	var sp := lay.lowbed_spot(_lowbed_back(v))   # behind the closure, or on a lane next to K (#33)
+	var sp := lay.lowbed_spot(_lowbed_back(v))   # behind the closure, or on the lane out of K (#33)
 	if sp.is_empty():
-		sp = {"key": lay.key, "s": minf(lay.lowbed_s(_lowbed_back(v)), lay.len_k - 12.0), "appr": 12.0}
+		# no room for a low-loader at this site: the machine drives itself, the low-loader stays home
+		if v.cargo.machine != null:
+			Events.warn("%s: kein Platz für den Tieflader – die Maschine fährt selbst hin" % job.short_title())
+			v.unload_machine(func(mach):
+				release_vehicle(v)
+				send_vehicle(mach))
+		else:
+			Events.warn("%s: kein Platz für den Tieflader – der Bagger fährt selbst zurück" % job.short_title())
+			release_vehicle(v)
+		return
 	var label := job.short_title()
 	var appr: float = sp.appr
 	v.drive_plan({"key": sp.key, "s": float(sp.s) - appr}, label, [v.pull_over_piece(sp.key, float(sp.s) - appr, SiteLayout.CURB, appr)], func(veh): _arrived(veh, "lowbed"))

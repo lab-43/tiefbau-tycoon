@@ -475,6 +475,10 @@ func checks(lay: SiteLayout) -> Array:
 	out.append(_check_plaetze(lay, lc_of, ext))
 	out.append(_check_reach(lay, ext))
 	out.append(_check_spots_traffic(lay, ext))
+	# 5b. the crew van still has a kerb (#33: a closure over the whole lane can take all of it); only listed when not
+	if not lay.van_fits(ext):
+		out.append({"id": "bus", "ok": false, "required": true, "text": "Platz für den Kolonnenbus",
+			"hint": "Die Sperrung lässt auf dieser Straße und in den Nachbarstraßen keinen Platz am Bordstein für den Kolonnenbus. Verschwenkung kürzer machen."})
 	# 6. taper ahead of the cross barrier
 	var n_taper := 0
 	for i in items.size():
