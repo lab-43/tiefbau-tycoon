@@ -71,13 +71,23 @@ func tick(delta: float) -> void:
 				return
 			_close_designer(w)
 			if "--platz-kurz" in OS.get_cmdline_user_args():
-				_end()
+				# B only for its closure designer (it may lie next to A on the same street)
+				var sb := _place(jm, spot_b)
+				if sb != null:
+					site = sb
+					_open_designer(w, "B")
+				step = 13
 				return
 			for v in w.fleet.vehicles:
 				if v.def_id in ["van_crew", "excavator_a918", "truck_tipper", "truck_flatbed"]:
 					site.send_vehicle(v)
 			site.auto_continue = true
 			step = 1
+		13:
+			if not drv.shot_queue.is_empty():
+				return
+			_close_designer(w)
+			_end()
 		1:
 			if _follow(delta, "A"):
 				ok(site.job.state == "done", "A: Auftrag abgenommen")
@@ -344,6 +354,15 @@ func _open_designer(w: World, tag: String) -> void:
 		return
 	des._refresh_side()
 	ok(not des._checks.is_empty(), "%s: Planer prüft den Plan (%d Punkte)" % [tag, des._checks.size()])
+	for c in des._checks:
+		if c.get("required", false) and not c.ok:
+			print("PLATZ %s Pflichtpunkt offen: %s – %s" % [tag, c.text, c.get("hint", "")])
+			for bi in c.get("bad", []):
+				var it: Dictionary = des.plan.items[bi]
+				var lc := site.lay.lane_coords(ClosurePlan.item_center(it))
+				print("      %s group=%s s=%.2f lat=%.2f yaw=%.2f" % [it.kind, it.get("group", ""), lc.x, lc.y, float(it.yaw)])
+	var ext: Dictionary = des.plan.extent(site.lay)
+	print("      Verkehr K: %s" % str(ext.k_ctrl))
 	var vr := des._spot_ref("van")
 	var vp: Vector2 = site.lay.van_pose().pos
 	ok(site.lay.lane_pt(vr.x, vr.y).distance_to(vp) < 3.0, "%s: Planer zeigt den Kolonnenbus dort, wo er parkt (%.1f m)" % [tag, site.lay.lane_pt(vr.x, vr.y).distance_to(vp)])

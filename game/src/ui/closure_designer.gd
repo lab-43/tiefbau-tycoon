@@ -132,8 +132,10 @@ func open(s: Site) -> void:
 ## Camera over the whole closure, traffic of the closed lane running from left to right.
 func frame_view() -> void:
 	var ext: Dictionary = plan.extent(lay)
-	var a: float = minf(float(ext.det0), float(ext.van) - 4.0)
-	var b: float = maxf(float(ext.det1), lay.s_taper1)
+	_set_ext(ext)
+	var van_s: float = _spot_ref("van").x   # also when the van parks on a lane next to K (#33)
+	var a: float = minf(float(ext.det0), van_s - 4.0)
+	var b: float = maxf(float(ext.det1), maxf(lay.s_taper1, van_s + 4.0))
 	# include the planned items (signs far ahead), but not items far away on other streets
 	for it in plan.items:
 		var sx := lay.lane_coords(ClosurePlan.item_center(it)).x

@@ -899,9 +899,10 @@ func items() -> Array:
 		var s2_308 := maxf(s2_123 + 3.0, s2a_def - 24.0)
 		out.append({"kind": "z308", "pos": lane2_pt(s2_308, lw2 * 0.5 + 0.7), "yaw": yaw_of(lane2_dir(s2_308)), "phase": 0.0, "group": "signs"})
 	# taper (Verschwenkung) with running warning lights
-	# a short taper near a junction gets fewer Leitbaken; none if the head barrier stands at the lane start (#33)
+	# a short taper near a junction gets fewer Leitbaken; under 3 m none (the traffic swings over right at
+	# the lane start there, a Leitbake would stand in its way), only the head barrier (#33)
 	var taper_len := s_c0 - s0
-	var n_taper := 0 if taper_len < 0.4 else clampi(int(taper_len / 3.0) + 1, 2, 5)
+	var n_taper := 0 if taper_len < 3.0 else clampi(int(taper_len / 3.0) + 1, 2, 5)
 	for i in n_taper:
 		var t := float(i) / maxf(1.0, n_taper - 1)
 		var s := lerpf(s0, s_c0, t)
@@ -915,9 +916,15 @@ func items() -> Array:
 	var width := right - left
 	var panels := maxi(1, int(ceil(width / 2.05)))
 	var step := (width - 2.05) / maxf(1.0, panels - 1) if panels > 1 else 0.0
+	# right behind a junction the traffic swings over within a few metres: the barrier stands where it has
+	# (TRAFFIC_CLEAR from the path), still in front of the pit (#33)
+	var s_head := s_c0 + 0.6
+	var full0: float = _def.get("full0", p_full0)
+	if full0 + 1.0 > s_head:
+		s_head = minf(full0 + 1.0, s_t0 - 0.3)
 	for i in panels:
 		var lat2 := left + i * step
-		out.append(_item("schranke", lane_pt(s_c0 + 0.6, lat2), yaw_of(lane_dir(s_c0 + 0.6)), "head"))
+		out.append(_item("schranke", lane_pt(s_head, lat2), yaw_of(lane_dir(s_head)), "head"))
 	# longitudinal Leitbaken along the traffic side
 	var s := s_c0 + 4.5
 	while s < s_c1 - 0.5:
