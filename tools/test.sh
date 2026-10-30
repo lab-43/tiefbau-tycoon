@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs end-to-end scenarios headless on the offline Utrecht map and reports pass/fail.
 # usage: tools/test.sh [scenario ...]            default: smoke issue
-#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren tunnel debug leuchten verkehrslichter rig schaufel altstand markierungen absperrung gelaende vollsperrung umbau fahrzeuge baeume stellplaetze  (save+load = save mid-dig,
+#   scenarios: smoke issue job lowbed save+load pbf ebenen sichtweite fahren tunnel debug leuchten verkehrslichter rig schaufel altstand markierungen absperrung gelaende vollsperrung umbau fahrzeuge baeume stellplaetze platzieren  (save+load = save mid-dig,
 #              then load and finish; rig = excavator linkage/cylinders, see game/test/rig_test.gd;
 #              schaufel = soil in the bucket (game/test/bucket_test.gd, stand-in model always, real model if present);
 #              ebenen = height order of flat map layers, see game/test/layer_test.gd – also part of pbf;
@@ -129,6 +129,9 @@ for s in "${SCEN[@]}"; do
     stellplaetze)  # machine and parking spots (#22): vehicles park where planned, excavator reaches them
       run stellplaetze "E2E OK stellplaetze" --e2e=stellplaetze
       if grep -q "SCRIPT ERROR" /tmp/tt_e2e_stellplaetze.log; then FAIL=1; echo "FAIL  stellplaetze: Skriptfehler im Log"; grep -A3 "SCRIPT ERROR" /tmp/tt_e2e_stellplaetze.log | head -8 | sed 's/^/      /'; fi ;;
+    platzieren)  # contracts almost anywhere (#33): statistics, pit preview, 2 real jobs right at junctions
+      run platzieren "E2E OK platzieren" --e2e=platzieren
+      if grep -q "SCRIPT ERROR" /tmp/tt_e2e_platzieren.log; then FAIL=1; echo "FAIL  platzieren: Skriptfehler im Log"; grep -A3 "SCRIPT ERROR" /tmp/tt_e2e_platzieren.log | head -8 | sed 's/^/      /'; fi ;;
     *) echo "unbekanntes Szenario: $s"; FAIL=1 ;;
   esac
 done
