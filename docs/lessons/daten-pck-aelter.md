@@ -13,3 +13,6 @@ pruefung: manuell: vor dem Übertragen `ls game/assets/consim` im Container mit 
 - Unterscheidet sich `daten.hash`, erst vergleichen: `ls game/assets/consim` hier und auf dem PC, Größe der Daten-pcks. Fehlt im Container etwas, nur Code-pck, `LIESMICH.txt`, `portable.txt` und `VERSION.txt` (mit `daten=` vom PC) übertragen, das Daten-pck des PCs bleibt.
 - Für eigene Tests mit neuen Modellen zuerst `private/assets.tar` neu holen (Skill tycoon-dev).
 - Ein roter Fahrzeugtest im Container erst auf main nachstellen, bevor man den eigenen Code verdächtigt.
+
+**Nochmals (#33), andere Ursache:** Hash im Container `fe21eebc2190cb95`, auf dem PC `3a512aa3d18ac46b`, obwohl die Modelle gleich waren. Der Vergleich der Inhalte ohne `.import` ergab: Container 470 Dateien, PC 465. Der Unterschied war `bus_citaro`, nur im Container gab es zusätzlich `bus_citaro_0.jpg` … `_4.png`. Godot packt beim Import die eingebetteten Texturen dieses glb in den Ordner aus. Der PC importiert nie, deshalb fehlen sie dort. Der Hash in `tools/build.sh` zählt solche Dateien mit. Er kann sich also auch bei gleichen Modellen unterscheiden.
+- Ein Vergleich, der etwas aussagt: Liste und Prüfsummen der `.glb`/`.json`/`.png` aus `private/assets.tar` (`tar -tvf`) gegen den Ordner auf dem PC. Sind sie gleich, nur das Code-pck übertragen und in `VERSION.txt` `daten=` vom PC eintragen.
