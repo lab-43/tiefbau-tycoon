@@ -207,22 +207,13 @@ func _paths() -> void:
 	for pi in data.paths.size():
 		var p: Dictionary = data.paths[pi]
 		var hw: String = p.tags.get("highway", "")
-		var w := 2.0
+		var w := path_width(p.tags)
 		var layer_name := "path"
 		match hw:
 			"cycleway":
-				w = 2.0
 				layer_name = "cycleway"
-			"pedestrian":
-				w = 6.0
-			"steps":
-				w = 2.0
 			"track":
-				w = 3.0
 				layer_name = "track"
-		var tw := RoadNet.parse_width(str(p.tags.get("width", "")))
-		if tw > 0.5 and tw < 12.0:
-			w = tw
 		var pts := Geo.chaikin(p.pts, 1, 2.0)
 		var dk: Dictionary = path_decks.get(pi, {})
 		if not dk.is_empty():
@@ -240,6 +231,21 @@ func _paths() -> void:
 				_deck_sides(ck, pts, w * 0.5, 1.1)
 	if terrain:
 		terrain.mode_deck = {}
+
+
+## Drawn width of a path (footway, cycleway, pedestrian street, steps, track); BridgeHeights and BridgeStructures
+## use it too.
+static func path_width(tags: Dictionary) -> float:
+	var w := 2.0
+	match str(tags.get("highway", "")):
+		"pedestrian":
+			w = 6.0
+		"track":
+			w = 3.0
+	var tw := RoadNet.parse_width(str(tags.get("width", "")))
+	if tw > 0.5 and tw < 12.0:
+		w = tw
+	return w
 
 
 func _flat_strip(l: MeshLayer, pts: PackedVector2Array, w: float, y: float) -> void:

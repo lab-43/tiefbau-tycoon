@@ -116,6 +116,7 @@ func bake(meta: Dictionary, osm_dir: String, pbf := "") -> Dictionary:
 	var bs := BridgeStructures.new(bh, net, terrain, cm._asphalt if cm._asphalt else AsphaltIndex.new(net, terrain))
 	bs.build(rm)
 	bs.clear_xforms(cm.trees)
+	bs.clear_xforms(cm.lamps)
 	note(bs.summary())
 	note("Untergrund: %d Tunnelabschnitte (%.1f km), %d Gleise im Tunnel, %d Tunnelportale" % [rm.under_stats.edges,
 		rm.under_stats.m / 1000.0, data.under_rails.size(), portals.built])

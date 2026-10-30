@@ -1,6 +1,6 @@
 extends Node
 ## Bridge heights (#32) on the Waltershof / Köhlbrand fixture (testdata/bruecken), once with the real ground heights
-## of the fixture and once on a flat map:
+## of the fixture and once on a flat map, and on the flat Utrecht test map (many small canal bridges, rail lines):
 ##   lichte Höhe – every road, railway, path and water crossed by a bridge has its clear height below the deck
 ##                 (cable-stayed bridges over wide water: 50 m, or as high as their own ramps allow),
 ##   Steigung    – raised decks rise no steeper than their class allows, unless the ground itself is steeper
@@ -23,27 +23,32 @@ var fails: Array = []
 
 func _ready() -> void:
 	var dir := ""
+	var only := ""
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--fixture="):
 			dir = a.substr(10)
+		elif a.begins_with("--nur="):
+			only = a.substr(6)   # one run only (Gelände, flach, Utrecht), for debugging
 	var spec = JSON.parse_string(FileAccess.get_file_as_string(dir.path_join("bruecken.json")))
 	if typeof(spec) != TYPE_DICTIONARY:
 		print("BRUECKEN FAIL bruecken.json fehlt in ", dir)
 		get_tree().quit(1)
 		return
+	spec["koehlbrand"] = true
+	var utrecht := {"lat": 52.0907, "lon": 5.1214, "halbe_kante_m": 3000.0, "pbf": "../utrecht.osm.pbf"}
 	var res: Array = []
-	for with_ground in [true, false]:
-		res.append(_run(dir, spec, with_ground))
+	for run in [[spec, true, "Gelände"], [spec, false, "flach"], [utrecht, false, "Utrecht"]]:
+		if only == "" or only == run[2]:
+			res.append(_run(dir, run[0], run[1], run[2]))
 	if fails.is_empty():
-		print("BRUECKEN OK %s | %s" % res)
+		print("BRUECKEN OK ", " | ".join(res))
 		get_tree().quit(0)
 	else:
 		print("BRUECKEN FAIL ", "; ".join(fails))
 		get_tree().quit(1)
 
 
-func _run(dir: String, spec: Dictionary, with_ground: bool) -> String:
-	var tag := "Gelände" if with_ground else "flach"
+func _run(dir: String, spec: Dictionary, with_ground: bool, tag: String) -> String:
 	Geo.setup(float(spec.lat), float(spec.lon))
 	var half: float = spec.halbe_kante_m
 	var data := OsmParser.new().parse_pbf(dir.path_join(spec.pbf), half)
@@ -148,7 +153,9 @@ func _run(dir: String, spec: Dictionary, with_ground: bool) -> String:
 			for side in [0.0, 1.0, -1.0]:   # the centre line and both edges (cross-slopes)
 				var at: Vector2 = smp[0] + across * side
 				var node_h := t.node_height(int(end[0]), at)
-				var d := absf(t.deck_at(dk, at) - node_h)
+				# at the edges of a curved road the deck is level across its own direction, not along the trim
+				# line: up to grade x the offset of the trim line (0.15 m allowed there, 0.1 m on the centre line)
+				var d := absf(t.deck_at(dk, at) - node_h) * (1.0 if side == 0.0 else 0.1 / 0.15)
 				if d > worst:
 					worst = d
 					worst_at = "%s %s an Knoten %d bei %s (Fahrbahn %.2f, Kreuzung %.2f, Grund %.2f)" % [e.cls, e.name,
@@ -166,7 +173,7 @@ func _run(dir: String, spec: Dictionary, with_ground: bool) -> String:
 			for k in h.size():
 				kb = maxf(kb, h[k] - g[k])
 	print("    Köhlbrandbrücke: %.0f m über Grund" % kb)
-	if kb < 40.0:
+	if spec.get("koehlbrand", false) and kb < 40.0:
 		fails.append("[%s] Köhlbrandbrücke nur %.0f m hoch" % [tag, kb])
 	# a mouse click from above hits the deck, not the water below (the ray starts above the highest bridge)
 	var was := Terrain.cur
@@ -192,7 +199,7 @@ func _run(dir: String, spec: Dictionary, with_ground: bool) -> String:
 			miss += 1
 	Terrain.cur = was
 	print("    Mausklick auf hohe Brücken: %d von %d verfehlt" % [miss, tried])
-	if tried == 0 or miss > 0:
+	if miss > 0 or (tried == 0 and spec.get("koehlbrand", false)):
 		fails.append("[%s] Mausklick verfehlt %d von %d hohen Brücken" % [tag, miss, tried])
 	# ramps with embankments
 	var rm := RoadMesher.new(net, 500.0, data.bounds.position)
@@ -260,103 +267,191 @@ func _run(dir: String, spec: Dictionary, with_ground: bool) -> String:
 	return "%s: %d Kreuzungen, Köhlbrand %.0f m, %s" % [tag, bh.crossings.size(), kb, st]
 
 
-## Stage 2: piers and abutments (BridgeStructures), deck undersides. Checked against what the meshers drew and the
-## OSM data, not against the helpers BridgeStructures uses itself.
+## Stage 2: piers and abutments (BridgeStructures), deck undersides and edges. Checked against what the meshers
+## drew and the OSM data, not against the helpers BridgeStructures uses itself.
 func _structures(tag: String, t: Terrain, net: RoadNet, data: OsmData, bh: BridgeHeights, rm: RoadMesher) -> String:
 	var bs := BridgeStructures.new(bh, net, t, AsphaltIndex.new(net, t))
 	bs.build(rm)
+	# railway and path decks: CityMesher
+	var cm := CityMesher.new(data, net, 500.0)
+	cm.terrain = t
+	cm.rail_decks = bh.rail_decks
+	cm.path_decks = bh.path_decks
+	cm._rails()
+	cm._paths()
 	print("    ", bs.summary())
 	if bs.piers.size() < 30 or bs.abutments.size() < 5:
 		fails.append("[%s] zu wenige Pfeiler (%d) oder Widerlager (%d)" % [tag, bs.piers.size(), bs.abutments.size()])
-	# ground asphalt as drawn (bridge decks and ramps are separate *_deck layers)
-	var asph := {}
-	var down := 0
+	# drawn road surfaces (with their heights), deck undersides and the vertical walls of the bridge layer
+	var surf := {}    # 10 m cell -> [[a, b, c] (Vector3)]
+	var under := {}   # 10 m cell -> [[a, b, c] (Vector3)]
+	var walls := {}   # 10 m cell -> [[p, q] (Vector2)]
+	for ck in cm.chunks:
+		var cbl = cm.chunks[ck].get("bridge")
+		if cbl != null:
+			_index_tris(cbl, under, func(n: Vector3): return n.y < -0.9)
 	for ck in rm.chunks:
-		var al = rm.chunks[ck].get("asphalt")
-		if al != null:
-			for i in range(0, (al as MeshLayer).indices.size(), 3):
-				var tri: Array = []
-				for j in 3:
-					var v: Vector3 = al.verts[al.indices[i + j]]
-					tri.append(Vector2(v.x, v.z))
-				var r := Rect2(tri[0], Vector2.ZERO).expand(tri[1]).expand(tri[2])
-				for gx in range(floori(r.position.x / 10.0), floori(r.end.x / 10.0) + 1):
-					for gz in range(floori(r.position.y / 10.0), floori(r.end.y / 10.0) + 1):
-						var k := Vector2i(gx, gz)
-						if not asph.has(k):
-							asph[k] = []
-						asph[k].append(tri)
+		for lname in ["asphalt", "asphalt_deck", "sidewalk", "sidewalk_deck"]:
+			var ml = rm.chunks[ck].get(lname)
+			if ml != null:
+				_index_tris(ml, surf, func(_n: Vector3): return true)
 		var bl = rm.chunks[ck].get("bridge")
 		if bl != null:
+			_index_tris(bl, under, func(n: Vector3): return n.y < -0.9)
 			for i in range(0, (bl as MeshLayer).indices.size(), 3):
-				if (bl as MeshLayer).normals[bl.indices[i]].y < -0.9:
-					down += 1
-	if down == 0:
-		fails.append("[%s] Brückendecks ohne Unterseite" % tag)
-	# water areas
+				if absf((bl as MeshLayer).normals[bl.indices[i]].y) > 0.2:
+					continue
+				var pa: Vector3 = bl.verts[bl.indices[i]]
+				var pb: Vector3 = bl.verts[bl.indices[i + 1]]
+				var pc: Vector3 = bl.verts[bl.indices[i + 2]]
+				var ps := [Vector2(pa.x, pa.z), Vector2(pb.x, pb.z), Vector2(pc.x, pc.z)]
+				var seg := [ps[0], ps[1]]
+				for u in 3:
+					for v in range(u + 1, 3):
+						if (ps[u] as Vector2).distance_to(ps[v]) > (seg[0] as Vector2).distance_to(seg[1]):
+							seg = [ps[u], ps[v]]
+				_add_cell(walls, Rect2(seg[0], Vector2.ZERO).expand(seg[1]), seg)
+	# what may lie below a pier
 	var water: Array = []
-	for a in data.areas:
-		if a.kind == "water" and (a.outer as PackedVector2Array).size() >= 3:
-			water.append(a.outer)
-	var on_road := 0
-	var on_rail := 0
-	var in_water := 0
-	var gap := 0
+	for ar in data.areas:
+		if ar.kind == "water" and (ar.outer as PackedVector2Array).size() >= 3:
+			water.append(ar)
+	var lines := {}   # railways and paths: [a, b, half width, railway?, way index]
+	for ri in data.rails.size():
+		var rp: PackedVector2Array = data.rails[ri].pts
+		for k in rp.size() - 1:
+			_add_cell(lines, Rect2(rp[k], Vector2.ZERO).expand(rp[k + 1]).grow(4.0), [rp[k], rp[k + 1], 1.7, true, ri])
+	for pi in data.paths.size():
+		var pp: PackedVector2Array = data.paths[pi].pts
+		var hw := CityMesher.path_width(data.paths[pi].tags) * 0.5
+		for k in pp.size() - 1:
+			_add_cell(lines, Rect2(pp[k], Vector2.ZERO).expand(pp[k + 1]).grow(hw + 2.0), [pp[k], pp[k + 1], hw, false, pi])
+	var houses := {}
+	for bd in data.buildings:
+		var o: PackedVector2Array = bd.outer
+		if o.size() >= 3:
+			var r := Rect2(o[0], Vector2.ZERO)
+			for q in o:
+				r = r.expand(q)
+			_add_cell(houses, r, [o, r])
+	var bad := {"Fahrbahn": 0, "Gleis": 0, "Weg": 0, "Gebäude": 0, "Wasser": 0, "nicht am Deck": 0}
 	for pr in bs.piers:
 		var c: Vector2 = pr.p
 		var d: Vector2 = pr.d
 		var rt := Geo.right_of(d)
-		var corners := [c, c + rt * (pr.w * 0.5) + d * (pr.t * 0.5), c - rt * (pr.w * 0.5) + d * (pr.t * 0.5),
-			c + rt * (pr.w * 0.5) - d * (pr.t * 0.5), c - rt * (pr.w * 0.5) - d * (pr.t * 0.5)]
-		var hit_road := false
-		for q: Vector2 in corners:
-			for tri in asph.get(Vector2i(floori(q.x / 10.0), floori(q.y / 10.0)), []):
-				if Geometry2D.point_is_inside_triangle(q, tri[0], tri[1], tri[2]):
-					hit_road = true
-		if hit_road:
-			on_road += 1
-			if on_road <= 3:
-				print("    Pfeiler auf der Fahrbahn bei %s" % str(c.round()))
-		# railways on the ground
-		for ri in data.rails.size():
-			var rpts: PackedVector2Array = data.rails[ri].pts
-			var rdk: Dictionary = bh.rail_decks.get(ri, {})
-			var rect := PackedVector2Array([corners[1], corners[2], corners[4], corners[3]])
-			for k in rpts.size() - 1:
-				var cp := Geometry2D.get_closest_point_to_segment(c, rpts[k], rpts[k + 1])
-				if _seg_rect_dist(rpts[k], rpts[k + 1], rect) < 2.0:
-					if rdk.is_empty() or t.deck_at(rdk, cp) - t.sample(cp.x, cp.y) < 1.0:
-						on_rail += 1
-						if on_rail <= 3:
-							print("    Pfeiler (%s, %.1f × %.1f m) %.1f m neben Gleis %d (%s, %.1f m über Grund) bei %s" % [
-								["Straße", "Gleis", "Weg"][int(bh.links[int(pr.link)].net)], pr.w, pr.t, cp.distance_to(c), ri,
-								data.rails[ri].tags.get("railway", ""), 0.0 if rdk.is_empty() else t.deck_at(rdk, cp) - t.sample(cp.x, cp.y),
-								str(c.round())])
-						break
-		# in water only under bridges over wide water: how far the water reaches along the bridge from here
-		for wpoly in water:
-			if Geometry2D.is_point_in_polygon(c, wpoly):
-				var run := 0.0
-				for dirn in [1.0, -1.0]:
-					var q: Vector2 = c
-					for k in 60:
-						q += d * dirn * 2.0
-						if not Geometry2D.is_point_in_polygon(q, wpoly):
-							break
-						run += 2.0
-				if run < 70.0:
-					in_water += 1
-					print("    Pfeiler im Wasser unter einer Brücke über %.0f m Wasser bei %s" % [run, str(c.round())])
-				break
-		# the pier reaches the deck
-		var dk := bs.deck_of(int(pr.link))
-		var depth: float = dk.get("depth", 0.0)
-		if absf(float(pr.top) - (t.deck_at(dk, c) - depth)) > 0.15:
-			gap += 1
-	print("    Pfeiler auf Fahrbahnen %d, an Gleisen %d, in schmalem Wasser %d, nicht am Deck %d" % [on_road, on_rail, in_water, gap])
-	if on_road + on_rail + in_water + gap > 0:
-		fails.append("[%s] Pfeiler am falschen Ort (Fahrbahn %d, Gleis %d, Wasser %d, nicht am Deck %d)" % [tag, on_road,
-			on_rail, in_water, gap])
+		var top: float = pr.top
+		var samples: Array = []
+		for i in 7:
+			for j in 5:
+				samples.append(c + rt * (float(pr.w) * lerpf(-0.5, 0.5, i / 6.0)) + d * (float(pr.t) * lerpf(-0.5, 0.5, j / 4.0)))
+		var hit := {}
+		for q: Vector2 in samples:
+			# a road surface below the deck: on the ground or a lower deck
+			for tri in surf.get(_cell(q), []):
+				var a3: Vector3 = tri[0]
+				var b3: Vector3 = tri[1]
+				var c3: Vector3 = tri[2]
+				if Geometry2D.point_is_inside_triangle(q, Vector2(a3.x, a3.z), Vector2(b3.x, b3.z), Vector2(c3.x, c3.z)) \
+						and minf(a3.y, minf(b3.y, c3.y)) < top - 0.3:
+					if not hit.has("Fahrbahn"):
+						print("    (Fahrbahn %.2f m hoch unter dem Pfeiler, Pfeiler bis %.2f, Grund %.2f)" % [_tri_height(q, a3, b3, c3), top, t.sample(q.x, q.y)])
+					hit["Fahrbahn"] = true
+			for ln in lines.get(_cell(q), []):
+				var cp := Geometry2D.get_closest_point_to_segment(q, ln[0], ln[1])
+				if cp.distance_to(q) < float(ln[2]):
+					var ldk: Dictionary = (bh.rail_decks if ln[3] else bh.path_decks).get(int(ln[4]), {})
+					var lh := t.sample(cp.x, cp.y) if ldk.is_empty() else t.deck_at(ldk, cp)
+					if lh < top - 0.5:
+						hit["Gleis" if ln[3] else "Weg"] = true
+			for hs in houses.get(_cell(q), []):
+				if (hs[1] as Rect2).has_point(q) and Geometry2D.is_point_in_polygon(q, hs[0]):
+					hit["Gebäude"] = true
+			for wa in water:
+				if _in_area(q, wa) and _water_run(q, d, water) < 70.0:
+					if not hit.has("Wasser"):
+						print("    (Wasser %.0f m entlang der Brücke)" % _water_run(q, d, water))
+					hit["Wasser"] = true
+		# the top of the pier meets the drawn underside above it
+		var uh := NAN
+		for tri in under.get(_cell(c), []):
+			var a3: Vector3 = tri[0]
+			var b3: Vector3 = tri[1]
+			var c3: Vector3 = tri[2]
+			if Geometry2D.point_is_inside_triangle(c, Vector2(a3.x, a3.z), Vector2(b3.x, b3.z), Vector2(c3.x, c3.z)):
+				var hgt := _tri_height(c, a3, b3, c3)
+				if is_nan(uh) or absf(hgt - top) < absf(uh - top):
+					uh = hgt
+		if is_nan(uh) or absf(uh - top) > 0.25:
+			hit["nicht am Deck"] = true
+		for k in hit:
+			bad[k] += 1
+			if bad[k] <= 2:
+				print("    Pfeiler: %s bei %s (%s, %.1f × %.1f m)" % [k, str(c.round()), ["Straße", "Gleis", "Weg"][int(bh.links[int(pr.link)].net)], pr.w, pr.t])
+	print("    Pfeiler auf/an: ", bad)
+	var nbad := 0
+	for k in bad:
+		nbad += int(bad[k])
+	if nbad > 0:
+		fails.append("[%s] Pfeiler am falschen Ort %s" % [tag, str(bad)])
+	# road bridge decks closed underneath, and walls along every open edge of a junction on a bridge
+	var pts_n := 0
+	var open_under := 0
+	var edge_n := 0
+	var open_edge := 0
+	for ei in t.decks:
+		var e: Dictionary = net.edges[ei]
+		if not e.bridge:
+			continue
+		var dk: Dictionary = t.decks[ei]
+		var sp := float(e.trim_a) + 1.0
+		while sp < float(e.len) - float(e.trim_b) - 1.0:
+			var q: Vector2 = Geo.sample(e.pts, e.cum, sp)[0]
+			sp += 10.0
+			if t.deck_at(dk, q) - t.sample(q.x, q.y) < 2.0:
+				continue
+			pts_n += 1
+			var covered := false
+			for tri in under.get(_cell(q), []):
+				if Geometry2D.point_is_inside_triangle(q, Vector2(tri[0].x, tri[0].z), Vector2(tri[1].x, tri[1].z), Vector2(tri[2].x, tri[2].z)):
+					covered = true
+					break
+			if not covered:
+				open_under += 1
+	for ni in t.node_decks:
+		var n: Dictionary = net.nodes[ni]
+		var all_bridge := true
+		for end in n.ends:
+			if not net.edges[end >> 1].bridge:
+				all_bridge = false
+		var poly: PackedVector2Array = n.get("polygon", PackedVector2Array())
+		if not all_bridge or poly.size() < 3:
+			continue
+		for i in poly.size():
+			var a2 := poly[i]
+			var b2 := poly[(i + 1) % poly.size()]
+			var m := (a2 + b2) * 0.5
+			var out := Geo.right_of((b2 - a2).normalized())
+			if Geometry2D.is_point_in_polygon(m + out * 0.3, poly):
+				out = -out
+			var q := m + out * 3.5   # beyond the sidewalk: open air unless a road goes on there
+			if t.node_height(ni, m) - t.sample(m.x, m.y) < 2.0 or not t.raised_at(q).is_empty():
+				continue
+			edge_n += 1
+			var near := false
+			for wseg in walls.get(_cell(m), []) + walls.get(_cell(q), []):
+				if Geometry2D.get_closest_point_to_segment(m + out * 1.5, wseg[0], wseg[1]).distance_to(m + out * 1.5) < 2.5:
+					near = true
+					break
+			if not near:
+				open_edge += 1
+				if open_edge <= 2:
+					print("    offener Rand einer Kreuzung auf einer Brücke bei %s" % str(m.round()))
+	print("    Unterseite: %d von %d Punkten offen; Ränder von Kreuzungen auf Brücken: %d von %d ohne Wand" % [open_under,
+		pts_n, open_edge, edge_n])
+	if pts_n == 0 or open_under * 50 > pts_n:
+		fails.append("[%s] Brückendecks unten offen (%d von %d)" % [tag, open_under, pts_n])
+	if open_edge * 20 > edge_n:
+		fails.append("[%s] Kreuzungen auf Brücken ohne Wand (%d von %d)" % [tag, open_edge, edge_n])
 	# long high bridges stand on piers (some may find no room over rail yards or wide roads)
 	var long_links := 0
 	var bare := 0
@@ -366,23 +461,87 @@ func _structures(tag: String, t: Terrain, net: RoadNet, data: OsmData, bh: Bridg
 			continue
 		var length: float = float(l.u1) - float(l.u0)
 		var dk := bs.deck_of(li)
-		if length < 2.5 * float(BridgeStructures.SPAN[int(l.net)]) or dk.is_empty():
+		if length < 2.0 * float(BridgeStructures.SPAN[int(l.net)]) or dk.is_empty():
 			continue
 		var mid: Vector2 = Geo.sample(l.pts, l.cum, (float(l.u0) + float(l.u1)) * 0.5)[0]
 		if t.deck_at(dk, mid) - t.sample(mid.x, mid.y) < 4.0:
 			continue
 		long_links += 1
+		var half := bs.half_of(li)
 		var has := false
-		for pr in bs.piers:
-			if int(pr.link) == li:
+		for pr in bs.piers:   # a pier under this deck (it may belong to a parallel deck of the same width)
+			if t.deck_ds(dk, pr.p).x <= half and t.deck_ds(dk, pr.p).y > float(l.u0) and t.deck_ds(dk, pr.p).y < float(l.u1):
 				has = true
 				break
 		if not has:
 			bare += 1
+			if bare <= 4:
+				print("    ohne Pfeiler: %s %.0f m lang, %.1f m hoch, Mitte %s" % [l.cls, length, t.deck_at(dk, mid) - t.sample(mid.x, mid.y), str(mid.round())])
 	print("    lange hohe Brückenabschnitte %d, davon ohne Pfeiler %d" % [long_links, bare])
-	if long_links > 0 and bare * 5 > long_links:
+	# where roads, tracks or water fill the space below, a span stays without a pier (Waltershof: about a fifth)
+	if long_links > 0 and bare * 4 > long_links:
 		fails.append("[%s] %d von %d langen Brückenabschnitten ohne Pfeiler" % [tag, bare, long_links])
 	return "%d Pfeiler, %d Widerlager" % [bs.piers.size(), bs.abutments.size()]
+
+
+static func _cell(q: Vector2) -> Vector2i:
+	return Vector2i(floori(q.x / 10.0), floori(q.y / 10.0))
+
+
+static func _add_cell(grid: Dictionary, r: Rect2, item: Variant) -> void:
+	for gx in range(floori(r.position.x / 10.0), floori(r.end.x / 10.0) + 1):
+		for gz in range(floori(r.position.y / 10.0), floori(r.end.y / 10.0) + 1):
+			var k := Vector2i(gx, gz)
+			if not grid.has(k):
+				grid[k] = []
+			grid[k].append(item)
+
+
+static func _index_tris(ml: MeshLayer, grid: Dictionary, keep: Callable) -> void:
+	for i in range(0, ml.indices.size(), 3):
+		if not keep.call(ml.normals[ml.indices[i]]):
+			continue
+		var a3: Vector3 = ml.verts[ml.indices[i]]
+		var b3: Vector3 = ml.verts[ml.indices[i + 1]]
+		var c3: Vector3 = ml.verts[ml.indices[i + 2]]
+		var r := Rect2(Vector2(a3.x, a3.z), Vector2.ZERO).expand(Vector2(b3.x, b3.z)).expand(Vector2(c3.x, c3.z))
+		_add_cell(grid, r, [a3, b3, c3])
+
+
+## Height of the plane through triangle a-b-c above point q.
+static func _tri_height(q: Vector2, a: Vector3, b: Vector3, c: Vector3) -> float:
+	var n := (b - a).cross(c - a)
+	if absf(n.y) < 1e-6:
+		return maxf(a.y, maxf(b.y, c.y))
+	return a.y - (n.x * (q.x - a.x) + n.z * (q.y - a.z)) / n.y
+
+
+## q lies on water area wa (not in one of its holes).
+static func _in_area(q: Vector2, wa: Dictionary) -> bool:
+	if not Geometry2D.is_point_in_polygon(q, wa.outer):
+		return false
+	for hole in wa.get("holes", []):
+		if Geometry2D.is_point_in_polygon(q, hole):
+			return false
+	return true
+
+
+## How far water reaches along d through c (any water area, both ways, 2 m steps, at most 240 m).
+static func _water_run(c: Vector2, d: Vector2, water: Array) -> float:
+	var run := 0.0
+	for dirn in [1.0, -1.0]:
+		var q: Vector2 = c
+		for k in 60:
+			q += d * dirn * 2.0
+			var wet := false
+			for wa in water:
+				if _in_area(q, wa):
+					wet = true
+					break
+			if not wet:
+				break
+			run += 2.0
+	return run
 
 
 ## Distance between segment a-b and the convex polygon rect (0 if they touch).

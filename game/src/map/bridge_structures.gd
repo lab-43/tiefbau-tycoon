@@ -5,9 +5,10 @@ extends RefCounted
 ## (RoadMesher._bridge_sides / _bridge_junction, CityMesher._deck_sides); BridgeHeights gives the decks.
 ##
 ## Piers stand at the joints of a bridge (where its OSM ways meet) and in between at the spacing of its kind,
-## at least half a spacing apart. They keep off what runs below: the asphalt of roads (with a margin), railways,
-## paths, and water narrower than WATER_SPAN or under a cable-stayed span. A blocked pier moves along the bridge
-## (up to SHIFT of the spacing), wide decks stand on several columns of which the free ones are built.
+## at least half a spacing apart under the same deck. They keep off what lies below: roads with their sidewalks,
+## railways and paths (also on embankments and lower bridges), buildings, and water narrower than WATER_SPAN or
+## under a cable-stayed span. A blocked pier moves along the bridge (up to SHIFT of the spacing), wide decks stand
+## on several columns of which the free ones are built.
 ## Built into the mesher's "bridge" layer after the meshers ran (heights above the ground per vertex).
 
 const SPAN := [32.0, 25.0, 20.0]   # pier spacing of road, railway and path bridges (m)
@@ -16,6 +17,7 @@ const SHIFT := 0.35                # a blocked pier may move this share of the s
 const MIN_HEIGHT := 0.8            # decks lower than this above the ground need no pier or abutment
 const WATER_SPAN := 80.0           # piers stand in water only under bridges over water at least this wide
 const ROAD_GAP := 1.0              # m between a pier and the asphalt of a road below
+const KERB_GAP := 0.5              # m beyond the sidewalks of a road below
 const RAIL_GAP := 2.6              # m from a pier to the centre line of a railway below
 const PATH_GAP := 0.5              # m beyond the half width of a path below
 const WALL_T := 1.0                # wall piers: thickness along the bridge
@@ -33,8 +35,9 @@ var piers: Array = []        # {p, d (along the bridge), w (across), t (along), 
 var abutments: Array = []    # {p, d (into the bridge), w_top (half), w_foot (half), top, link}
 var stats := {"piers": 0, "blocked": 0, "abutments": 0}
 
-var _lines := {}             # Vector2i -> Array of [a, b, gap, link]: railways and paths that may be below
-var _placed := {}            # Vector2i -> Array of [p, chain]
+var _lines := {}             # Vector2i -> Array of [a, b, gap, link]: roads (with sidewalks), railways and paths
+var _houses := {}            # Vector2i -> Array of [outline, rect]
+var _placed := {}            # Vector2i -> Array of pier positions
 var _water_ok := {}          # link -> Array of [lo, hi]: water runs wide enough for piers
 
 
@@ -118,15 +121,13 @@ func half_of(li: int) -> float:
 	return maxf(float(l.hw), 1.0) + 0.3
 
 
-## A bridge end that leads onto something that is no bridge (a ramp, the ground, a raised junction) or nowhere.
+## The bridge ends here: no other bridge link goes on from this node (side roads may, they are ramps).
 func _land_end(nid: int, ni: int) -> bool:
-	var ls: Array = bh.nodes[nid][ni].links
-	if ls.size() <= 1:
-		return true
-	for li in ls:
-		if not bh.links[li].bridge:
-			return true
-	return false
+	var n := 0
+	for li in bh.nodes[nid][ni].links:
+		if bh.links[li].bridge:
+			n += 1
+	return n <= 1
 
 
 # ------------------------------------------------------------------------------------------
@@ -150,17 +151,25 @@ func _joint(nid: int, ni: int, mesher: Object) -> void:
 	if dk.is_empty():
 		return
 	var s: float = l.u0 if int(l.a) == ni else l.u1
+	var depth: float = dk.get("depth", BridgeHeights.DEPTH[int(l.net)])
 	if nid == BridgeHeights.ROAD and float(l.u1) - float(l.u0) > 1.0:
-		s = 0.0 if int(l.a) == ni else float(l.len)   # under the middle of the junction
-	_pier(best, dk, s, span_of(best), mesher)
+		s = 0.0 if int(l.a) == ni else float(l.len)   # under the middle of the junction ...
+		depth = INF
+		for li in ls:   # ... whose structure is as deep as the shallowest road on it (RoadMesher._node_depth)
+			var ldk := deck_of(li)
+			if bh.links[li].bridge and ldk.has("depth"):
+				depth = minf(depth, float(ldk.depth))
+		if depth == INF:
+			depth = BridgeHeights.DEPTH[BridgeHeights.ROAD]
+	_pier(best, dk, s, span_of(best), mesher, depth)
 
 
 ## Try to build a pier for bridge link li around arc length s (moving along the bridge if blocked).
-func _pier(li: int, dk: Dictionary, s: float, span: float, mesher: Object) -> void:
+func _pier(li: int, dk: Dictionary, s: float, span: float, mesher: Object, depth := NAN) -> void:
 	var l: Dictionary = bh.links[li]
-	var ch: int = bh.chain[li]
 	var half := half_of(li)
-	var depth: float = dk.get("depth", BridgeHeights.DEPTH[int(l.net)])
+	if is_nan(depth):
+		depth = dk.get("depth", BridgeHeights.DEPTH[int(l.net)])
 	var total: float = l.len
 	var shifts := [0.0]
 	var step := 2.0
@@ -172,15 +181,15 @@ func _pier(li: int, dk: Dictionary, s: float, span: float, mesher: Object) -> vo
 		var sp := clampf(s + float(sh), 0.0, total)
 		var smp := Geo.sample(l.pts, l.cum, sp)
 		var p: Vector2 = smp[0]
-		if _near_pier(p, ch, span * 0.5):
-			return   # a joint or a neighbour already carries this part of the bridge
+		if _near_pier(p, dk, half, span * 0.5):
+			return   # a joint or a neighbour already carries this part of this deck
 		var d: Vector2 = smp[1]
-		var top := Terrain.deck_h(dk, sp) - depth
+		var top := _surface(li, dk, sp, p) - depth
 		var parts := _parts(half)
 		var ok: Array = []
 		for part in parts:
 			var c: Vector2 = p + Geo.right_of(d) * float(part[0])
-			if _free(c, d, float(part[1]), float(part[2]), li, sp):
+			if _free(c, d, float(part[1]), float(part[2]), li, sp, top):
 				ok.append([c, part])
 		# a wall stands or not as a whole; of several columns the free ones are enough if at least half stand
 		if ok.is_empty() or ok.size() * 2 < parts.size():
@@ -190,10 +199,21 @@ func _pier(li: int, dk: Dictionary, s: float, span: float, mesher: Object) -> vo
 			if _build_pier(o[0], d, float(o[1][1]), float(o[1][2]), top, li, mesher):
 				built = true
 		if built:
-			_remember(p, ch)
+			_remember(p)
 			stats.piers += 1
 		return
 	stats.blocked += 1
+
+
+## Road surface of bridge link li at arc length s (point p): its deck, or the flat area of a raised junction at its
+## end where p lies on it (the deck runs on in a straight line there, see BridgeHeights._profile).
+func _surface(li: int, dk: Dictionary, s: float, p: Vector2) -> float:
+	var l: Dictionary = bh.links[li]
+	if int(l.net) == BridgeHeights.ROAD:
+		for ni in [int(l.a), int(l.b)]:
+			if terrain.node_decks.has(ni) and terrain._on_node(ni, p):
+				return terrain.node_height(ni, p)
+	return Terrain.deck_h(dk, s)
 
 
 ## Footprints under a deck of half width half: [offset across, width across, thickness along].
@@ -210,8 +230,9 @@ static func _parts(half: float) -> Array:
 	return res
 
 
-## The footprint (centre c, w across, t along d) keeps off roads, railways, paths and narrow water below.
-func _free(c: Vector2, d: Vector2, w: float, t: float, li: int, s: float) -> bool:
+## The footprint (centre c, w across, t along d) keeps off roads, railways, paths, buildings and narrow water
+## below a deck whose underside is at height top.
+func _free(c: Vector2, d: Vector2, w: float, t: float, li: int, s: float, top: float) -> bool:
 	var r := Geo.right_of(d)
 	var pts: Array = []
 	for i in 5:
@@ -225,11 +246,19 @@ func _free(c: Vector2, d: Vector2, w: float, t: float, li: int, s: float) -> boo
 			for off in [Vector2.ZERO, r * ROAD_GAP, -r * ROAD_GAP, d * ROAD_GAP, -d * ROAD_GAP]:
 				if asphalt.on_asphalt(q + off):
 					return false
+		# road surfaces below the deck (another bridge, a ramp, a low bridge): the pier would stand on or go through them
+		for h in terrain.raised_at(q):
+			if h < top - 0.3:
+				return false
+		# roads with their sidewalks, railways and paths: obstacles unless they run at the height of this deck
 		for item in _lines.get(Vector2i(floori(q.x / GRID), floori(q.y / GRID)), []):
 			if int(item[3]) == li:
 				continue
 			var cp := Geometry2D.get_closest_point_to_segment(q, item[0], item[1])
-			if cp.distance_to(q) < float(item[2]) and not _raised(int(item[3]), cp):
+			if cp.distance_to(q) < float(item[2]) and _line_height(int(item[3]), cp) < top - 0.5:
+				return false
+		for hs in _houses.get(Vector2i(floori(q.x / GRID), floori(q.y / GRID)), []):
+			if (hs[1] as Rect2).has_point(q) and Geometry2D.is_point_in_polygon(q, hs[0]):
 				return false
 		if not is_nan(bh._water_at(q)):
 			var ok := false
@@ -241,12 +270,15 @@ func _free(c: Vector2, d: Vector2, w: float, t: float, li: int, s: float) -> boo
 	return true
 
 
-## Railway or path link li2 runs above the ground at p (a bridge or ramp itself: no obstacle on the ground).
-func _raised(li2: int, p: Vector2) -> bool:
-	if not bh.profiles.has(li2):
-		return false
-	var dk := deck_of(li2)
-	return not dk.is_empty() and terrain.deck_at(dk, p) - terrain.sample(p.x, p.y) > 1.5
+## Height of link li2 (road, railway or path; -1 - node: a junction corner) at p: its deck, or the ground.
+func _line_height(li2: int, p: Vector2) -> float:
+	if li2 < 0:
+		return terrain.node_height(-1 - li2, p)
+	if bh.profiles.has(li2):
+		var dk := deck_of(li2)
+		if not dk.is_empty():
+			return terrain.deck_at(dk, p)
+	return terrain.sample(p.x, p.y)
 
 
 ## Mesh one pier: a box from below the ground up to the underside of the deck. False if the deck is low.
@@ -280,61 +312,88 @@ func _at(q: Vector2, y: float) -> Vector3:
 	return Vector3(q.x, y - terrain.sample(q.x, q.y), q.y)
 
 
-func _near_pier(p: Vector2, ch: int, dist: float) -> bool:
+## A pier already stands under deck dk (half width half) within dist of p.
+func _near_pier(p: Vector2, dk: Dictionary, half: float, dist: float) -> bool:
 	var k := Vector2i(floori(p.x / GRID), floori(p.y / GRID))
 	for gx in range(k.x - 2, k.x + 3):
 		for gz in range(k.y - 2, k.y + 3):
-			for item in _placed.get(Vector2i(gx, gz), []):
-				if int(item[1]) == ch and (item[0] as Vector2).distance_to(p) < dist:
+			for q: Vector2 in _placed.get(Vector2i(gx, gz), []):
+				if q.distance_to(p) < dist and terrain.deck_ds(dk, q).x <= half + 0.5:
 					return true
 	return false
 
 
-func _remember(p: Vector2, ch: int) -> void:
+func _remember(p: Vector2) -> void:
 	var k := Vector2i(floori(p.x / GRID), floori(p.y / GRID))
 	if not _placed.has(k):
 		_placed[k] = []
-	_placed[k].append([p, ch])
+	_placed[k].append(p)
 
 
 func _index_lines() -> void:
 	for li in bh.links.size():
 		var l: Dictionary = bh.links[li]
-		if int(l.net) == BridgeHeights.ROAD:
-			continue   # roads: the asphalt index
-		var gap: float = RAIL_GAP if int(l.net) == BridgeHeights.RAIL else float(l.hw) + PATH_GAP
+		var gap: float
+		match int(l.net):
+			BridgeHeights.ROAD:
+				var e: Dictionary = net.edges[int(l.id)]
+				gap = float(e.width) * 0.5 + maxf(float(e.sw_l), float(e.sw_r)) + KERB_GAP
+			BridgeHeights.RAIL:
+				gap = RAIL_GAP
+			_:
+				gap = float(l.hw) + PATH_GAP
 		var pts: PackedVector2Array = l.pts
 		for i in pts.size() - 1:
-			var a := pts[i]
-			var b := pts[i + 1]
-			var rect := Rect2(a, Vector2.ZERO).expand(b).grow(gap)
-			for gx in range(floori(rect.position.x / GRID), floori(rect.end.x / GRID) + 1):
-				for gz in range(floori(rect.position.y / GRID), floori(rect.end.y / GRID) + 1):
-					var k := Vector2i(gx, gz)
-					if not _lines.has(k):
-						_lines[k] = []
-					_lines[k].append([a, b, gap, li])
+			_add(_lines, Rect2(pts[i], Vector2.ZERO).expand(pts[i + 1]).grow(gap), [pts[i], pts[i + 1], gap, li])
+	# the sidewalks around junction corners (outside the asphalt of the junction area)
+	for ni in net.nodes.size():
+		var n: Dictionary = net.nodes[ni]
+		if n.get("under", false):
+			continue
+		for corner in n.get("corners", []):
+			var cp: PackedVector2Array = corner.pts
+			var cg: float = float(corner.sw) + KERB_GAP
+			for i in cp.size() - 1:
+				_add(_lines, Rect2(cp[i], Vector2.ZERO).expand(cp[i + 1]).grow(cg), [cp[i], cp[i + 1], cg, -1 - ni])
+	for b in bh.data.buildings:
+		var o: PackedVector2Array = b.outer
+		if o.size() < 3:
+			continue
+		var rect := Rect2(o[0], Vector2.ZERO)
+		for q in o:
+			rect = rect.expand(q)
+		_add(_houses, rect, [o, rect])
+
+
+static func _add(grid: Dictionary, rect: Rect2, item: Array) -> void:
+	for gx in range(floori(rect.position.x / GRID), floori(rect.end.x / GRID) + 1):
+		for gz in range(floori(rect.position.y / GRID), floori(rect.end.y / GRID) + 1):
+			var k := Vector2i(gx, gz)
+			if not grid.has(k):
+				grid[k] = []
+			grid[k].append(item)
 
 
 # ------------------------------------------------------------------------------------------
 # Abutments
 # ------------------------------------------------------------------------------------------
 
-## Where bridge link li ends on land at arc length s (dir +1: the bridge lies at larger s): a concrete front from
-## the underside of the deck down into the ground, as wide as the embankment behind it at its foot.
+## Where bridge link li ends on land at arc length s (dir +1: the bridge lies at larger s): a concrete front that
+## closes the embankment behind it, from the road surface (as wide as the deck) down into the ground (as wide as
+## the embankment at its foot, slopes 1 : 1.5).
 func _abutment(li: int, dk: Dictionary, s: float, dir: float, mesher: Object) -> void:
 	var l: Dictionary = bh.links[li]
 	var smp := Geo.sample(l.pts, l.cum, s)
 	var p: Vector2 = smp[0]
 	var d: Vector2 = (smp[1] as Vector2) * dir
 	var depth: float = dk.get("depth", BridgeHeights.DEPTH[int(l.net)])
-	var top := Terrain.deck_h(dk, s) - depth
+	var surface := Terrain.deck_h(dk, s)
+	var top := surface - depth
 	var g := terrain.sample(p.x, p.y)
-	var h := top - g
-	if h < MIN_HEIGHT:
+	if top - g < MIN_HEIGHT:
 		return
 	var half := half_of(li)
-	var foot := half + h * 1.5
+	var foot := half + (surface - g) * 1.5
 	var r := Geo.right_of(d)
 	var front := p + d * 0.05
 	var tl := front - r * half
@@ -342,18 +401,13 @@ func _abutment(li: int, dk: Dictionary, s: float, dir: float, mesher: Object) ->
 	var bl := front - r * foot
 	var br := front + r * foot
 	var lay: MeshLayer = mesher.layer(mesher.chunk_of(p), "bridge")
-	var n := Vector3(d.x, 0.0, d.y)
-	# front: a trapezoid, its sides follow the slopes of the embankment behind it
-	lay.quad(_at(bl, terrain.sample(bl.x, bl.y) - EMBED), _at(br, terrain.sample(br.x, br.y) - EMBED), _at(tr, top),
-		_at(tl, top), n)
-	# the bearing shelf: a strip under the deck end
-	var back := -d * 1.2
-	lay.quad(_at(tl, top), _at(tr, top), _at(tr + back, top), _at(tl + back, top), Vector3.UP)
+	lay.quad(_at(bl, terrain.sample(bl.x, bl.y) - EMBED), _at(br, terrain.sample(br.x, br.y) - EMBED),
+		_at(tr, surface - 0.05), _at(tl, surface - 0.05), Vector3(d.x, 0.0, d.y))
 	abutments.append({"p": p, "d": d, "w_top": half, "w_foot": foot, "top": top, "link": li})
 	stats.abutments += 1
 
 
-## Removes trees (or lamps) that would stand in a pier. Returns how many.
+## Removes trees or lamps that would stand in a pier (not those up on the deck). Returns how many.
 func clear_xforms(by_chunk: Dictionary) -> int:
 	if piers.is_empty():
 		return 0
@@ -369,7 +423,7 @@ func clear_xforms(by_chunk: Dictionary) -> int:
 		var keep: Array = []
 		for x: Transform3D in by_chunk[ck]:
 			var q := Vector2(x.origin.x, x.origin.z)
-			if _in_pier(q, cells):
+			if _in_pier(q, x.origin.y, cells):
 				n += 1
 			else:
 				keep.append(x)
@@ -377,12 +431,14 @@ func clear_xforms(by_chunk: Dictionary) -> int:
 	return n
 
 
-func _in_pier(q: Vector2, cells: Dictionary) -> bool:
+func _in_pier(q: Vector2, y: float, cells: Dictionary) -> bool:
 	var k := Vector2i(floori(q.x / GRID), floori(q.y / GRID))
 	for gx in range(k.x - 1, k.x + 2):
 		for gz in range(k.y - 1, k.y + 2):
 			for i in cells.get(Vector2i(gx, gz), []):
 				var pr: Dictionary = piers[i]
+				if y > float(pr.top) - 0.5:
+					continue
 				var v: Vector2 = q - pr.p
 				var d: Vector2 = pr.d
 				if absf(v.dot(d)) <= float(pr.t) * 0.5 + 1.0 and absf(v.dot(Geo.right_of(d))) <= float(pr.w) * 0.5 + 1.0:

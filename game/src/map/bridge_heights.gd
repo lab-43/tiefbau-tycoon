@@ -143,7 +143,7 @@ func _line_network(nid: int, ways: Array) -> void:
 		var br := str(tags.get("bridge", ""))
 		var ls := str(tags.get("layer", "0"))
 		var cls := str(tags.get("railway", "")) if nid == RAIL else str(tags.get("highway", ""))
-		var hw := 1.8 if nid == RAIL else clampf(RoadNet.parse_width(str(tags.get("width", ""))) * 0.5, 0.8, 4.0)
+		var hw := 1.8 if nid == RAIL else CityMesher.path_width(tags) * 0.5   # as drawn
 		var cum := Geo.cumulative(pts)
 		_add_link(nid, wi, ends[0], ends[1], pts, cum, 0.0, cum[cum.size() - 1], br != "" and br != "no", hw,
 			ls.to_int() if ls.is_valid_int() else 0, cls, 0.0)
@@ -668,7 +668,9 @@ func _profile(li: int, va: float, vb: float, oa: int, ob: int, srcs: Array) -> A
 		var s := step * k
 		var p: Vector2 = Geo.sample(l.pts, l.cum, s)[0]
 		var ground := terrain.sample(p.x, p.y)
-		var f := clampf(s, u0, u1) - u0
+		# unclamped: inside the junction areas the ramp goes on in a straight line, so that the evenly spaced
+		# stations interpolate exactly the junction height at the edge of its area (u0, u1)
+		var f := s - u0
 		var h := ground
 		var o := -1
 		var ha := va - da * f

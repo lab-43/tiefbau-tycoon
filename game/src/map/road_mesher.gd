@@ -117,6 +117,8 @@ func _edge(ei: int) -> void:
 		_sidewalk_strip(ck, left, Geo.offset_polyline(center, -hw - e.sw_l), center, false, clips)
 	if e.bridge:
 		_bridge_sides(ck, center, hw + e.sw_r, hw + e.sw_l)
+		if _on_deck():
+			_bridge_caps(ck, e, center, hw + e.sw_r + 0.35, hw + e.sw_l + 0.35)
 	elif _on_deck():
 		_embankment(ck, center, hw + e.sw_r, hw + e.sw_l)   # an approach ramp (#32)
 	_edge_markings(ei, e, ck, s0, s1)
@@ -353,21 +355,51 @@ func _bridge_sides(ck: Vector2i, center: PackedVector2Array, off_r: float, off_l
 		cb.quad(Geo.v3(ll[i], -depth), Geo.v3(lr[i], -depth), Geo.v3(lr[i + 1], -depth), Geo.v3(ll[i + 1], -depth), Vector3.DOWN)
 
 
+## Depth of the structure under raised junction ni: the shallowest of its bridge roads (deeper ones close the
+## step with a cap at their end, _bridge_caps).
+func _node_depth(ni: int) -> float:
+	var depth := INF
+	for end in net.nodes[ni].ends:
+		var dk: Dictionary = terrain.decks.get(end >> 1, {})
+		if net.edges[end >> 1].bridge and dk.has("depth"):
+			depth = minf(depth, float(dk.depth))
+	return 1.3 if depth == INF else depth
+
+
+## Where a bridge road meets a shallower structure (a junction or the next bridge road), the step under the deck is
+## closed across its width. off_r / off_l: outer edges of the structure. Built while terrain.mode_deck is set.
+func _bridge_caps(ck: Vector2i, e: Dictionary, center: PackedVector2Array, off_r: float, off_l: float) -> void:
+	var depth: float = terrain.mode_deck.get("depth", 1.3)
+	var cb := layer(ck, "bridge")
+	for at_b in [false, true]:
+		var ni: int = e.b if at_b else e.a
+		var other := _node_depth(ni)   # (includes this road: equal if nothing shallower meets it)
+		if other >= depth - 0.05:
+			continue
+		var p: Vector2 = center[center.size() - 1] if at_b else center[0]
+		var ed: Vector2 = (center[center.size() - 1] - center[center.size() - 2]).normalized() if at_b \
+			else (center[1] - center[0]).normalized()
+		var er := Geo.right_of(ed)
+		var d: Vector2 = ed if at_b else -ed   # out of the road, towards the node
+		var pr: Vector2 = p + er * off_r
+		var pl: Vector2 = p - er * off_l
+		cb.quad(Geo.v3(pl, -depth), Geo.v3(pr, -depth), Geo.v3(pr, -other), Geo.v3(pl, -other), Vector3(d.x, 0.0, d.y))
+
+
 ## A junction area on a bridge (#32 stage 2): underside and edge with parapet around it, like the bridge sides,
 ## except where its roads leave it. Built while terrain.mode_node is set.
 func _bridge_junction(ck: Vector2i, ni: int, poly: PackedVector2Array) -> void:
 	var n: Dictionary = net.nodes[ni]
-	var depth := 1.3
+	var depth := _node_depth(ni)
 	var sw := 0.0
 	for end in n.ends:
-		var dk: Dictionary = terrain.decks.get(end >> 1, {})
-		depth = maxf(depth, float(dk.get("depth", 1.3)))
 		var e: Dictionary = net.edges[end >> 1]
 		sw = maxf(sw, maxf(float(e.sw_l), float(e.sw_r)))
+	var grow := sw + 0.35
 	# the sidewalks around the corners lie outside the asphalt polygon: the structure reaches around them
 	var grown := poly
 	var best := 0.0
-	for o: PackedVector2Array in Geometry2D.offset_polygon(poly, sw + 0.35):
+	for o: PackedVector2Array in Geometry2D.offset_polygon(poly, grow):
 		if not Geometry2D.is_polygon_clockwise(o) and absf(Geo.polygon_area(o)) > best:
 			best = absf(Geo.polygon_area(o))
 			grown = o
@@ -382,12 +414,21 @@ func _bridge_junction(ck: Vector2i, ni: int, poly: PackedVector2Array) -> void:
 		if a.distance_to(b) < 0.2:
 			continue
 		var mid := (a + b) * 0.5
+		# a side that lies across the end of one of its roads: the road goes on there (no wall)
 		var mouth := false
 		for end in n.ends:
 			var e: Dictionary = net.edges[end >> 1]
 			var at_b: bool = (end & 1) == 1
 			var smp := Geo.sample(e.pts, e.cum, float(e.len) - float(e.trim_b) if at_b else float(e.trim_a))
-			if (smp[0] as Vector2).distance_to(mid) < float(e.width) * 0.5 + maxf(float(e.sw_l), float(e.sw_r)) + 1.0:
+			var t: Vector2 = smp[0]
+			var dout: Vector2 = -(smp[1] as Vector2) if at_b else smp[1]
+			var reach: float = float(e.width) * 0.5 + maxf(float(e.sw_l), float(e.sw_r)) + 0.35 + 0.3
+			var across := true
+			for q: Vector2 in [a, b]:
+				var along := (q - t).dot(dout)
+				if along < -0.3 or along > grow + 0.5 or absf((q - t).dot(Geo.right_of(dout))) > reach:
+					across = false
+			if across:
 				mouth = true
 				break
 		if mouth:

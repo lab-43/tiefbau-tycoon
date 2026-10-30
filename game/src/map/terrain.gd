@@ -309,6 +309,24 @@ func surface_near(p: Vector2, hint: float) -> float:
 	return best
 
 
+## Heights of all raised road surfaces at p (bridge decks, ramps, raised junction areas), without the ground.
+func raised_at(p: Vector2) -> PackedFloat32Array:
+	var out := PackedFloat32Array()
+	if decks.is_empty():
+		return out
+	if not _bgrid_ready:
+		_index_bridges()
+	for ei in _bgrid.get(Vector2i(floori(p.x / BGRID), floori(p.y / BGRID)), []):
+		if ei < 0:
+			if _on_node(-1 - int(ei), p):
+				out.append(node_height(-1 - int(ei), p))
+			continue
+		var dk: Dictionary = decks[ei]
+		if deck_ds(dk, p).x <= float(dk.hw):
+			out.append(deck_at(dk, p))
+	return out
+
+
 ## Height of the road surface at p for a vehicle on lane key `key` (edge = key >> 4) or at junction `node`.
 func road_height(p: Vector2, key: int = -1, node: int = -1) -> float:
 	if key >= 0 and decks.has(key >> 4):
