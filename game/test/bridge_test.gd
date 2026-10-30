@@ -115,7 +115,8 @@ func _run(dir: String, spec: Dictionary, with_ground: bool, tag: String) -> Stri
 	for li in bh.profiles:
 		var l: Dictionary = bh.links[li]
 		var z: PackedFloat32Array = bh.profiles[li]
-		var step: float = float(l.len) / maxf(1.0, z.size() - 1)
+		var st0: float = l.st0
+		var step: float = (float(l.st1) - st0) / maxf(1.0, z.size() - 1)
 		if step < 0.5:
 			continue
 		var allowed: float = float(l.g) + 0.005
@@ -129,8 +130,8 @@ func _run(dir: String, spec: Dictionary, with_ground: bool, tag: String) -> Stri
 		for k in z.size() - 1:
 			if absf(z[k + 1] - z[k]) / step <= allowed:
 				continue
-			var pa: Vector2 = Geo.sample(l.pts, l.cum, step * k)[0]
-			var pb: Vector2 = Geo.sample(l.pts, l.cum, step * (k + 1))[0]
+			var pa: Vector2 = Geo.sample(l.pts, l.cum, st0 + step * k)[0]
+			var pb: Vector2 = Geo.sample(l.pts, l.cum, st0 + step * (k + 1))[0]
 			if absf(z[k] - t.sample(pa.x, pa.y)) < 0.02 or absf(z[k + 1] - t.sample(pb.x, pb.y)) < 0.02:
 				continue   # on the ground: the ground is that steep
 			steep += 1
@@ -186,7 +187,8 @@ func _run(dir: String, spec: Dictionary, with_ground: bool, tag: String) -> Stri
 		var g: PackedFloat32Array = dk.g
 		var k := -1
 		for i in h.size():   # where the road is drawn (not in the junction areas at its ends)
-			if float(dk.step) * i < float(dk.get("u0", 0.0)) or float(dk.step) * i > float(dk.get("u1", INF)):
+			var si := float(dk.get("s0", 0.0)) + float(dk.step) * i
+			if si < float(dk.get("u0", 0.0)) or si > float(dk.get("u1", INF)):
 				continue
 			if k < 0 or h[i] - g[i] > h[k] - g[k]:
 				k = i
@@ -194,7 +196,7 @@ func _run(dir: String, spec: Dictionary, with_ground: bool, tag: String) -> Stri
 			continue
 		if h[k] - g[k] < 10.0:
 			continue
-		var at: Vector2 = Geo.sample(dk.pts, dk.cum, float(dk.step) * k)[0]
+		var at: Vector2 = Geo.sample(dk.pts, dk.cum, float(dk.get("s0", 0.0)) + float(dk.step) * k)[0]
 		var deck := t.deck_at(dk, at)
 		var from := Vector3(at.x + 30.0, deck + 60.0, at.y + 30.0)
 		var hit = CameraRig.terrain_hit(from, (Vector3(at.x, deck, at.y) - from).normalized())

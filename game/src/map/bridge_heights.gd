@@ -157,9 +157,12 @@ func _add_link(nid: int, id: int, a: int, b: int, pts: PackedVector2Array, cum: 
 	var li := links.size()
 	var pa: Vector2 = Geo.sample(pts, cum, u0)[0]
 	var pb: Vector2 = Geo.sample(pts, cum, u1)[0]
+	# profile stations: between the junction areas (exact heights at their edges), the whole line if that is tiny
+	var st0 := u0 if u1 - u0 >= 1.0 else 0.0
+	var st1 := u1 if u1 - u0 >= 1.0 else total
 	links.append({"net": nid, "id": id, "a": a, "b": b, "pts": pts, "cum": cum, "len": total, "u0": u0, "u1": u1,
 		"g": grade(nid, cls), "bridge": bridge, "hw": hw, "layer": layer, "cls": cls, "maxheight": maxheight,
-		"big": false, "ga": terrain.sample(pa.x, pa.y), "gb": terrain.sample(pb.x, pb.y)})
+		"big": false, "ga": terrain.sample(pa.x, pa.y), "gb": terrain.sample(pb.x, pb.y), "st0": st0, "st1": st1})
 	nodes[nid][a].links.append(li)
 	if b != a:
 		nodes[nid][b].links.append(li)
@@ -483,10 +486,10 @@ func height_and_origin(li: int, s: float) -> Vector2:
 	var pr = profiles.get(li)
 	if pr != null:
 		var z: PackedFloat32Array = pr
-		var step := float(l.len) / maxf(1.0, z.size() - 1.0)
+		var step := (float(l.st1) - float(l.st0)) / maxf(1.0, z.size() - 1.0)
 		var zo: PackedInt32Array = origins[li]
-		var k := clampi(roundi(s / maxf(step, 0.001)), 0, zo.size() - 1)
-		return Vector2(Terrain._deck_lerp(z, step, s), zo[k])
+		var k := clampi(roundi((s - float(l.st0)) / maxf(step, 0.001)), 0, zo.size() - 1)
+		return Vector2(Terrain._deck_lerp(z, step, s - float(l.st0)), zo[k])
 	return Vector2(ground_at(li, s), -1)
 
 
@@ -638,9 +641,9 @@ static func _carry(l: Dictionary, h: float, from_a: bool) -> float:
 ## [heights, origins] at evenly spaced stations along link li, rounded off; empty if it nowhere rises above the ground.
 func _profile(li: int, va: float, vb: float, oa: int, ob: int, srcs: Array) -> Array:
 	var l: Dictionary = links[li]
-	var total: float = l.len
-	var n := maxi(1, int(ceil(total / STEP)))
-	var step := total / n
+	var st0: float = l.st0
+	var n := maxi(1, int(ceil((float(l.st1) - st0) / STEP)))
+	var step := (float(l.st1) - st0) / n
 	var g: float = l.g
 	var u0: float = l.u0
 	var u1: float = l.u1
@@ -665,7 +668,7 @@ func _profile(li: int, va: float, vb: float, oa: int, ob: int, srcs: Array) -> A
 	var db := descent(l, false)
 	var top := 0.0
 	for k in n + 1:
-		var s := step * k
+		var s := st0 + step * k
 		var p: Vector2 = Geo.sample(l.pts, l.cum, s)[0]
 		var ground := terrain.sample(p.x, p.y)
 		# unclamped: inside the junction areas the ramp goes on in a straight line, so that the evenly spaced
@@ -748,15 +751,16 @@ func _store() -> void:
 		var n := z.size() - 1
 		var gr := PackedFloat32Array()
 		gr.resize(n + 1)
-		var step := float(l.len) / maxf(1.0, n)
+		var step := (float(l.st1) - float(l.st0)) / maxf(1.0, n)
 		var up := 0.0   # metres of this link raised above the ground
 		for k in n + 1:
-			var p: Vector2 = Geo.sample(l.pts, l.cum, step * k)[0]
+			var p: Vector2 = Geo.sample(l.pts, l.cum, float(l.st0) + step * k)[0]
 			gr[k] = terrain.sample(p.x, p.y)
 			top = maxf(top, z[k] - gr[k])
 			if k > 0 and (z[k] - gr[k] > RAISED or z[k - 1] - gr[k - 1] > RAISED):
 				up += step
-		var dk := Terrain.make_deck(l.pts, l.cum, z, gr, float(l.hw) + 0.5, levels.get(li, PackedFloat32Array()))
+		var dk := Terrain.make_deck(l.pts, l.cum, z, gr, float(l.hw) + 0.5, levels.get(li, PackedFloat32Array()),
+			float(l.st0), float(l.st1))
 		dk["u0"] = float(l.u0)   # drawn between the junction areas at its ends (beyond: the junction surface)
 		dk["u1"] = float(l.u1)
 		if l.bridge:   # structure below the surface (stage 2: deck underside, piers)

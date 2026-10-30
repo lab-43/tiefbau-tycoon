@@ -156,11 +156,14 @@ func deck_height(ei: int, p: Vector2) -> float:
 ## A deck: the height profile h along a centre line (pts, cum), stations evenly spaced from s = 0 to the end, and
 ## the ground under the centre line at the same stations (g). hw: half width (sidewalks included).
 ## lv: the required height at the same stations (may lie below the ground; h = max(lv, ground)), empty = h.
+## The stations run evenly from arc length s0 to s1 (default: the whole line); beyond them the ends hold.
 static func make_deck(pts: PackedVector2Array, cum: PackedFloat32Array, h: PackedFloat32Array, g: PackedFloat32Array,
-		hw: float, lv := PackedFloat32Array()) -> Dictionary:
+		hw: float, lv := PackedFloat32Array(), s0 := 0.0, s1 := -1.0) -> Dictionary:
 	var total: float = cum[cum.size() - 1]
+	if s1 < 0.0:
+		s1 = total
 	return {"pts": pts, "cum": cum, "h": h, "g": g, "lv": lv if lv.size() == h.size() else h, "hw": hw,
-		"step": total / maxf(1.0, h.size() - 1.0)}
+		"s0": s0, "step": (s1 - s0) / maxf(1.0, h.size() - 1.0)}
 
 
 ## Height of deck dk at p: flat across the road at the required height where p lies across the centre line, but
@@ -168,17 +171,17 @@ static func make_deck(pts: PackedVector2Array, cum: PackedFloat32Array, h: Packe
 ## do), and its edges meet a junction area (flat at its height, never below the ground) without a step.
 func deck_at(dk: Dictionary, p: Vector2) -> float:
 	var s := deck_s(dk, p)
-	return maxf(_deck_lerp(dk.get("lv", dk.h), float(dk.step), s), sample(p.x, p.y))   # (no lv: map baked before)
+	return maxf(_deck_lerp(dk.get("lv", dk.h), float(dk.step), s - float(dk.get("s0", 0.0))), sample(p.x, p.y))
 
 
 ## Profile height at arc length s.
 static func deck_h(dk: Dictionary, s: float) -> float:
-	return _deck_lerp(dk.h, float(dk.step), s)
+	return _deck_lerp(dk.h, float(dk.step), s - float(dk.get("s0", 0.0)))
 
 
 ## Ground under the centre line at arc length s.
 static func deck_g(dk: Dictionary, s: float) -> float:
-	return _deck_lerp(dk.g, float(dk.step), s)
+	return _deck_lerp(dk.g, float(dk.step), s - float(dk.get("s0", 0.0)))
 
 
 static func _deck_lerp(a: PackedFloat32Array, step: float, s: float) -> float:
