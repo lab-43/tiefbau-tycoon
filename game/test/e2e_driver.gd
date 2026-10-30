@@ -634,6 +634,8 @@ var _view_i := 0
 func _ansichten() -> void:
 	if t < 2.0 or not shot_queue.is_empty():
 		return
+	if _view_i == 0:
+		get_parent().hud.open_left("")   # pictures of the map, not of the job list
 	if not _repro_view():
 		print("E2E OK ansichten")
 		get_tree().quit(0)
