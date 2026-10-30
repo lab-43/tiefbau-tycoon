@@ -67,17 +67,21 @@ func _check(res: Dictionary, bad: Array) -> bool:
 	var total := 0
 	for kind in [["trees", "Bäumen"], ["lamps", "Laternen"]]:
 		var n := 0
+		var high := 0
 		var on_road: Array = []
 		for ck in res[kind[0]]:
 			for tf in res[kind[0]][ck]:
 				var p := Vector2((tf as Transform3D).origin.x, (tf as Transform3D).origin.z)
 				n += 1
 				if (tf as Transform3D).origin.y > CityMesher.LAMP_ABOVE:
+					high += 1
 					continue   # on a bridge or ramp above the ground asphalt (the test map is flat, #32)
 				for t in grid.get(Vector2i(int(floor(p.x / CELL)), int(floor(p.y / CELL))), []):
 					if Geometry2D.point_is_inside_triangle(p, t[0], t[1], t[2]):
 						on_road.append(p)
 						break
+		if high > 0:
+			print("BAEUME %d %s auf Brücken oder hohen Rampen (nicht gegen die Fahrbahn am Boden geprüft)" % [high, kind[1]])
 		if not on_road.is_empty():
 			bad.append("%d von %d %s stehen auf der Fahrbahn, z. B. %s" % [on_road.size(), n, kind[1], str(on_road.slice(0, 5))])
 		if kind[0] == "trees":
