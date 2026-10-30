@@ -21,6 +21,7 @@ var decks := {}
 var node_decks := {}              # raised junction (on a bridge or a ramp) -> height of its flat area
 var node_pos := {}                # same nodes -> position (for surface_near)
 var node_r := {}                  # same nodes -> radius of their flat area (NODE_R if missing)
+var node_poly := {}               # same nodes -> outline of their flat area (convex hull; circle if missing)
 # set by the meshers while they build a deck (a deck dictionary) or a raised junction (bake thread)
 var mode_deck := {}
 var mode_node := -1
@@ -271,6 +272,14 @@ func _grid_add(r: Rect2, id: int) -> void:
 			_bgrid[k].append(id)
 
 
+## p lies on the flat area of raised junction ni.
+func _on_node(ni: int, p: Vector2) -> bool:
+	if (node_pos[ni] as Vector2).distance_to(p) > float(node_r.get(ni, NODE_R)):
+		return false
+	var poly = node_poly.get(ni)
+	return poly == null or Geometry2D.is_point_in_polygon(p, poly)
+
+
 ## Surface at p for something that is now at height `hint`: the ground, or a bridge deck at p if that is
 ## closer to hint (a car on a bridge stays on it, a car under the bridge stays on the ground).
 func surface_near(p: Vector2, hint: float) -> float:
@@ -283,7 +292,7 @@ func surface_near(p: Vector2, hint: float) -> float:
 	for ei in _bgrid.get(Vector2i(floori(p.x / BGRID), floori(p.y / BGRID)), []):
 		if ei < 0:
 			var ni := -1 - int(ei)
-			if (node_pos[ni] as Vector2).distance_to(p) <= float(node_r.get(ni, NODE_R)):
+			if _on_node(ni, p):
 				var hn: float = node_height(ni, p)
 				if absf(hn - hint) < bd:
 					bd = absf(hn - hint)
@@ -291,7 +300,7 @@ func surface_near(p: Vector2, hint: float) -> float:
 			continue
 		var dk: Dictionary = decks[ei]
 		var ds := deck_ds(dk, p)
-		if ds.x > float(dk.hw) + 1.0:
+		if ds.x > float(dk.hw):   # (hw: road, sidewalks and half a metre)
 			continue
 		var hd := deck_at(dk, p)
 		if absf(hd - hint) < bd:
@@ -388,7 +397,7 @@ func serialize() -> Dictionary:
 		dk.erase("_g")   # segment index, rebuilt on first use
 		dks[ei] = dk
 	return {"origin": origin, "cell": cell, "nx": nx, "nz": nz, "h": h, "info": info, "decks": dks,
-		"node_decks": node_decks, "node_pos": node_pos, "node_r": node_r, "flat": flat}
+		"node_decks": node_decks, "node_pos": node_pos, "node_r": node_r, "node_poly": node_poly, "flat": flat}
 
 
 static func deserialize(d: Dictionary) -> Terrain:
@@ -402,6 +411,7 @@ static func deserialize(d: Dictionary) -> Terrain:
 	t.node_decks = d.get("node_decks", {})
 	t.node_pos = d.get("node_pos", {})
 	t.node_r = d.get("node_r", {})
+	t.node_poly = d.get("node_poly", {})
 	t.flat = bool(d.get("flat", false))
 	return null if t.is_empty() else t
 

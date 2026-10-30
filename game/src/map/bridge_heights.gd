@@ -727,6 +727,7 @@ func _store() -> void:
 	terrain.node_decks.clear()
 	terrain.node_pos.clear()
 	terrain.node_r.clear()
+	terrain.node_poly.clear()
 	var raised := 0
 	var raised_m := 0.0
 	var ramp_m := 0.0
@@ -764,13 +765,19 @@ func _store() -> void:
 		if v[ni] > float(nodes[ROAD][ni].ground) + RAISED:
 			terrain.node_decks[ni] = v[ni]
 			terrain.node_pos[ni] = nodes[ROAD][ni].pos
-			# its flat area reaches to where its roads leave it, across their width
+			# its flat area reaches to where its roads leave it, across their width: the hull of those edges
+			var c: Vector2 = nodes[ROAD][ni].pos
+			var hull := PackedVector2Array([c + Vector2(4, 0), c + Vector2(0, 4), c - Vector2(4, 0), c - Vector2(0, 4)])
 			var r := 4.0
 			for li in nodes[ROAD][ni].links:
 				var l: Dictionary = links[li]
-				var trim: float = float(l.u0) if int(l.a) == ni else float(l.len) - float(l.u1)
-				r = maxf(r, Vector2(trim, float(l.hw)).length() + 1.0)
+				var smp := Geo.sample(l.pts, l.cum, float(l.u0) if int(l.a) == ni else float(l.u1))
+				var across: Vector2 = Geo.right_of(smp[1]) * (float(l.hw) + 0.5)
+				for q: Vector2 in [smp[0] + across, smp[0] - across]:
+					hull.append(q)
+					r = maxf(r, q.distance_to(c))
 			terrain.node_r[ni] = r
+			terrain.node_poly[ni] = Geometry2D.convex_hull(hull)
 	# highest surface of the map (mouse picking starts its ray above it, CameraRig.terrain_hit)
 	var hi: float = terrain.info.get("max", 0.0)
 	for li in profiles:
