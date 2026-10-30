@@ -111,7 +111,14 @@ func _run(dir: String, spec: Dictionary, with_ground: bool) -> String:
 		var step: float = float(l.len) / maxf(1.0, z.size() - 1)
 		if step < 0.5:
 			continue
-		var allowed := maxf(BridgeHeights.descent(l, true), BridgeHeights.descent(l, false)) + 0.005
+		var allowed: float = float(l.g) + 0.005
+		var lf: float = float(l.u1) - float(l.u0)
+		if not l.bridge and lf >= 1.0:   # (worked out here, not with BridgeHeights.descent, which is under test)
+			var pa0: Vector2 = Geo.sample(l.pts, l.cum, float(l.u0))[0]
+			var pb0: Vector2 = Geo.sample(l.pts, l.cum, float(l.u1))[0]
+			var fall := absf(t.sample(pa0.x, pa0.y) - t.sample(pb0.x, pb0.y)) / lf
+			if fall > float(l.g):
+				allowed = fall * 1.25 + 0.005
 		for k in z.size() - 1:
 			if absf(z[k + 1] - z[k]) / step <= allowed:
 				continue
