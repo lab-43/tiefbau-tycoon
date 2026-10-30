@@ -86,7 +86,7 @@ func _make_offer() -> Job:
 		if max_s0 < 34.0:
 			continue
 		var s0 := rng.randf_range(34.0, max_s0)
-		if not lay.setup(world.net, c.key, s0, L, W, D, pipe.d) or not _standard_kerb(lay):
+		if not lay.setup(world.net, c.key, s0, L, W, D, pipe.d) or not _standard_kerb(lay) or _route_problem(lay) != "":
 			continue
 		if not _location_free(lay):
 			continue
@@ -209,6 +209,8 @@ func check_spot(p: Vector2, pipe: Dictionary, L := 4.0, D := 1.8, y_click := NAN
 				err = lay.error
 			continue
 		var clash := _clash(lay, others)
+		if clash == "":
+			clash = _route_problem(lay)
 		if clash != "":
 			if err == "":
 				err = clash
@@ -254,6 +256,84 @@ func _clash(lay: SiteLayout, others: Array) -> String:
 		if ol.trench_center().distance_to(c) < PIT_GAP_OTHER + (lay.L + ol.L) * 0.5:
 			return "zu nah an %s" % j.short_title()
 	return ""
+
+
+## Why the fleet could not drive to this site and back ("" = it can): the site's lane and the lanes of
+## its kerb spots must be reachable from the HQ, and the HQ from them. Some lanes of a map are not
+## (one-way chains, dead ends, gaps in the data; #10, #33). Cached per lane and direction.
+func _route_problem(lay: SiteLayout) -> String:
+	var keys: Array = [lay.key]
+	for sl in [lay.van_spot()] + (lay.kerb.get("stage", []) as Array) + [lay.kerb.get("lowbed", {})]:
+		if not (sl as Dictionary).is_empty() and not keys.has(int(sl.key)):
+			keys.append(int(sl.key))
+	for k in keys:
+		var why := _reach(k)
+		if why != "":
+			return why if k == lay.key else "Parkplatz in der Nachbarstraße: " + why
+	return ""
+
+
+var _reach_from := {}          # edge direction -> true: reachable from the HQ (built once, _build_reach)
+var _reach_to := {}            # edge direction -> true: the HQ is reachable from it
+var _reach_built := false
+
+
+func _reach(key: int) -> String:
+	if not _reach_built:
+		_build_reach()
+	var ed := key >> 3
+	if _reach_from.is_empty():
+		return ""   # no HQ node on this map (tests): nothing to check
+	if not _reach_from.has(ed):
+		return "von der Zentrale aus nicht erreichbar (Fahrtrichtung oder Lücke im Straßennetz)"
+	if not _reach_to.has(ed):
+		return "von dort kommt kein Fahrzeug zur Zentrale zurück"
+	return ""
+
+
+## Breadth-first over the edge-direction graph of the router, forwards from the lane leaving the HQ and
+## backwards from the lane arriving there (one pass each instead of an A* per lane under the mouse).
+func _build_reach() -> void:
+	_reach_built = true
+	var net: RoadNet = world.net
+	var hn: int = net.hq_node
+	if hn < 0:
+		return
+	var starts: Array = []
+	var goals: Array = []
+	for er in net.nodes[hn].ends:
+		var e: int = er >> 1
+		var d_out := 0 if (er & 1) == 0 else 1
+		if net.lane_count(e, d_out) > 0:
+			starts.append(e * 2 + d_out)
+		if net.lane_count(e, 1 - d_out) > 0:
+			goals.append(e * 2 + 1 - d_out)
+	var out: Dictionary = world.router.edir_out
+	var back := {}
+	for u in out:
+		for pair in out[u]:
+			var v: int = pair[1]
+			if not back.has(v):
+				back[v] = []
+			back[v].append(u)
+	_reach_from = _bfs(starts, func(u): return (out.get(u, []) as Array).map(func(pr): return pr[1]))
+	_reach_to = _bfs(goals, func(u): return back.get(u, []))
+
+
+static func _bfs(starts: Array, next: Callable) -> Dictionary:
+	var seen := {}
+	var queue: Array = starts.duplicate()
+	for st in starts:
+		seen[st] = true
+	var i := 0
+	while i < queue.size():
+		var u: int = queue[i]
+		i += 1
+		for v in next.call(u):
+			if not seen.has(v):
+				seen[v] = true
+				queue.append(v)
+	return seen
 
 
 ## Lane ranges a site uses, each in its lane's own coordinates: [{key, a, b}].

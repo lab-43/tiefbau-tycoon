@@ -2,7 +2,7 @@
 titel: Regeln, die Spieleraktionen verbieten, an der echten Karte messen – wie viele Stellen gehen und warum nicht
 bereich: baustelle
 datum: 2026-10-30
-pruefung: e2e:platzieren (Statistik: mindestens 60 % der Straßenpunkte ohne Brücken nehmen einen Auftrag; Hamburg 82 %, Utrecht 65 %)
+pruefung: e2e:platzieren (Statistik: mindestens 55 % der Straßenpunkte ohne Brücken nehmen einen Auftrag; Hamburg 82 %, Utrecht 59 %)
 ---
 
 **Was passiert ist:** Jonathan konnte mit dem Debug-Werkzeug „dauerhaft“ keinen Auftrag platzieren (#33). Die Regeln stammten aus der festen Absperr-Vorlage:

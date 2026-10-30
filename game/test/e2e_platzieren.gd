@@ -6,7 +6,8 @@ extends RefCounted
 ##      taper, crew van parks on the lane leading in), (B) the pit as close to the next junction as the
 ##      machines allow (waiting spot and low-loader on the lane leading out; the excavator comes by lowbed)
 ## Driven by e2e_driver.gd, which owns the clock and shots. --platz-stat-only: only step 1; --platz-kurz:
-## steps 1 and 2, then contract A is placed and its closure designer opened, but not played through.
+## steps 1 and 2, then contract A is placed and its closure designer opened, but not played through;
+## --platz-routen: only whether the fleet gets from the HQ to both spots.
 
 var drv: Node
 var step := 0
@@ -51,6 +52,17 @@ func tick(delta: float) -> void:
 			ok(tool.preview == null, "Vorschau verschwindet mit dem Werkzeug")
 			spot_a = _find_spot(w, jm, "a")
 			spot_b = _find_spot(w, jm, "b")
+			if "--platz-routen" in OS.get_cmdline_user_args():
+				for sp in [spot_a, spot_b]:
+					var r := jm.check_spot(sp.p, JobManager.PIPES[0])
+					var lay: SiteLayout = r.lay
+					var dep: Dictionary = w.fleet.vehicles[0]._hq_departure_lane()
+					var s_stop := minf(lay.s_det1 + 3.0 + 4.03, lay.len_k - 1.0)
+					var pl: Array = w.router.plan(dep.key, 4.0, lay.key, s_stop)
+					var pl2: Array = w.router.plan(dep.key, 4.0, lay.key, 1.0)
+					print("PLATZ Route Zentrale -> K %d (s %.1f): %d Stücke, -> K-Anfang: %d Stücke, Abschnitt %s" % [lay.key, s_stop, pl.size(), pl2.size(), w.net.edges[lay.key >> 4].name])
+				_end()
+				return
 			ok(not spot_a.is_empty(), "Stelle A gefunden (Grube direkt hinter einer Kreuzung)")
 			ok(not spot_b.is_empty(), "Stelle B gefunden (Grube knapp vor der nächsten Kreuzung)")
 			if spot_a.is_empty() or spot_b.is_empty():
@@ -284,9 +296,10 @@ func _statistics(w: World, jm: JobManager) -> void:
 	ks.sort_custom(func(a, b): return reasons[a] > reasons[b])
 	for k in ks:
 		print("PLATZ   %5d  %s" % [reasons[k], k])
-	# Hamburg (4 x 4 km, harbour): 82 %; Utrecht: 65 % (many one-way streets with one lane, not possible yet);
+	# Hamburg (4 x 4 km, harbour): 82 %; Utrecht: 59 % (many one-way streets with one lane, not possible yet,
+	# and lanes the fleet cannot reach from the HQ or not leave towards it);
 	# before #33 Hamburg had 34 %
-	ok(share_nb >= 60.0, "mindestens 60 %% der Straßenpunkte außerhalb von Brücken nehmen einen Auftrag (%.0f %%)" % share_nb)
+	ok(share_nb >= 55.0, "mindestens 55 %% der Straßenpunkte außerhalb von Brücken nehmen einen Auftrag (%.0f %%)" % share_nb)
 
 
 ## 2. Preview of PlaceJobTool: orange on a good spot (centred on the mouse), red with a reason on a bad one.

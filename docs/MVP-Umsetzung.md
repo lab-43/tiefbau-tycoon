@@ -296,6 +296,7 @@ Fahrzeuge (Kolonnenbus, Pritsche, Kipper, Sattelzug mit Tieflader, Mobilbagger):
   - Sie liegt im rechten Fahrstreifen der angeklickten Richtung, nicht in der Kreuzungsfläche, nicht auf einer Brücke oder im Tunnel und nicht in einer engen Kurve (12° über die Grubenlänge).
   - Dahinter müssen rund 32 m desselben Abschnitts frei sein: Bagger und Kipper stehen dort und fahren von hinten rückwärts hinein. Das ist die einzige große Bedingung, die noch übrig ist.
   - Was zwei Baustellen auf einem Fahrstreifen belegen, darf sich nicht überschneiden: Umleitung mit dem Platz zum Rückwärts-Einfahren, Gegenrichtung und Parkplätze.
+  - Die Fahrzeuge müssen von der Zentrale hin- und zurückkommen. Manche Fahrstreifen einer Karte erreicht man nicht, z. B. bei Einbahn-Ketten, Sackgassen oder Lücken in den Daten. Dort blieb früher ein Kipper mit „Keine Route“ stehen, und die Baustelle hing. Geprüft wird einmal pro Karte über das ganze Netz (`JobManager._build_reach`). Das gilt auch für Ausschreibungen und betrifft wahrscheinlich die Ursache von Meldung #10.
   - Zebrastreifen, Haltestellen und kurze Straßen sind nur noch Hinweise.
   - Klickt man neben eine passende Stelle, rückt die Grube bis 25 m entlang der Straße.
   - Ergebnis: 69 % aller Straßenpunkte, 82 % ohne Brücken. Die Brücken machen im Hafengebiet 15 % aus.
@@ -322,7 +323,7 @@ Fahrzeuge (Kolonnenbus, Pritsche, Kipper, Sattelzug mit Tieflader, Mobilbagger):
 
   Alles davon ist behoben. Offen bleibt das Warten in der Kreuzung (siehe Grenzen).
 - **Test:** `tools/test.sh platzieren`:
-  - Statistik über die Straßenpunkte (mindestens 60 % ohne Brücken; Hamburg 82 %, Utrecht 65 % wegen vieler einspuriger Einbahnstraßen).
+  - Statistik über die Straßenpunkte (mindestens 55 % ohne Brücken; Hamburg 82 %, Utrecht 59 % wegen vieler einspuriger Einbahnstraßen und einiger unerreichbarer Fahrstreifen).
   - Vorschau orange und rot.
   - Planer an beiden Stellen.
   - Zwei echte Aufträge ohne Überspringen bis zur Abnahme: Grube 3,5 m hinter einer Kreuzung (Bus auf dem Zulauf) und Grube knapp vor der nächsten Kreuzung (Warteplatz und Tieflader auf dem Ablauf, Bagger per Tieflader).
