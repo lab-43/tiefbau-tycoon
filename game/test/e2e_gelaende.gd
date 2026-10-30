@@ -153,6 +153,18 @@ func _check_bridges(w: World) -> void:
 			var e: Dictionary = w.net.edges[ei]
 			print("GELAENDE   Klick verfehlt: %s%s bei %s, Deck %.2f, Treffer %s, top dort %.2f" % [e.cls,
 				" (Brücke)" if e.bridge else "", str(mid.round()), deck, str(hit), Terrain.top(mid)])
+			for oi in tr.decks:   # what lies higher at the same spot
+				var od: Dictionary = tr.decks[oi]
+				var ods := tr.deck_ds(od, mid)
+				if oi != ei and ods.x <= float(od.hw) + 1.0 and tr.deck_at(od, mid) > deck + 0.3:
+					var oe: Dictionary = w.net.edges[oi]
+					print("GELAENDE     darüber: Kante %d %s%s, %.1f m von ihrer Mitte (Breite/2 %.1f), Höhe %.2f" % [oi, oe.cls,
+						" (Brücke)" if oe.bridge else "", ods.x, float(od.hw), tr.deck_at(od, mid)])
+			for ni in tr.node_pos:
+				var dn: float = (tr.node_pos[ni] as Vector2).distance_to(mid)
+				if dn <= float(tr.node_r.get(ni, Terrain.NODE_R)) and tr.node_height(ni, mid) > deck + 0.3:
+					print("GELAENDE     darüber: Kreuzung %d, %.1f m entfernt (Radius %.1f), Höhe %.2f" % [ni, dn,
+						float(tr.node_r.get(ni, Terrain.NODE_R)), tr.node_height(ni, mid)])
 	ok(picked == high, "Mausklick trifft die Brücke (%d von %d)" % [picked, high])
 
 
