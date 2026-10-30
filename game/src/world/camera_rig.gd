@@ -92,7 +92,8 @@ func ground_point(screen: Vector2, plane_y := 0.0) -> Variant:
 
 ## First point where a ray meets the terrain or a bridge deck (steps between the highest and lowest ground, then bisection).
 static func terrain_hit(from: Vector3, dir: Vector3) -> Variant:
-	var hi: float = float(Terrain.cur.info.get("max", 100.0)) + 12.0
+	# above the highest ground and the highest bridge (#32: the Köhlbrandbrücke is 40 m above the highest ground)
+	var hi: float = maxf(float(Terrain.cur.info.get("max", 100.0)), float(Terrain.cur.info.get("top", 0.0))) + 12.0
 	var lo: float = float(Terrain.cur.info.get("min", -10.0)) - 3.0
 	if dir.y > -0.0001 and from.y > hi:
 		return null

@@ -7,6 +7,7 @@ extends Node
 ##                 (then a ramp loses its height above the ground with that grade),
 ##   Stufen      – a raised road meets its junction without a step,
 ##   Köhlbrand   – the Köhlbrandbrücke stands more than 40 m above the water,
+##   Mausklick   – a click from above hits the decks of high bridges (CameraRig.terrain_hit),
 ##   Rampen      – some roads next to bridges are raised as ramps and get embankments (RoadMesher),
 ##   Ruhe        – the solution settles (fewer than 6 rounds).
 ## usage: godot --headless --path game res://test/bridge_test.tscn -- --fixture=<testdata/bruecken>
@@ -146,6 +147,32 @@ func _run(dir: String, spec: Dictionary, with_ground: bool) -> String:
 	print("    Köhlbrandbrücke: %.0f m über Grund" % kb)
 	if kb < 40.0:
 		fails.append("[%s] Köhlbrandbrücke nur %.0f m hoch" % [tag, kb])
+	# a mouse click from above hits the deck, not the water below (the ray starts above the highest bridge)
+	var was := Terrain.cur
+	Terrain.cur = t
+	var miss := 0
+	var tried := 0
+	for ei in t.decks:
+		var dk: Dictionary = t.decks[ei]
+		var h: PackedFloat32Array = dk.h
+		var g: PackedFloat32Array = dk.g
+		var k := 0
+		for i in h.size():
+			if h[i] - g[i] > h[k] - g[k]:
+				k = i
+		if h[k] - g[k] < 10.0:
+			continue
+		var at: Vector2 = Geo.sample(dk.pts, dk.cum, float(dk.step) * k)[0]
+		var deck := t.deck_at(dk, at)
+		var from := Vector3(at.x + 30.0, deck + 60.0, at.y + 30.0)
+		var hit = CameraRig.terrain_hit(from, (Vector3(at.x, deck, at.y) - from).normalized())
+		tried += 1
+		if hit == null or absf((hit as Vector3).y - deck) > 0.5:
+			miss += 1
+	Terrain.cur = was
+	print("    Mausklick auf hohe Brücken: %d von %d verfehlt" % [miss, tried])
+	if tried == 0 or miss > 0:
+		fails.append("[%s] Mausklick verfehlt %d von %d hohen Brücken" % [tag, miss, tried])
 	# ramps with embankments
 	var rm := RoadMesher.new(net, 500.0, data.bounds.position)
 	rm.terrain = t

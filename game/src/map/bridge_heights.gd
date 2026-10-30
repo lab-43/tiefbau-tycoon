@@ -745,6 +745,12 @@ func _store() -> void:
 		if v[ni] > float(nodes[ROAD][ni].ground) + RAISED:
 			terrain.node_decks[ni] = v[ni]
 			terrain.node_pos[ni] = nodes[ROAD][ni].pos
+	# highest surface of the map (mouse picking starts its ray above it, CameraRig.terrain_hit)
+	var hi: float = terrain.info.get("max", 0.0)
+	for li in profiles:
+		for zz in (profiles[li] as PackedFloat32Array):
+			hi = maxf(hi, zz)
+	terrain.info["top"] = hi
 	stats["raised"] = raised
 	stats["raised_m"] = raised_m
 	stats["ramp_m"] = ramp_m
