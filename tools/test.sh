@@ -21,6 +21,15 @@ find_godot
 SPEED="${E2E_SPEED:-10}"; TMO="${E2E_TIMEOUT:-1500}"
 SCEN=("$@"); [ ${#SCEN[@]} -eq 0 ] && SCEN=(smoke issue)
 FAIL=0
+# The saved test map is only rebuilt when BAKE_VERSION changes. Code of the same version that bakes differently
+# (earlier commits of a branch, a bisect in a clone: the user data folder is shared) would leave a map behind that
+# the current code then reads (#32: a deck without "lv"). So: rebuild it whenever the map code changed.
+DEVMAP="$HOME/.local/share/godot/app_userdata/Baustellen Manager/maps/dev_utrecht"
+SRC_HASH=$(cat "$ROOT"/game/src/map/*.gd | sha1sum | cut -c1-16)
+if [ -d "$DEVMAP" ] && [ "$(cat "$DEVMAP/.kartencode" 2>/dev/null)" != "$SRC_HASH" ]; then
+  rm -f "$DEVMAP"/baked_v*.bin
+  echo "$SRC_HASH" > "$DEVMAP/.kartencode"
+fi
 run() {  # name, expected-ok-regex, extra args...
   local name="$1" ok="$2"; shift 2
   local log="/tmp/tt_e2e_${name}.log" t0=$(date +%s)
@@ -108,7 +117,7 @@ for s in "${SCEN[@]}"; do
     absperrung)  # closure designer (#9); like markierungen it also fails on a script error (in _draw)
       run absperrung "E2E OK absperrung" --e2e=absperrung
       if grep -q "SCRIPT ERROR" /tmp/tt_e2e_absperrung.log; then FAIL=1; echo "FAIL  absperrung: Skriptfehler im Log"; grep -A3 "SCRIPT ERROR" /tmp/tt_e2e_absperrung.log | head -8 | sed 's/^/      /'; fi ;;
-    gelaende) DEVMAP="$HOME/.local/share/godot/app_userdata/Baustellen Manager/maps/dev_utrecht"
+    gelaende)
       rm -f "$DEVMAP"/baked_v*_syn.bin   # a map saved by older code of the same BAKE_VERSION would hide bake changes
       run gelaende "E2E OK gelaende" --e2e=gelaende --terrain=synthetic
       # download path: tiles from a local Terrarium server (PNG and lossless WebP)

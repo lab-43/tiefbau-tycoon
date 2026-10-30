@@ -168,7 +168,7 @@ static func make_deck(pts: PackedVector2Array, cum: PackedFloat32Array, h: Packe
 ## do), and its edges meet a junction area (flat at its height, never below the ground) without a step.
 func deck_at(dk: Dictionary, p: Vector2) -> float:
 	var s := deck_s(dk, p)
-	return maxf(_deck_lerp(dk.lv, float(dk.step), s), sample(p.x, p.y))
+	return maxf(_deck_lerp(dk.get("lv", dk.h), float(dk.step), s), sample(p.x, p.y))   # (no lv: map baked before)
 
 
 ## Profile height at arc length s.
