@@ -757,6 +757,8 @@ func _store() -> void:
 			if k > 0 and (z[k] - gr[k] > RAISED or z[k - 1] - gr[k - 1] > RAISED):
 				up += step
 		var dk := Terrain.make_deck(l.pts, l.cum, z, gr, float(l.hw) + 0.5, levels.get(li, PackedFloat32Array()))
+		dk["u0"] = float(l.u0)   # drawn between the junction areas at its ends (beyond: the junction surface)
+		dk["u1"] = float(l.u1)
 		if l.bridge:   # structure below the surface (stage 2: deck underside, piers)
 			dk["depth"] = BIG_DEPTH if big_links.has(li) else float(DEPTH[int(l.net)])
 		match int(l.net):

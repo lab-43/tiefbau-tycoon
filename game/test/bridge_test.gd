@@ -184,10 +184,14 @@ func _run(dir: String, spec: Dictionary, with_ground: bool, tag: String) -> Stri
 		var dk: Dictionary = t.decks[ei]
 		var h: PackedFloat32Array = dk.h
 		var g: PackedFloat32Array = dk.g
-		var k := 0
-		for i in h.size():
-			if h[i] - g[i] > h[k] - g[k]:
+		var k := -1
+		for i in h.size():   # where the road is drawn (not in the junction areas at its ends)
+			if float(dk.step) * i < float(dk.get("u0", 0.0)) or float(dk.step) * i > float(dk.get("u1", INF)):
+				continue
+			if k < 0 or h[i] - g[i] > h[k] - g[k]:
 				k = i
+		if k < 0:
+			continue
 		if h[k] - g[k] < 10.0:
 			continue
 		var at: Vector2 = Geo.sample(dk.pts, dk.cum, float(dk.step) * k)[0]
@@ -197,6 +201,7 @@ func _run(dir: String, spec: Dictionary, with_ground: bool, tag: String) -> Stri
 		tried += 1
 		if hit == null or absf((hit as Vector3).y - deck) > 0.5:
 			miss += 1
+			print("    Mausklick verfehlt bei %s: Deck %.2f, getroffen %s, oben %.2f" % [str(at.round()), deck, str(hit), Terrain.top(at)])
 	Terrain.cur = was
 	print("    Mausklick auf hohe Brücken: %d von %d verfehlt" % [miss, tried])
 	if miss > 0 or (tried == 0 and spec.get("koehlbrand", false)):

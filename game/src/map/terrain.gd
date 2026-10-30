@@ -300,13 +300,19 @@ func surface_near(p: Vector2, hint: float) -> float:
 			continue
 		var dk: Dictionary = decks[ei]
 		var ds := deck_ds(dk, p)
-		if ds.x > float(dk.hw):   # (hw: road, sidewalks and half a metre)
+		if ds.x > float(dk.hw) or not _drawn(dk, ds.y):   # (hw: road, sidewalks and half a metre)
 			continue
 		var hd := deck_at(dk, p)
 		if absf(hd - hint) < bd:
 			bd = absf(hd - hint)
 			best = hd
 	return best
+
+
+## Arc length s of deck dk lies where the road is drawn, not in the junction area at one of its ends (there the
+## profile only runs on in a straight line, BridgeHeights._profile).
+static func _drawn(dk: Dictionary, s: float) -> bool:
+	return s >= float(dk.get("u0", -INF)) - 0.5 and s <= float(dk.get("u1", INF)) + 0.5
 
 
 ## Heights of all raised road surfaces at p (bridge decks, ramps, raised junction areas), without the ground.
@@ -322,7 +328,8 @@ func raised_at(p: Vector2) -> PackedFloat32Array:
 				out.append(node_height(-1 - int(ei), p))
 			continue
 		var dk: Dictionary = decks[ei]
-		if deck_ds(dk, p).x <= float(dk.hw):
+		var ds := deck_ds(dk, p)
+		if ds.x <= float(dk.hw) and _drawn(dk, ds.y):
 			out.append(deck_at(dk, p))
 	return out
 
