@@ -52,7 +52,7 @@ func _build_candidates() -> void:
 		var g: Array = net.lane_geo[key]
 		var cum: PackedFloat32Array = g[1]
 		var ln: float = cum[cum.size() - 1]
-		if ln < 60.0:
+		if ln < 95.0:
 			continue
 		var mid: Vector2 = Geo.sample(g[0], cum, ln * 0.5)[0]
 		var dist := mid.distance_to(hq)
@@ -80,12 +80,13 @@ func _make_offer() -> Job:
 		var W: float = pipe.width
 		var D := snappedf(rng.randf_range(1.5, 2.1), 0.05)
 		var lay := SiteLayout.new()
-		# anywhere the pit and the room behind it fit (#33); setup() checks the rest
-		var max_s0: float = c.len - 50.0
-		if max_s0 < 0.0:
+		# generated offers keep the full standard closure (crew van in front, waiting spots behind on the same
+		# street); squeezed spots right at junctions come from the player placing them (#33)
+		var max_s0: float = c.len - 60.0
+		if max_s0 < 34.0:
 			continue
-		var s0 := rng.randf_range(0.0, max_s0)
-		if not lay.setup(world.net, c.key, s0, L, W, D, pipe.d):
+		var s0 := rng.randf_range(34.0, max_s0)
+		if not lay.setup(world.net, c.key, s0, L, W, D, pipe.d) or lay.squeezed or lay.s_van < 0.0:
 			continue
 		if not _location_free(lay):
 			continue

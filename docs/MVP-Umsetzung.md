@@ -303,14 +303,14 @@ Fahrzeuge (Kolonnenbus, Pritsche, Kipper, Sattelzug mit Tieflader, Mobilbagger):
 - **Parkplätze auf den Nachbarstraßen** (`SiteLayout.plan_kerb`): Kolonnenbus, drei Warteplätze und der Tieflader stehen am Bordstein vor bzw. hinter der Absperrung. Passt es dort nicht, stehen sie auf dem geraden Zulauf bzw. Ablauf des Abschnitts. Die Kolonne läuft von dort zur Baustelle, der Planer zeigt den Bus, wo er wirklich steht.
 - **Planer:** Absperrung, Umleitung und Fahrspuren reichen über den ganzen Abschnitt, nicht mehr nur bis 15 m vor die Vorlage. Die roten Grenzlinien „frühestens ab / höchstens bis hier“ stehen jetzt am Abschnittsanfang bzw. vor dem Platz zum Wenden.
 - **Debug-Menü, „Auftrag platzieren“:** Die Grube hängt am Mauszeiger, aufgesprüht wie auf dem Asphalt. Orange heißt: passt. Rot heißt: passt nicht, mit dem Grund. Dahinter ist gestrichelt der Platz für Bagger und Kipper eingezeichnet, dazu Größe, Tiefe und Hinweise. Ein Klick auf ein Brückendeck meint die Brücke, nicht die Straße darunter.
-- **Ausschreibungen** entstehen auch auf kürzeren Straßen (ab 60 m statt 135 m), mit Abstand zur Zentrale und zueinander wie bisher.
+- **Ausschreibungen** entstehen auch auf kürzeren Straßen (Abschnitte ab 95 m statt 135 m), behalten aber die volle Standard-Absperrung (Bus davor, Warteplätze dahinter) und den Abstand zur Zentrale und zueinander. Gestauchte Stellen an Kreuzungen entstehen nur, wenn du sie selbst platzierst.
 - **Grenzen (bewusst noch nicht):**
   - Die Grube liegt immer im rechten Fahrstreifen ihrer Richtung.
-  - Einbahnstraßen mit nur einem Fahrstreifen gehen nicht (2 % der Punkte); dort ginge nur eine Vollsperrung.
+  - Einbahnstraßen mit nur einem Fahrstreifen gehen nicht (Hamburg 2 %, Utrecht 23 % der Punkte). Dort ginge nur eine Vollsperrung, und die Maschinen müssten von hinten über die nächste Straße hineinfahren.
   - Der Verkehr reagiert nur auf Teile im eigenen Abschnitt: Die Verschwenkung beginnt frühestens am Abschnittsanfang, Kreuzungen und Seitenstraßen lassen sich nicht absperren.
   - Abschnitte unter rund 36 m gehen nicht, auch wenn die Straße hinter einem Übergang (Knoten mit zwei Straßen) weiterläuft.
 - **Test:** `tools/test.sh platzieren`:
-  - Statistik über die Straßenpunkte (mindestens 75 % ohne Brücken).
+  - Statistik über die Straßenpunkte (mindestens 60 % ohne Brücken; Hamburg 87 %, Utrecht 65 % wegen vieler einspuriger Einbahnstraßen).
   - Vorschau orange und rot.
   - Planer an beiden Stellen.
   - Zwei echte Aufträge ohne Überspringen bis zur Abnahme: Grube 3,5 m hinter einer Kreuzung (Bus auf dem Zulauf) und Grube knapp vor der nächsten Kreuzung (Warteplatz und Tieflader auf dem Ablauf, Bagger per Tieflader).

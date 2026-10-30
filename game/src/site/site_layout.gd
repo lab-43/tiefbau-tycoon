@@ -285,13 +285,7 @@ func van_dir() -> Vector2:
 ## Kerb spot of the crew van on K (#33): 20 m in front of the taper where there is room, closer to
 ## the closure on short lanes, otherwise behind the site after the reversing room. -1: no room on K.
 func van_default() -> float:
-	var up := minf(s0 - 20.0, s_det0 - VAN_EXIT_GAP)
-	if up >= HEAD_MIN + VAN_APPR_MIN:
-		return up
-	var down := s_det1 + REV_ROOM + 3.0
-	if down + 3.0 + VAN_EXIT_MIN <= len_k - 0.5:
-		return down
-	return -1.0
+	return _van_for(s_det0, s_det1, s0 - 20.0)
 
 
 ## Metres the crew van pulls over before its spot (at most 12, never from inside the detour).
@@ -824,8 +818,9 @@ func extent_limits() -> Vector2:
 ## Crew van spot for a detour from d0 to d1: the wanted s if it is outside the detour with room to pull
 ## in and out, otherwise the nearest such spot in front of or behind the closure (#33).
 func _van_for(d0: float, d1: float, want: float) -> float:
-	var up_hi := d0 - VAN_EXIT_GAP
 	var up_lo := HEAD_MIN + VAN_APPR_MIN
+	# 12 m in front of the detour as in the standard layout; closer only where the lane is short
+	var up_hi := d0 - 12.0 if d0 - 12.0 >= up_lo else d0 - VAN_EXIT_GAP
 	var dn_lo := d1 + REV_ROOM + 3.0
 	var dn_hi := len_k - 0.5 - 3.0 - VAN_EXIT_MIN
 	var best := -1.0
