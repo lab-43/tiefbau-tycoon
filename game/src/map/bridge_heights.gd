@@ -85,8 +85,10 @@ func run() -> void:
 
 
 func summary() -> String:
-	return "Brücken: %d Kreuzungen darunter, %d Abschnitte angehoben (%.1f km, davon Rampen %.1f km), höchster Punkt %.0f m über Grund (%d ms)" % [
+	var bn: Array = stats.get("by_net", [0.0, 0.0, 0.0])
+	return "Brücken: %d Kreuzungen darunter, %d Abschnitte angehoben (%.1f km: Straßen %.1f, Gleise %.1f, Wege %.1f; davon Rampen ohne Brückentag %.1f km), höchster Punkt %.0f m über Grund (%d ms)" % [
 		crossings.size(), int(stats.get("raised", 0)), float(stats.get("raised_m", 0.0)) / 1000.0,
+		float(bn[0]) / 1000.0, float(bn[1]) / 1000.0, float(bn[2]) / 1000.0,
 		float(stats.get("ramp_m", 0.0)) / 1000.0, float(stats.get("max_height", 0.0)), int(stats.get("ms", 0))]
 
 
@@ -145,9 +147,11 @@ func _add_link(nid: int, id: int, a: int, b: int, pts: PackedVector2Array, cum: 
 	u0 = clampf(u0, 0.0, total)
 	u1 = clampf(u1, u0, total)
 	var li := links.size()
+	var pa: Vector2 = Geo.sample(pts, cum, u0)[0]
+	var pb: Vector2 = Geo.sample(pts, cum, u1)[0]
 	links.append({"net": nid, "id": id, "a": a, "b": b, "pts": pts, "cum": cum, "len": total, "u0": u0, "u1": u1,
 		"g": grade(nid, cls), "bridge": bridge, "hw": hw, "layer": layer, "cls": cls, "maxheight": maxheight,
-		"big": false})
+		"big": false, "ga": terrain.sample(pa.x, pa.y), "gb": terrain.sample(pb.x, pb.y)})
 	nodes[nid][a].links.append(li)
 	if b != a:
 		nodes[nid][b].links.append(li)
@@ -582,7 +586,7 @@ func _solve(nid: int, src: Dictionary) -> void:
 			if int(l.a) == int(l.b):
 				continue
 			var m: int = l.b if int(l.a) == ni else l.a
-			var cand: float = v[ni] - float(l.g) * (float(l.u1) - float(l.u0))
+			var cand := _carry(l, v[ni], int(l.a) == ni)
 			if cand > v[m] + 0.001:
 				v[m] = cand
 				vo[m] = vo[ni]
@@ -601,6 +605,19 @@ func _solve(nid: int, src: Dictionary) -> void:
 		if not res.is_empty():
 			profiles[li] = res[0]
 			origins[li] = res[1]
+
+
+## Height that a raised end (height h, at end a if from_a) leaves at the other end of link l's free length. It falls
+## with the grade of the link; a ramp (not a bridge) also loses its height above the ground at least that fast, so on
+## ground falling steeper than the grade it follows the ground down instead of running on as a long embankment.
+static func _carry(l: Dictionary, h: float, from_a: bool) -> float:
+	var drop: float = float(l.g) * (float(l.u1) - float(l.u0))
+	var c := h - drop
+	if not l.bridge:
+		var g0: float = l.ga if from_a else l.gb
+		var g1: float = l.gb if from_a else l.ga
+		c = minf(c, g1 + (h - g0) - drop)
+	return c
 
 
 ## [heights, origins] at evenly spaced stations along link li, rounded off; empty if it nowhere rises above the ground.
@@ -635,11 +652,16 @@ func _profile(li: int, va: float, vb: float, oa: int, ob: int, srcs: Array) -> A
 		var f := clampf(s, u0, u1) - u0
 		var h := ground
 		var o := -1
-		if va - g * f > h:
-			h = va - g * f
+		var ha := va - g * f
+		var hb := vb - g * (lf - f)
+		if not l.bridge:   # a ramp loses its height above the ground at least with its grade (see _carry)
+			ha = minf(ha, ground + (va - float(l.ga)) - g * f)
+			hb = minf(hb, ground + (vb - float(l.gb)) - g * (lf - f))
+		if ha > h:
+			h = ha
 			o = oa
-		if vb - g * (lf - f) > h:
-			h = vb - g * (lf - f)
+		if hb > h:
+			h = hb
 			o = ob
 		for q in srcs:
 			var flo := clampf(float(q[0]), u0, u1) - u0
@@ -689,6 +711,7 @@ func _store() -> void:
 	var raised := 0
 	var raised_m := 0.0
 	var ramp_m := 0.0
+	var by_net := [0.0, 0.0, 0.0]
 	var top := 0.0
 	for li in profiles:
 		var l: Dictionary = links[li]
@@ -696,10 +719,14 @@ func _store() -> void:
 		var n := z.size() - 1
 		var gr := PackedFloat32Array()
 		gr.resize(n + 1)
+		var step := float(l.len) / maxf(1.0, n)
+		var up := 0.0   # metres of this link raised above the ground
 		for k in n + 1:
-			var p: Vector2 = Geo.sample(l.pts, l.cum, float(l.len) * k / maxf(1.0, n))[0]
+			var p: Vector2 = Geo.sample(l.pts, l.cum, step * k)[0]
 			gr[k] = terrain.sample(p.x, p.y)
 			top = maxf(top, z[k] - gr[k])
+			if k > 0 and (z[k] - gr[k] > RAISED or z[k - 1] - gr[k - 1] > RAISED):
+				up += step
 		var dk := Terrain.make_deck(l.pts, l.cum, z, gr, float(l.hw) + 0.5)
 		match int(l.net):
 			ROAD:
@@ -709,9 +736,10 @@ func _store() -> void:
 			PATH:
 				path_decks[int(l.id)] = dk
 		raised += 1
-		raised_m += float(l.len)
+		raised_m += up
+		by_net[int(l.net)] += up
 		if not l.bridge:
-			ramp_m += float(l.len)
+			ramp_m += up
 	var v: PackedFloat32Array = _v[ROAD]
 	for ni in v.size():
 		if v[ni] > float(nodes[ROAD][ni].ground) + RAISED:
@@ -720,6 +748,7 @@ func _store() -> void:
 	stats["raised"] = raised
 	stats["raised_m"] = raised_m
 	stats["ramp_m"] = ramp_m
+	stats["by_net"] = by_net
 	stats["max_height"] = top
 
 

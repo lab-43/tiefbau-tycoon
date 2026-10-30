@@ -149,6 +149,10 @@ func _check_bridges(w: World) -> void:
 		var hit = CameraRig.terrain_hit(from, (Vector3(mid.x, deck, mid.y) - from).normalized())
 		if hit != null and absf((hit as Vector3).y - deck) < 0.5:
 			picked += 1
+		elif high - picked <= 5:
+			var e: Dictionary = w.net.edges[ei]
+			print("GELAENDE   Klick verfehlt: %s%s bei %s, Deck %.2f, Treffer %s, top dort %.2f" % [e.cls,
+				" (Brücke)" if e.bridge else "", str(mid.round()), deck, str(hit), Terrain.top(mid)])
 	ok(picked == high, "Mausklick trifft die Brücke (%d von %d)" % [picked, high])
 
 

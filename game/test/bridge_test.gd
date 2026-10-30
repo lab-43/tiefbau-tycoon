@@ -3,7 +3,8 @@ extends Node
 ## of the fixture and once on a flat map:
 ##   lichte Höhe – every road, railway, path and water crossed by a bridge has its clear height below the deck
 ##                 (cable-stayed bridges over wide water: 50 m, or as high as their own ramps allow),
-##   Steigung    – raised decks rise no steeper than their class allows, unless the ground itself is steeper,
+##   Steigung    – raised decks rise no steeper than their class allows, unless the ground itself is steeper
+##                 (then a ramp loses its height above the ground with that grade),
 ##   Stufen      – a raised road meets its junction without a step,
 ##   Köhlbrand   – the Köhlbrandbrücke stands more than 40 m above the water,
 ##   Rampen      – some roads next to bridges are raised as ramps and get embankments (RoadMesher),
@@ -105,8 +106,12 @@ func _run(dir: String, spec: Dictionary, with_ground: bool) -> String:
 				continue
 			var pa: Vector2 = Geo.sample(l.pts, l.cum, step * k)[0]
 			var pb: Vector2 = Geo.sample(l.pts, l.cum, step * (k + 1))[0]
-			var on_ground := absf(z[k] - t.sample(pa.x, pa.y)) < 0.02 or absf(z[k + 1] - t.sample(pb.x, pb.y)) < 0.02
-			if not on_ground:
+			var ga := t.sample(pa.x, pa.y)
+			var gb := t.sample(pb.x, pb.y)
+			var on_ground := absf(z[k] - ga) < 0.02 or absf(z[k + 1] - gb) < 0.02
+			# a ramp on falling ground goes down with the ground and loses its height above it with its grade
+			var along_ground: bool = not l.bridge and absf((z[k + 1] - gb) - (z[k] - ga)) / step <= float(l.g) + 0.005
+			if not on_ground and not along_ground:
 				steep += 1
 	print("    zu steil (nicht vom Gelände): ", steep)
 	if steep > 0:
