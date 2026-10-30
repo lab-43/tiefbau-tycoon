@@ -11,7 +11,9 @@ extends Node
 ##   Mausklick   – a click from above hits the decks of high bridges (CameraRig.terrain_hit),
 ##   Rampen      – some roads next to bridges are raised as ramps and get embankments (RoadMesher), also below
 ##                 an edge that is raised only by a cross-slope,
-##   Ruhe        – the solution settles (fewer than 6 rounds).
+##   Ruhe        – the solution settles (fewer than 6 rounds),
+##   Bauwerk     – piers keep off roads (as drawn), railways and narrow water and reach the deck, long high
+##                 bridges stand on piers, there are abutments and deck undersides (stage 2).
 ## usage: godot --headless --path game res://test/bridge_test.tscn -- --fixture=<testdata/bruecken>
 ## (a scene: TerrainBake reads tiles through TerrainSource, which needs the Game autoload)  ·  tools/test.sh bruecken
 ## Prints "BRUECKEN OK …" or "BRUECKEN FAIL …" (exit code 1).
@@ -254,4 +256,146 @@ func _run(dir: String, spec: Dictionary, with_ground: bool) -> String:
 	print("    Rampenränder über Grund: %d, davon ohne Böschung %d" % [edges, bare])
 	if bare > edges / 50:
 		fails.append("[%s] %d von %d Rampenrändern ohne Böschung" % [tag, bare, edges])
-	return "%s: %d Kreuzungen, Köhlbrand %.0f m" % [tag, bh.crossings.size(), kb]
+	var st := _structures(tag, t, net, data, bh, rm)
+	return "%s: %d Kreuzungen, Köhlbrand %.0f m, %s" % [tag, bh.crossings.size(), kb, st]
+
+
+## Stage 2: piers and abutments (BridgeStructures), deck undersides. Checked against what the meshers drew and the
+## OSM data, not against the helpers BridgeStructures uses itself.
+func _structures(tag: String, t: Terrain, net: RoadNet, data: OsmData, bh: BridgeHeights, rm: RoadMesher) -> String:
+	var bs := BridgeStructures.new(bh, net, t, AsphaltIndex.new(net, t))
+	bs.build(rm)
+	print("    ", bs.summary())
+	if bs.piers.size() < 30 or bs.abutments.size() < 5:
+		fails.append("[%s] zu wenige Pfeiler (%d) oder Widerlager (%d)" % [tag, bs.piers.size(), bs.abutments.size()])
+	# ground asphalt as drawn (bridge decks and ramps are separate *_deck layers)
+	var asph := {}
+	var down := 0
+	for ck in rm.chunks:
+		var al = rm.chunks[ck].get("asphalt")
+		if al != null:
+			for i in range(0, (al as MeshLayer).indices.size(), 3):
+				var tri: Array = []
+				for j in 3:
+					var v: Vector3 = al.verts[al.indices[i + j]]
+					tri.append(Vector2(v.x, v.z))
+				var r := Rect2(tri[0], Vector2.ZERO).expand(tri[1]).expand(tri[2])
+				for gx in range(floori(r.position.x / 10.0), floori(r.end.x / 10.0) + 1):
+					for gz in range(floori(r.position.y / 10.0), floori(r.end.y / 10.0) + 1):
+						var k := Vector2i(gx, gz)
+						if not asph.has(k):
+							asph[k] = []
+						asph[k].append(tri)
+		var bl = rm.chunks[ck].get("bridge")
+		if bl != null:
+			for i in range(0, (bl as MeshLayer).indices.size(), 3):
+				if (bl as MeshLayer).normals[bl.indices[i]].y < -0.9:
+					down += 1
+	if down == 0:
+		fails.append("[%s] Brückendecks ohne Unterseite" % tag)
+	# water areas
+	var water: Array = []
+	for a in data.areas:
+		if a.kind == "water" and (a.outer as PackedVector2Array).size() >= 3:
+			water.append(a.outer)
+	var on_road := 0
+	var on_rail := 0
+	var in_water := 0
+	var gap := 0
+	for pr in bs.piers:
+		var c: Vector2 = pr.p
+		var d: Vector2 = pr.d
+		var rt := Geo.right_of(d)
+		var corners := [c, c + rt * (pr.w * 0.5) + d * (pr.t * 0.5), c - rt * (pr.w * 0.5) + d * (pr.t * 0.5),
+			c + rt * (pr.w * 0.5) - d * (pr.t * 0.5), c - rt * (pr.w * 0.5) - d * (pr.t * 0.5)]
+		var hit_road := false
+		for q: Vector2 in corners:
+			for tri in asph.get(Vector2i(floori(q.x / 10.0), floori(q.y / 10.0)), []):
+				if Geometry2D.point_is_inside_triangle(q, tri[0], tri[1], tri[2]):
+					hit_road = true
+		if hit_road:
+			on_road += 1
+			if on_road <= 3:
+				print("    Pfeiler auf der Fahrbahn bei %s" % str(c.round()))
+		# railways on the ground
+		for ri in data.rails.size():
+			var rpts: PackedVector2Array = data.rails[ri].pts
+			var rdk: Dictionary = bh.rail_decks.get(ri, {})
+			var rect := PackedVector2Array([corners[1], corners[2], corners[4], corners[3]])
+			for k in rpts.size() - 1:
+				var cp := Geometry2D.get_closest_point_to_segment(c, rpts[k], rpts[k + 1])
+				if _seg_rect_dist(rpts[k], rpts[k + 1], rect) < 2.0:
+					if rdk.is_empty() or t.deck_at(rdk, cp) - t.sample(cp.x, cp.y) < 1.0:
+						on_rail += 1
+						if on_rail <= 3:
+							print("    Pfeiler (%s, %.1f × %.1f m) %.1f m neben Gleis %d (%s, %.1f m über Grund) bei %s" % [
+								["Straße", "Gleis", "Weg"][int(bh.links[int(pr.link)].net)], pr.w, pr.t, cp.distance_to(c), ri,
+								data.rails[ri].tags.get("railway", ""), 0.0 if rdk.is_empty() else t.deck_at(rdk, cp) - t.sample(cp.x, cp.y),
+								str(c.round())])
+						break
+		# in water only under bridges over wide water: how far the water reaches along the bridge from here
+		for wpoly in water:
+			if Geometry2D.is_point_in_polygon(c, wpoly):
+				var run := 0.0
+				for dirn in [1.0, -1.0]:
+					var q: Vector2 = c
+					for k in 60:
+						q += d * dirn * 2.0
+						if not Geometry2D.is_point_in_polygon(q, wpoly):
+							break
+						run += 2.0
+				if run < 70.0:
+					in_water += 1
+					print("    Pfeiler im Wasser unter einer Brücke über %.0f m Wasser bei %s" % [run, str(c.round())])
+				break
+		# the pier reaches the deck
+		var dk := bs.deck_of(int(pr.link))
+		var depth: float = dk.get("depth", 0.0)
+		if absf(float(pr.top) - (t.deck_at(dk, c) - depth)) > 0.15:
+			gap += 1
+	print("    Pfeiler auf Fahrbahnen %d, an Gleisen %d, in schmalem Wasser %d, nicht am Deck %d" % [on_road, on_rail, in_water, gap])
+	if on_road + on_rail + in_water + gap > 0:
+		fails.append("[%s] Pfeiler am falschen Ort (Fahrbahn %d, Gleis %d, Wasser %d, nicht am Deck %d)" % [tag, on_road,
+			on_rail, in_water, gap])
+	# long high bridges stand on piers (some may find no room over rail yards or wide roads)
+	var long_links := 0
+	var bare := 0
+	for li in bh.profiles:
+		var l: Dictionary = bh.links[li]
+		if not l.bridge or bh.big_chains.has(bh.chain[li]):
+			continue
+		var length: float = float(l.u1) - float(l.u0)
+		var dk := bs.deck_of(li)
+		if length < 2.5 * float(BridgeStructures.SPAN[int(l.net)]) or dk.is_empty():
+			continue
+		var mid: Vector2 = Geo.sample(l.pts, l.cum, (float(l.u0) + float(l.u1)) * 0.5)[0]
+		if t.deck_at(dk, mid) - t.sample(mid.x, mid.y) < 4.0:
+			continue
+		long_links += 1
+		var has := false
+		for pr in bs.piers:
+			if int(pr.link) == li:
+				has = true
+				break
+		if not has:
+			bare += 1
+	print("    lange hohe Brückenabschnitte %d, davon ohne Pfeiler %d" % [long_links, bare])
+	if long_links > 0 and bare * 5 > long_links:
+		fails.append("[%s] %d von %d langen Brückenabschnitten ohne Pfeiler" % [tag, bare, long_links])
+	return "%d Pfeiler, %d Widerlager" % [bs.piers.size(), bs.abutments.size()]
+
+
+## Distance between segment a-b and the convex polygon rect (0 if they touch).
+static func _seg_rect_dist(a: Vector2, b: Vector2, rect: PackedVector2Array) -> float:
+	if Geometry2D.is_point_in_polygon(a, rect) or Geometry2D.is_point_in_polygon(b, rect):
+		return 0.0
+	var best := INF
+	for i in rect.size():
+		var p := rect[i]
+		var q := rect[(i + 1) % rect.size()]
+		if Geometry2D.segment_intersects_segment(a, b, p, q) != null:
+			return 0.0
+		best = minf(best, Geometry2D.get_closest_point_to_segment(p, a, b).distance_to(p))
+		best = minf(best, Geometry2D.get_closest_point_to_segment(a, p, q).distance_to(a))
+		best = minf(best, Geometry2D.get_closest_point_to_segment(b, p, q).distance_to(b))
+	return best

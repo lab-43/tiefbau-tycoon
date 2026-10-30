@@ -4,7 +4,7 @@ extends RefCounted
 ## The scene-tree part (creating MeshInstances) happens on the main thread in build_scene().
 
 const CHUNK := 500.0
-const BAKE_VERSION := 12  # 4: water on top of the base ground, no bank walls (#4); 5: merged junctions (#5); 6: smooth transitions (#5); 7: arc turn paths, islands (#5); 8: ground heights (#8); 9: markings after RMS (#5); 10: trees off the road (#30); 11: tunnels below the surface, portals, underground layers (#31); 12: bridge heights, ramps, embankments (#32)
+const BAKE_VERSION := 13  # 4: water on top of the base ground, no bank walls (#4); 5: merged junctions (#5); 6: smooth transitions (#5); 7: arc turn paths, islands (#5); 8: ground heights (#8); 9: markings after RMS (#5); 10: trees off the road (#30); 11: tunnels below the surface, portals, underground layers (#31); 12: bridge heights, ramps, embankments (#32); 13: piers, abutments, deck undersides (#32)
 const GROUND_Y := 0.0     # opaque base ground plane; flat map layers below it are invisible (test/layer_test.gd)
 
 var progress := 0.0
@@ -113,6 +113,10 @@ func bake(meta: Dictionary, osm_dir: String, pbf := "") -> Dictionary:
 	portals.build(net, data.rails, cm)
 	portals.clear_xforms(cm.trees)
 	portals.clear_xforms(cm.lamps)
+	var bs := BridgeStructures.new(bh, net, terrain, cm._asphalt if cm._asphalt else AsphaltIndex.new(net, terrain))
+	bs.build(rm)
+	bs.clear_xforms(cm.trees)
+	note(bs.summary())
 	note("Untergrund: %d Tunnelabschnitte (%.1f km), %d Gleise im Tunnel, %d Tunnelportale" % [rm.under_stats.edges,
 		rm.under_stats.m / 1000.0, data.under_rails.size(), portals.built])
 	note("Stadt modelliert: %d Kacheln" % cm.chunks.size())

@@ -280,22 +280,30 @@ func _rails() -> void:
 		terrain.mode_deck = {}
 
 
-## Sides of a raised deck (railway and path bridges, #32): concrete from 1.2 m below the surface up to a
-## parapet of `parapet` metres, `hw` to either side of the centre line. Built while terrain.mode_deck is set.
+## Sides of a raised deck (railway and path bridges and stairs, #32): concrete from the underside (depth of the
+## deck, see BridgeHeights) up to a parapet of `parapet` metres, `hw` to either side of the centre line, closed
+## underneath. Built while terrain.mode_deck is set.
 func _deck_sides(ck: Vector2i, pts: PackedVector2Array, hw: float, parapet: float) -> void:
 	var cb := layer(ck, "bridge")
+	var depth: float = terrain.mode_deck.get("depth", 0.8) if terrain else 0.8
+	var outer := {}
 	for side in [1.0, -1.0]:
 		var line := Geo.offset_polyline(pts, (hw + 0.3) * side)
+		outer[side] = line
 		var line_in := Geo.offset_polyline(pts, hw * side)
 		for i in range(line.size() - 1):
 			var a := line[i]
 			var b := line[i + 1]
 			var nout: Vector2 = Geo.right_of((b - a).normalized()) * side
 			var n := Vector3(nout.x, 0, nout.y)
-			cb.quad(Geo.v3(a, -1.2), Geo.v3(b, -1.2), Geo.v3(b, parapet), Geo.v3(a, parapet), n)
+			cb.quad(Geo.v3(a, -depth), Geo.v3(b, -depth), Geo.v3(b, parapet), Geo.v3(a, parapet), n)
 			cb.quad(Geo.v3(line_in[i], 0.0), Geo.v3(line_in[i + 1], 0.0), Geo.v3(line_in[i + 1], parapet),
 				Geo.v3(line_in[i], parapet), -n)
 			cb.quad(Geo.v3(line_in[i], parapet), Geo.v3(line_in[i + 1], parapet), Geo.v3(b, parapet), Geo.v3(a, parapet), Vector3.UP)
+	var lr: PackedVector2Array = outer[1.0]
+	var ll: PackedVector2Array = outer[-1.0]
+	for i in range(mini(lr.size(), ll.size()) - 1):
+		cb.quad(Geo.v3(ll[i], -depth), Geo.v3(lr[i], -depth), Geo.v3(lr[i + 1], -depth), Geo.v3(ll[i + 1], -depth), Vector3.DOWN)
 
 
 ## Embankment of a raised track or path that is no bridge (#32): grass slopes 1 : 1.5 down to the ground.

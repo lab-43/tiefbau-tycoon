@@ -45,6 +45,7 @@ var chain := PackedInt32Array()   # link index -> bridge chain (connected bridge
 var rail_decks := {}          # rail way index -> Terrain deck
 var path_decks := {}          # path way index -> Terrain deck
 var crossings: Array = []     # {link, lo, hi, s, lower (link or -1 = water), ls, clear, base, big}
+var big_chains := {}          # chains with a cable-stayed or suspension span (their approaches get wider spans)
 var stats := {}
 
 var _seg := {}                # Vector2i -> Array of [link, segment]
@@ -733,6 +734,12 @@ func _store() -> void:
 	var ramp_m := 0.0
 	var by_net := [0.0, 0.0, 0.0]
 	var top := 0.0
+	var big_links := {}
+	big_chains.clear()
+	for c in crossings:
+		if c.big:
+			big_links[int(c.link)] = true
+			big_chains[chain[int(c.link)]] = true
 	for li in profiles:
 		var l: Dictionary = links[li]
 		var z: PackedFloat32Array = profiles[li]
@@ -748,6 +755,8 @@ func _store() -> void:
 			if k > 0 and (z[k] - gr[k] > RAISED or z[k - 1] - gr[k - 1] > RAISED):
 				up += step
 		var dk := Terrain.make_deck(l.pts, l.cum, z, gr, float(l.hw) + 0.5, levels.get(li, PackedFloat32Array()))
+		if l.bridge:   # structure below the surface (stage 2: deck underside, piers)
+			dk["depth"] = BIG_DEPTH if big_links.has(li) else float(DEPTH[int(l.net)])
 		match int(l.net):
 			ROAD:
 				terrain.decks[int(l.id)] = dk

@@ -325,9 +325,13 @@ func _junction_embankment(ck: Vector2i, ni: int, poly: PackedVector2Array) -> vo
 
 func _bridge_sides(ck: Vector2i, center: PackedVector2Array, off_r: float, off_l: float) -> void:
 	var cb := layer(ck, "bridge")
+	# the structure below the surface (#32 stage 2): as deep as BridgeHeights planned it, closed underneath
+	var depth: float = terrain.mode_deck.get("depth", 1.2) if _on_deck() else 1.2
+	var outer := {}
 	for side in [1, -1]:
 		var off: float = (off_r if side == 1 else off_l) + 0.35
 		var line := Geo.offset_polyline(center, off * side)
+		outer[side] = line
 		var line_in := Geo.offset_polyline(center, (off - 0.35) * side)
 		for i in range(line.size() - 1):
 			var a := line[i]
@@ -335,12 +339,68 @@ func _bridge_sides(ck: Vector2i, center: PackedVector2Array, off_r: float, off_l
 			var dir := (b - a).normalized()
 			var nout: Vector2 = Geo.right_of(dir) * side
 			var n := Vector3(nout.x, 0, nout.y)
-			# deck side down into the water and parapet up
-			cb.quad(Geo.v3(a, -1.2), Geo.v3(b, -1.2), Geo.v3(b, Y_SW + 0.9), Geo.v3(a, Y_SW + 0.9), n)
+			# deck edge from the underside up to the parapet
+			cb.quad(Geo.v3(a, -depth), Geo.v3(b, -depth), Geo.v3(b, Y_SW + 0.9), Geo.v3(a, Y_SW + 0.9), n)
 			var ai := line_in[i]
 			var bi := line_in[i + 1]
 			cb.quad(Geo.v3(ai, Y_SW), Geo.v3(bi, Y_SW), Geo.v3(bi, Y_SW + 0.9), Geo.v3(ai, Y_SW + 0.9), -n)
 			cb.quad(Geo.v3(ai, Y_SW + 0.9), Geo.v3(bi, Y_SW + 0.9), Geo.v3(b, Y_SW + 0.9), Geo.v3(a, Y_SW + 0.9), Vector3.UP)
+	if not _on_deck():
+		return
+	var lr: PackedVector2Array = outer[1]
+	var ll: PackedVector2Array = outer[-1]
+	for i in range(mini(lr.size(), ll.size()) - 1):
+		cb.quad(Geo.v3(ll[i], -depth), Geo.v3(lr[i], -depth), Geo.v3(lr[i + 1], -depth), Geo.v3(ll[i + 1], -depth), Vector3.DOWN)
+
+
+## A junction area on a bridge (#32 stage 2): underside and edge with parapet around it, like the bridge sides,
+## except where its roads leave it. Built while terrain.mode_node is set.
+func _bridge_junction(ck: Vector2i, ni: int, poly: PackedVector2Array) -> void:
+	var n: Dictionary = net.nodes[ni]
+	var depth := 1.3
+	var sw := 0.0
+	for end in n.ends:
+		var dk: Dictionary = terrain.decks.get(end >> 1, {})
+		depth = maxf(depth, float(dk.get("depth", 1.3)))
+		var e: Dictionary = net.edges[end >> 1]
+		sw = maxf(sw, maxf(float(e.sw_l), float(e.sw_r)))
+	# the sidewalks around the corners lie outside the asphalt polygon: the structure reaches around them
+	var grown := poly
+	var best := 0.0
+	for o: PackedVector2Array in Geometry2D.offset_polygon(poly, sw + 0.35):
+		if not Geometry2D.is_polygon_clockwise(o) and absf(Geo.polygon_area(o)) > best:
+			best = absf(Geo.polygon_area(o))
+			grown = o
+	var cb := layer(ck, "bridge")
+	var tri := cb.triangulate(grown)
+	for t in range(0, tri.size(), 3):
+		cb.tri(Geo.v3(grown[tri[t]], -depth), Geo.v3(grown[tri[t + 1]], -depth), Geo.v3(grown[tri[t + 2]], -depth), Vector3.DOWN)
+	var m := grown.size()
+	for i in m:
+		var a := grown[i]
+		var b := grown[(i + 1) % m]
+		if a.distance_to(b) < 0.2:
+			continue
+		var mid := (a + b) * 0.5
+		var mouth := false
+		for end in n.ends:
+			var e: Dictionary = net.edges[end >> 1]
+			var at_b: bool = (end & 1) == 1
+			var smp := Geo.sample(e.pts, e.cum, float(e.len) - float(e.trim_b) if at_b else float(e.trim_a))
+			if (smp[0] as Vector2).distance_to(mid) < float(e.width) * 0.5 + maxf(float(e.sw_l), float(e.sw_r)) + 1.0:
+				mouth = true
+				break
+		if mouth:
+			continue
+		var out := Geo.right_of((b - a).normalized())
+		if Geometry2D.is_point_in_polygon(mid + out * 0.3, grown):
+			out = -out
+		var nv := Vector3(out.x, 0.0, out.y)
+		var ai := a - out * 0.35
+		var bi := b - out * 0.35
+		cb.quad(Geo.v3(a, -depth), Geo.v3(b, -depth), Geo.v3(b, Y_SW + 0.9), Geo.v3(a, Y_SW + 0.9), nv)
+		cb.quad(Geo.v3(ai, Y_SW), Geo.v3(bi, Y_SW), Geo.v3(bi, Y_SW + 0.9), Geo.v3(ai, Y_SW + 0.9), -nv)
+		cb.quad(Geo.v3(ai, Y_SW + 0.9), Geo.v3(bi, Y_SW + 0.9), Geo.v3(b, Y_SW + 0.9), Geo.v3(a, Y_SW + 0.9), Vector3.UP)
 
 
 # ------------------------------------------------------------------------------------------
@@ -661,6 +721,8 @@ func _junction(ni: int) -> void:
 		asp.polygon_up(extra, Y_ROAD, 1.0)
 	if terrain and terrain.node_decks.has(ni) and not _on_bridge_node(n):
 		_junction_embankment(ck, ni, poly)
+	elif terrain and terrain.node_decks.has(ni):
+		_bridge_junction(ck, ni, poly)
 	var mk := layer(ck, "mark")
 	for c in n.get("crossings", []):
 		_crossing_at(mk, c.p, c.d, c.hw, c.kind)
